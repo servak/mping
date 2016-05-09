@@ -17,13 +17,14 @@ func main() {
 	flag.StringVar(&filename, "file", "", "use contents of file")
 	flag.StringVar(&filename, "f", "", "use contents of file (shorthand)")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage:\n  %s [options]\n\nOptions:\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage:\n  %s [options] [host ...]\n\nOptions:\n", os.Args[0])
 		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "Example:\n  %s localhost 8.8.8.8\n  %s -f hostslist\n", os.Args[0], os.Args[0])
 	}
 	flag.Parse()
 
 	_, err := os.Stat(filename)
-	if err != nil {
+	if err != nil && flag.NArg() == 0 {
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -40,17 +41,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	fp, err := os.Open(filename)
-	if err != nil {
-		panic(err)
+	hosts := []string{}
+	if err == nil {
+		fp, err := os.Open(filename)
+		if err != nil {
+			panic(err)
+		}
+		hosts = file2hostnames(fp)
 	}
 
-	hostnames := file2hostnames(fp)
-	mping.Run(hostnames)
+	for _, h := range flag.Args() {
+		hosts = append(hosts, h)
+	}
+
+	mping.Run(hosts)
 }
 
 func file2hostnames(fp *os.File) []string {
-	hostnames := []string{}
+	hosts := []string{}
 	reader := bufio.NewReaderSize(fp, 4096)
 	for {
 		lb, _, err := reader.ReadLine()
@@ -61,8 +69,8 @@ func file2hostnames(fp *os.File) []string {
 		if line == "" {
 			continue
 		}
-		hostnames = append(hostnames, strings.Trim(line, " \n"))
+		hosts = append(hosts, strings.Trim(line, " \n"))
 	}
 
-	return hostnames
+	return hosts
 }
