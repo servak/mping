@@ -40,12 +40,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	var fp *os.File
-	fp, err = os.Open(filename)
+	fp, err := os.Open(filename)
 	if err != nil {
 		panic(err)
 	}
 
+	hostnames := file2hostnames(fp)
+	mping.Run(hostnames)
+}
+
+func file2hostnames(fp *os.File) []string {
 	hostnames := []string{}
 	reader := bufio.NewReaderSize(fp, 4096)
 	for {
@@ -60,5 +64,5 @@ func main() {
 		hostnames = append(hostnames, strings.Trim(line, " \n"))
 	}
 
-	mping.Run(hostnames)
+	return hostnames
 }
