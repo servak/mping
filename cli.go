@@ -1,8 +1,10 @@
 package mping
 
 import (
+	"fmt"
 	"log"
 	"net"
+	"os"
 	"time"
 
 	"github.com/nsf/termbox-go"
@@ -32,7 +34,8 @@ func Run(hostnames []string) {
 	for _, hostname := range hostnames {
 		ra, err := net.ResolveIPAddr("ip4:icmp", hostname)
 		if err != nil {
-			panic(err)
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		}
 		p.AddIPAddr(ra)
 		results[ra.String()] = nil
@@ -45,6 +48,7 @@ func Run(hostnames []string) {
 	}
 
 	screenInit()
+	defer printScreenValues()
 	defer screenClose()
 	screenRedraw()
 

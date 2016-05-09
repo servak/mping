@@ -14,12 +14,13 @@ mping is a program to send ICMP echo.
 ```
 > ./mping
 Usage:
-  ./mping [options]
-  cat filename | ./mping
+  ./mping [options] [host ...]
 
 Options:
   -f string
-    	use contents of file (shorthand)
+        use contents of file (shorthand)
   -file string
-    	use contents of file
-```
+        use contents of file
+Example:
+  ./mping localhost 8.8.8.8
+  ./mping -f hostslist```
