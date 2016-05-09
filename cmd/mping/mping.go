@@ -6,43 +6,44 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
+	"syscall"
 
 	"github.com/servak/mping"
 )
-
-func isPipeExists() bool {
-	s, _ := os.Stdin.Stat()
-	if s.Size() > 0 {
-		return true
-	}
-
-	return false
-}
 
 func main() {
 	var filename string
 	flag.StringVar(&filename, "file", "", "use contents of file")
 	flag.StringVar(&filename, "f", "", "use contents of file (shorthand)")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage:\n  %s [options]\n  cat filename | %s \n\nOptions:\n", os.Args[0], os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage:\n  %s [options]\n\nOptions:\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 
 	_, err := os.Stat(filename)
-	if err != nil && !isPipeExists() {
+	if err != nil {
 		flag.Usage()
 		os.Exit(1)
 	}
 
+	uid := syscall.Geteuid()
+	if uid != 0 {
+		p := os.Args[0]
+		msg := "mping need to 'root' privileges.\n"
+		msg += "try to issue the following command:\n"
+		msg += "        1. sudo chown root %s\n"
+		msg += "(Mac)   2. sudo chmod u+t %s\n"
+		msg += "(Linux) 2. sudo chmod u+s %s\n"
+		fmt.Printf(msg, p, p, p)
+		os.Exit(1)
+	}
+
 	var fp *os.File
-	if isPipeExists() {
-		fp = os.Stdin
-	} else {
-		fp, err = os.Open(filename)
-		if err != nil {
-			panic(err)
-		}
+	fp, err = os.Open(filename)
+	if err != nil {
+		panic(err)
 	}
 
 	hostnames := []string{}
@@ -56,7 +57,7 @@ func main() {
 		if line == "" {
 			continue
 		}
-		hostnames = append(hostnames, line)
+		hostnames = append(hostnames, strings.Trim(line, " \n"))
 	}
 
 	mping.Run(hostnames)
