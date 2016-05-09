@@ -48,6 +48,7 @@ func Run(hostnames []string) {
 	}
 
 	screenInit()
+	defer printScreenValues()
 	defer screenClose()
 	screenRedraw()
 
