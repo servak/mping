@@ -113,6 +113,10 @@ func (s stats) average() time.Duration {
 func (s stats) values() map[string]string {
 	v := make(map[string]string)
 	v[Host] = s.hostname
+	if s.hostname != s.ip {
+		v[Host] = fmt.Sprintf("%s(%s)", s.hostname, s.ip)
+	}
+
 	v[Success] = fmt.Sprintf("%d", s.success)
 	v[Fail] = fmt.Sprintf("%d", s.fail)
 	v[Loss] = fmt.Sprintf("%5.1f%%", s.loss())
