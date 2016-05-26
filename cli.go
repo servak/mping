@@ -11,7 +11,7 @@ import (
 	"github.com/tatsushid/go-fastping"
 )
 
-var totalStats map[string]*stats
+var totalStats statistics
 
 type response struct {
 	addr *net.IPAddr
@@ -20,7 +20,7 @@ type response struct {
 
 func Run(hostnames []string) {
 	p := fastping.NewPinger()
-	totalStats = make(map[string]*stats)
+	totalStats = []*stats{}
 	results := make(map[string]*response)
 	onRecv, onIdle := make(chan *response), make(chan bool)
 	p.OnRecv = func(addr *net.IPAddr, t time.Duration) {
@@ -40,10 +40,11 @@ func Run(hostnames []string) {
 		p.AddIPAddr(ra)
 		results[ra.String()] = nil
 
-		totalStats[ra.String()] = &stats{
+		totalStats = append(totalStats, &stats{
 			order:    i,
 			hostname: hostname,
-		}
+			ip:       ra.String(),
+		})
 		i++
 	}
 
@@ -54,7 +55,15 @@ func Run(hostnames []string) {
 
 	p.MaxRTT = time.Second
 	p.RunLoop()
-	go updateView()
+	go func() {
+		t := time.NewTicker(time.Millisecond * 250)
+		for {
+			select {
+			case <-t.C:
+				screenRedraw()
+			}
+		}
+	}()
 	go func() {
 		for {
 			select {
@@ -63,13 +72,13 @@ func Run(hostnames []string) {
 					results[res.addr.String()] = res
 				}
 			case <-onIdle:
-				for host, r := range results {
+				for ip, r := range results {
 					if r == nil {
-						totalStats[host].failed()
+						totalStats.setFailed(ip)
 					} else {
-						totalStats[host].succeed(r.rtt)
+						totalStats.setSucceed(ip, r.rtt)
 					}
-					results[host] = nil
+					results[ip] = nil
 				}
 			case <-p.Done():
 				if err := p.Err(); err != nil {
@@ -84,8 +93,21 @@ mainloop:
 	for {
 		switch ev := termbox.PollEvent(); ev.Type {
 		case termbox.EventKey:
-			if ev.Ch == 'q' {
+			switch ev.Ch {
+			case 'q':
 				break mainloop
+			case 'n':
+				currentPage++
+				if currentPage > pageLength {
+					currentPage = 0
+				}
+			case 's':
+				sortType++
+			case 'p':
+				currentPage--
+				if currentPage < 0 {
+					currentPage = pageLength
+				}
 			}
 		case termbox.EventError:
 			panic(ev.Err)
