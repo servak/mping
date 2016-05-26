@@ -2,11 +2,19 @@ package mping
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
-	"time"
+	"strings"
 
 	"github.com/nsf/termbox-go"
+)
+
+var sort int
+var currentPage int
+var pageLength int
+
+const (
+	coldef     = termbox.ColorDefault
+	IgnoreLine = 3
 )
 
 func tbPrint(x, y int, fg, bg termbox.Attribute, msg string) {
@@ -17,6 +25,9 @@ func tbPrint(x, y int, fg, bg termbox.Attribute, msg string) {
 }
 
 func screenInit() {
+	sort = 0
+	currentPage = 0
+	pageLength = 1
 	err := termbox.Init()
 	if err != nil {
 		panic(err)
@@ -29,91 +40,82 @@ func screenClose() {
 }
 
 func screenRedraw() {
-	const coldef = termbox.ColorDefault
 	termbox.Clear(coldef, coldef)
-	length := 0
-	for k, v := range totalStats {
-		if l := len(v.hostname) + len(k); l > length {
-			length = l
-		}
+	w, h := termbox.Size()
+	pageSize := h - IgnoreLine
+	pageLength = len(totalStats) / (pageSize + 1)
+	// if change screen size
+	if pageLength < currentPage {
+		currentPage = 0
 	}
 
-	hostFormat := "%-" + strconv.Itoa(length+2) + "s "
-	header := fmt.Sprintf(hostFormat+"%-7s %-5s %-12s %-12s %-12s %-12s",
-		"Host", "Loss%", "Sent", "Last", "Avg", "Best", "Worst")
-	bFormat := hostFormat + "%5.1f%% %5d %12v %12v %12v %12v"
-	tbPrint(0, 0, termbox.ColorMagenta, coldef, "Press 'q' to quit")
+	drawTop(currentPage, pageLength, w)
 
+	header, body := drawTotalStats()
 	bold := coldef | termbox.AttrBold
-	tbPrint(0, 2, bold, coldef, header)
+	tbPrint(0, 1, bold, coldef, header)
+	begin := currentPage * pageSize
+	end := (currentPage + 1) * pageSize
 
-	_results := make(map[int]string)
-	for k, v := range totalStats {
-		host := v.hostname
-		if host != k {
-			host = fmt.Sprintf("%s(%s)", v.hostname, k)
-		}
-
-		line := fmt.Sprintf(bFormat, host, v.loss(), v.count, v.last, v.average(), v.min, v.max)
-		_results[v.order] = line
+	var sliceBody []string
+	if end > len(body) {
+		sliceBody = body[begin:]
+	} else {
+		sliceBody = body[begin:end]
 	}
 
-	var keys []int
-	for k := range _results {
-		keys = append(keys, k)
-	}
-	sort.Ints(keys)
-
-	baseline := 3
-	for _, k := range keys {
-		tbPrint(0, baseline, coldef, coldef, _results[k])
-		baseline++
+	for i, v := range sliceBody {
+		tbPrint(0, 2+i, coldef, coldef, v)
 	}
 
+	tbPrint(0, h-1, coldef, coldef, "q: quite program, n: next page, p: previous page, s: sort")
 	termbox.Flush()
+	// log.Println(h, pageSize, pageLength)
+}
+
+func drawTop(page, pageSize, width int) {
+	keys := totalStats.keys()
+	if sort >= len(keys) {
+		sort = 0
+	}
+	msg := fmt.Sprintf("Sort: %s", keys[sort])
+	lmsg := fmt.Sprintf("[%d/%d]", page+1, pageSize+1)
+	tbPrint(0, 0, termbox.ColorMagenta, coldef, msg)
+	tbPrint(width-len(lmsg), 0, termbox.ColorMagenta, coldef, lmsg)
+}
+
+func drawTotalStats() (string, []string) {
+	headers := totalStats.keys()
+	length := make([]int, len(headers))
+	for i, k := range headers {
+		length[i] = totalStats.getMaxLength(k)
+	}
+
+	// print header
+	msg := []string{}
+	for i, h := range headers {
+		msg = append(msg, fmt.Sprintf("%-"+strconv.Itoa(length[i])+"s", h))
+	}
+	header := strings.Join(msg, "  ")
+	body := []string{}
+
+	// print body
+	for _, _stats := range totalStats {
+		v := _stats.values()
+		msg = []string{}
+		for i, h := range headers {
+			msg = append(msg, fmt.Sprintf("%"+strconv.Itoa(length[i])+"s", v[h]))
+		}
+		body = append(body, strings.Join(msg, "  "))
+	}
+	return header, body
 }
 
 func printScreenValues() {
-	length := 0
-	for k, v := range totalStats {
-		if l := len(v.hostname) + len(k); l > length {
-			length = l
-		}
+	header, body := drawTotalStats()
+	fmt.Println(header)
+	for _, v := range body {
+		fmt.Println(v)
 	}
 
-	hostFormat := "%-" + strconv.Itoa(length+2) + "s "
-	bFormat := hostFormat + "%5.1f%% %5d %12v %12v %12v %12v"
-	fmt.Printf(hostFormat+"%-7s %-5s %-12s %-12s %-12s %-12s\n",
-		"Host", "Loss%", "Sent", "Last", "Avg", "Best", "Worst")
-
-	_results := make(map[int]string)
-	for k, v := range totalStats {
-		host := v.hostname
-		if host != k {
-			host = fmt.Sprintf("%s(%s)", v.hostname, k)
-		}
-
-		line := fmt.Sprintf(bFormat, host, v.loss(), v.count, v.last, v.average(), v.min, v.max)
-		_results[v.order] = line
-	}
-
-	var keys []int
-	for k := range _results {
-		keys = append(keys, k)
-	}
-	sort.Ints(keys)
-
-	for _, k := range keys {
-		fmt.Println(_results[k])
-	}
-}
-
-func updateView() {
-	t := time.NewTicker(time.Millisecond * 250)
-	for {
-		select {
-		case <-t.C:
-			screenRedraw()
-		}
-	}
 }
