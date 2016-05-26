@@ -2,13 +2,14 @@ package mping
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/nsf/termbox-go"
 )
 
-var sort int
+var sortType int
 var currentPage int
 var pageLength int
 
@@ -25,7 +26,7 @@ func tbPrint(x, y int, fg, bg termbox.Attribute, msg string) {
 }
 
 func screenInit() {
-	sort = 0
+	sortType = 3
 	currentPage = 0
 	pageLength = 1
 	err := termbox.Init()
@@ -75,10 +76,10 @@ func screenRedraw() {
 
 func drawTop(page, pageSize, width int) {
 	keys := totalStats.keys()
-	if sort >= len(keys) {
-		sort = 0
+	if sortType >= len(keys) {
+		sortType = 0
 	}
-	msg := fmt.Sprintf("Sort: %s", keys[sort])
+	msg := fmt.Sprintf("Sort: %s", keys[sortType])
 	lmsg := fmt.Sprintf("[%d/%d]", page+1, pageSize+1)
 	tbPrint(0, 0, termbox.ColorMagenta, coldef, msg)
 	tbPrint(width-len(lmsg), 0, termbox.ColorMagenta, coldef, lmsg)
@@ -99,6 +100,23 @@ func drawTotalStats() (string, []string) {
 	header := strings.Join(msg, "  ")
 	body := []string{}
 
+	switch headers[sortType] {
+	case Host:
+		sort.Sort(byHost{totalStats})
+	case Success:
+		sort.Sort(bySuccess{totalStats})
+	case Loss, Fail:
+		sort.Sort(byLoss{totalStats})
+	case Best:
+		sort.Sort(byBest{totalStats})
+	case Last:
+		sort.Sort(byLast{totalStats})
+	case Avg:
+		sort.Sort(byAvg{totalStats})
+	case Worst:
+		sort.Sort(byWorst{totalStats})
+	}
+
 	// print body
 	for _, _stats := range totalStats {
 		v := _stats.values()
@@ -108,6 +126,7 @@ func drawTotalStats() (string, []string) {
 		}
 		body = append(body, strings.Join(msg, "  "))
 	}
+
 	return header, body
 }
 

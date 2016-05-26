@@ -102,7 +102,7 @@ mainloop:
 					currentPage = 0
 				}
 			case 's':
-				sort++
+				sortType++
 			case 'p':
 				currentPage--
 				if currentPage < 0 {

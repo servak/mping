@@ -6,20 +6,20 @@ import (
 )
 
 const (
-	Host  = "Host"
-	Sent  = "Sent"
-	Loss  = "Loss(%)"
-	Last  = "Last"
-	Res   = "Succ/Fail"
-	Avg   = "Avg"
-	Best  = "Best"
-	Worst = "Worst"
+	Host    = "Host"
+	Success = "Succ"
+	Loss    = "Loss(%)"
+	Last    = "Last"
+	Fail    = "Fail"
+	Avg     = "Avg"
+	Best    = "Best"
+	Worst   = "Worst"
 )
 
 type statistics []*stats
 
 func (s statistics) keys() []string {
-	return []string{Host, Sent, Res, Loss, Last, Avg, Best, Worst}
+	return []string{Host, Success, Fail, Loss, Last, Avg, Best, Worst}
 }
 
 func (s statistics) Len() int {
@@ -113,12 +113,68 @@ func (s stats) average() time.Duration {
 func (s stats) values() map[string]string {
 	v := make(map[string]string)
 	v[Host] = s.hostname
-	v[Sent] = fmt.Sprintf("%d", s.count)
-	v[Res] = fmt.Sprintf("%d/%d", s.success, s.fail)
+	v[Success] = fmt.Sprintf("%d", s.success)
+	v[Fail] = fmt.Sprintf("%d", s.fail)
 	v[Loss] = fmt.Sprintf("%5.1f%%", s.loss())
 	v[Last] = fmt.Sprintf("%v", s.last)
 	v[Avg] = fmt.Sprintf("%v", s.average())
 	v[Best] = fmt.Sprintf("%v", s.min)
 	v[Worst] = fmt.Sprintf("%v", s.max)
 	return v
+}
+
+type byLast struct {
+	statistics
+}
+
+func (b byLast) Less(i, j int) bool {
+	return b.statistics[i].last < b.statistics[j].last
+}
+
+type byAvg struct {
+	statistics
+}
+
+func (b byAvg) Less(i, j int) bool {
+	return b.statistics[i].average() < b.statistics[j].average()
+}
+
+type byWorst struct {
+	statistics
+}
+
+func (b byWorst) Less(i, j int) bool {
+	return b.statistics[i].max < b.statistics[j].max
+}
+
+type bySuccess struct {
+	statistics
+}
+
+func (b bySuccess) Less(i, j int) bool {
+	return b.statistics[i].success > b.statistics[j].success
+}
+
+type byLoss struct {
+	statistics
+}
+
+func (b byLoss) Less(i, j int) bool {
+	return b.statistics[i].fail > b.statistics[j].fail
+}
+
+type byBest struct {
+	statistics
+}
+
+func (b byBest) Less(i, j int) bool {
+	return b.statistics[i].min < b.statistics[j].min
+}
+
+type byHost struct {
+	statistics
+}
+
+func (b byHost) Less(i, j int) bool {
+	return len(b.statistics[i].hostname) < len(b.statistics[j].hostname)
 }
