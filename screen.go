@@ -26,7 +26,7 @@ func tbPrint(x, y int, fg, bg termbox.Attribute, msg string) {
 }
 
 func screenInit() {
-	sortType = 3
+	sortType = 6
 	currentPage = 0
 	pageLength = 1
 	err := termbox.Init()
