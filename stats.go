@@ -156,7 +156,7 @@ type bySuccess struct {
 }
 
 func (b bySuccess) Less(i, j int) bool {
-	return b.statistics[i].success > b.statistics[j].success
+	return b.statistics[i].success < b.statistics[j].success
 }
 
 type byLoss struct {
@@ -164,7 +164,7 @@ type byLoss struct {
 }
 
 func (b byLoss) Less(i, j int) bool {
-	return b.statistics[i].fail > b.statistics[j].fail
+	return b.statistics[i].fail < b.statistics[j].fail
 }
 
 type byBest struct {
