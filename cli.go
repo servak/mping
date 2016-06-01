@@ -108,6 +108,10 @@ mainloop:
 				} else {
 					reverse = true
 				}
+			case 'R':
+				for _, x := range totalStats {
+					x.init()
+				}
 			case 'p':
 				currentPage--
 				if currentPage < 0 {

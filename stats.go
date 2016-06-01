@@ -70,6 +70,15 @@ type stats struct {
 	ip       string
 }
 
+func (s *stats) init() {
+	s.max = 0
+	s.min = 0
+	s.last = 0
+	s.count = 0
+	s.success = 0
+	s.fail = 0
+}
+
 func (s *stats) succeed(t time.Duration) {
 	if s.max < t {
 		s.max = t
