@@ -13,16 +13,26 @@ import (
 	"github.com/servak/mping"
 )
 
+const version = "v0.2"
+
 func main() {
 	var filename string
+	var v bool
 	flag.StringVar(&filename, "file", "", "use contents of file")
 	flag.StringVar(&filename, "f", "", "use contents of file (shorthand)")
+	flag.BoolVar(&v, "v", false, "print version")
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage:\n  %s [options] [host ...]\n\nOptions:\n", os.Args[0])
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "Example:\n  %s localhost 8.8.8.8\n  %s -f hostslist\n", os.Args[0], os.Args[0])
 	}
 	flag.Parse()
+
+	if v {
+		fmt.Printf("%s: %s\n", os.Args[0], version)
+		os.Exit(0)
+	}
 
 	_, err := os.Stat(filename)
 	if err != nil && flag.NArg() == 0 {
