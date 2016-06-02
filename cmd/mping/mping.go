@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"syscall"
 
@@ -54,22 +55,31 @@ func main() {
 		hosts = append(hosts, h)
 	}
 
+	if len(hosts) == 0 {
+		fmt.Println("Host not found.")
+		os.Exit(1)
+	}
+
 	mping.Run(hosts)
 }
 
 func file2hostnames(fp *os.File) []string {
 	hosts := []string{}
 	reader := bufio.NewReaderSize(fp, 4096)
+	r := regexp.MustCompile(`[#;/].*`)
+
 	for {
 		lb, _, err := reader.ReadLine()
 		if err == io.EOF {
 			break
 		}
-		line := string(lb)
+
+		line := r.ReplaceAllString(string(lb), "")
+		line = strings.Trim(line, " \n")
 		if line == "" {
 			continue
 		}
-		hosts = append(hosts, strings.Trim(line, " \n"))
+		hosts = append(hosts, line)
 	}
 
 	return hosts
