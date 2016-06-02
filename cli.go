@@ -18,7 +18,7 @@ type response struct {
 	rtt  time.Duration
 }
 
-func Run(hostnames []string) {
+func Run(hostnames []string, maxRtt int) {
 	p := fastping.NewPinger()
 	results := make(map[string]*response)
 	onRecv, onIdle := make(chan *response), make(chan bool)
@@ -52,10 +52,10 @@ func Run(hostnames []string) {
 	defer screenClose()
 	screenRedraw()
 
-	p.MaxRTT = time.Second
+	p.MaxRTT = time.Millisecond * time.Duration(maxRtt)
 	p.RunLoop()
 	go func() {
-		t := time.NewTicker(time.Millisecond * 250)
+		t := time.NewTicker(time.Millisecond * 200)
 		for {
 			select {
 			case <-t.C:
@@ -75,6 +75,9 @@ func Run(hostnames []string) {
 					if r == nil {
 						totalStats.setFailed(ip)
 					} else {
+						if r.rtt == 0 {
+							r.rtt = p.MaxRTT
+						}
 						totalStats.setSucceed(ip, r.rtt)
 					}
 					results[ip] = nil

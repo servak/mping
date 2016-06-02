@@ -17,9 +17,10 @@ const version = "v0.2"
 
 func main() {
 	var filename string
+	var time int
 	var v bool
-	flag.StringVar(&filename, "file", "", "use contents of file")
 	flag.StringVar(&filename, "f", "", "use contents of file (shorthand)")
+	flag.IntVar(&time, "t", 1000, "max rtt of ping. (ms)")
 	flag.BoolVar(&v, "v", false, "print version")
 
 	flag.Usage = func() {
@@ -70,7 +71,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	mping.Run(hosts)
+	if time == 0 {
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	mping.Run(hosts, time)
 }
 
 func file2hostnames(fp *os.File) []string {
