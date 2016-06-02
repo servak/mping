@@ -6,22 +6,33 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"syscall"
 
 	"github.com/servak/mping"
 )
 
+const version = "v0.2"
+
 func main() {
 	var filename string
+	var v bool
 	flag.StringVar(&filename, "file", "", "use contents of file")
 	flag.StringVar(&filename, "f", "", "use contents of file (shorthand)")
+	flag.BoolVar(&v, "v", false, "print version")
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage:\n  %s [options] [host ...]\n\nOptions:\n", os.Args[0])
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "Example:\n  %s localhost 8.8.8.8\n  %s -f hostslist\n", os.Args[0], os.Args[0])
 	}
 	flag.Parse()
+
+	if v {
+		fmt.Printf("%s: %s\n", os.Args[0], version)
+		os.Exit(0)
+	}
 
 	_, err := os.Stat(filename)
 	if err != nil && flag.NArg() == 0 {
@@ -54,22 +65,31 @@ func main() {
 		hosts = append(hosts, h)
 	}
 
+	if len(hosts) == 0 {
+		fmt.Println("Host not found.")
+		os.Exit(1)
+	}
+
 	mping.Run(hosts)
 }
 
 func file2hostnames(fp *os.File) []string {
 	hosts := []string{}
 	reader := bufio.NewReaderSize(fp, 4096)
+	r := regexp.MustCompile(`[#;/].*`)
+
 	for {
 		lb, _, err := reader.ReadLine()
 		if err == io.EOF {
 			break
 		}
-		line := string(lb)
+
+		line := r.ReplaceAllString(string(lb), "")
+		line = strings.Trim(line, " \n")
 		if line == "" {
 			continue
 		}
-		hosts = append(hosts, strings.Trim(line, " \n"))
+		hosts = append(hosts, line)
 	}
 
 	return hosts
