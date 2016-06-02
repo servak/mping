@@ -9,9 +9,10 @@ import (
 	"github.com/nsf/termbox-go"
 )
 
-var sortType int
-var currentPage int
-var pageLength int
+var sortType = 6
+var currentPage = 0
+var pageLength = 1
+var reverse = false
 
 const (
 	coldef     = termbox.ColorDefault
@@ -26,9 +27,6 @@ func tbPrint(x, y int, fg, bg termbox.Attribute, msg string) {
 }
 
 func screenInit() {
-	sortType = 6
-	currentPage = 0
-	pageLength = 1
 	err := termbox.Init()
 	if err != nil {
 		panic(err)
@@ -69,9 +67,8 @@ func screenRedraw() {
 		tbPrint(0, 2+i, coldef, coldef, v)
 	}
 
-	tbPrint(0, h-1, coldef, coldef, "q: quite program, n: next page, p: previous page, s: sort")
+	tbPrint(0, h-1, coldef, coldef, "q: quite program, n: next page, p: previous page, s: sort, r: reverse mode, R: count reset")
 	termbox.Flush()
-	// log.Println(h, pageSize, pageLength)
 }
 
 func drawTop(page, pageSize, width int) {
@@ -80,9 +77,34 @@ func drawTop(page, pageSize, width int) {
 		sortType = 0
 	}
 	msg := fmt.Sprintf("Sort: %s", keys[sortType])
+	if reverse {
+		msg += ", Reverse mode"
+	}
+
 	lmsg := fmt.Sprintf("[%d/%d]", page+1, pageSize+1)
 	tbPrint(0, 0, termbox.ColorMagenta, coldef, msg)
 	tbPrint(width-len(lmsg), 0, termbox.ColorMagenta, coldef, lmsg)
+}
+
+func getSortInterface(s statistics, str string) (t sort.Interface) {
+	switch str {
+	case Host:
+		t = byHost{s}
+	case Success:
+		t = bySuccess{s}
+	case Loss, Fail:
+		t = byLoss{s}
+	case Best:
+		t = byBest{s}
+	case Last:
+		t = byLast{s}
+	case Avg:
+		t = byAvg{s}
+	case Worst:
+		t = byWorst{s}
+	}
+
+	return
 }
 
 func drawTotalStats() (string, []string) {
@@ -100,21 +122,11 @@ func drawTotalStats() (string, []string) {
 	header := strings.Join(msg, "  ")
 	body := []string{}
 
-	switch headers[sortType] {
-	case Host:
-		sort.Sort(byHost{totalStats})
-	case Success:
-		sort.Sort(bySuccess{totalStats})
-	case Loss, Fail:
-		sort.Sort(byLoss{totalStats})
-	case Best:
-		sort.Sort(byBest{totalStats})
-	case Last:
-		sort.Sort(byLast{totalStats})
-	case Avg:
-		sort.Sort(byAvg{totalStats})
-	case Worst:
-		sort.Sort(byWorst{totalStats})
+	t := getSortInterface(totalStats, headers[sortType])
+	if reverse {
+		sort.Sort(sort.Reverse(t))
+	} else {
+		sort.Sort(t)
 	}
 
 	// print body

@@ -11,7 +11,7 @@ import (
 	"github.com/tatsushid/go-fastping"
 )
 
-var totalStats statistics
+var totalStats statistics = []*stats{}
 
 type response struct {
 	addr *net.IPAddr
@@ -20,7 +20,6 @@ type response struct {
 
 func Run(hostnames []string) {
 	p := fastping.NewPinger()
-	totalStats = []*stats{}
 	results := make(map[string]*response)
 	onRecv, onIdle := make(chan *response), make(chan bool)
 	p.OnRecv = func(addr *net.IPAddr, t time.Duration) {
@@ -103,6 +102,16 @@ mainloop:
 				}
 			case 's':
 				sortType++
+			case 'r':
+				if reverse {
+					reverse = false
+				} else {
+					reverse = true
+				}
+			case 'R':
+				for _, x := range totalStats {
+					x.init()
+				}
 			case 'p':
 				currentPage--
 				if currentPage < 0 {
