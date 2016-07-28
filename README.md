@@ -19,8 +19,10 @@ Usage:
 Options:
   -f string
         use contents of file (shorthand)
-  -file string
-        use contents of file
+  -t int
+        max rtt of ping. (ms) (default 1000)
+  -v    print version
 Example:
   ./mping localhost 8.8.8.8
-  ./mping -f hostslist```
+  ./mping -f hostslist
+```

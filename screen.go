@@ -9,7 +9,7 @@ import (
 	"github.com/nsf/termbox-go"
 )
 
-var sortType = 6
+var sortType = 1
 var currentPage = 0
 var pageLength = 1
 var reverse = false
