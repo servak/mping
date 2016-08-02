@@ -13,6 +13,7 @@ var sortType = 1
 var currentPage = 0
 var pageLength = 1
 var reverse = false
+var title = ""
 
 const (
 	coldef     = termbox.ColorDefault
@@ -83,6 +84,7 @@ func drawTop(page, pageSize, width int) {
 
 	lmsg := fmt.Sprintf("[%d/%d]", page+1, pageSize+1)
 	tbPrint(0, 0, termbox.ColorMagenta, coldef, msg)
+	tbPrint(width/2, 0, termbox.ColorMagenta|termbox.AttrBold, coldef, title)
 	tbPrint(width-len(lmsg), 0, termbox.ColorMagenta, coldef, lmsg)
 }
 
