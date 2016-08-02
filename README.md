@@ -21,6 +21,8 @@ Options:
         use contents of file (shorthand)
   -t int
         max rtt of ping. (ms) (default 1000)
+  -title string
+        print title
   -v    print version
 Example:
   ./mping localhost 8.8.8.8

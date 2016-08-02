@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/nsf/termbox-go"
-	"github.com/tatsushid/go-fastping"
+	"github.com/servak/go-fastping"
 )
 
 var totalStats statistics = []*stats{}
@@ -18,7 +18,7 @@ type response struct {
 	rtt  time.Duration
 }
 
-func Run(hostnames []string, maxRtt int) {
+func Run(hostnames []string, maxRtt int, _title string) {
 	p := fastping.NewPinger()
 	results := make(map[string]*response)
 	onRecv, onIdle := make(chan *response), make(chan bool)
@@ -29,6 +29,7 @@ func Run(hostnames []string, maxRtt int) {
 		onIdle <- true
 	}
 
+	title = _title
 	i := 1
 	for _, hostname := range hostnames {
 		ra, err := net.ResolveIPAddr("ip4:icmp", hostname)
