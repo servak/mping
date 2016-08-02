@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/nsf/termbox-go"
-	"github.com/tatsushid/go-fastping"
+	"github.com/servak/go-fastping"
 )
 
 var totalStats statistics = []*stats{}
