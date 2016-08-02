@@ -7,7 +7,7 @@ mping is a program to send ICMP echo.
 
 ## Demo
 
-![gif](https://cloud.githubusercontent.com/assets/1210536/15098387/37db406a-1577-11e6-8b49-7f2dbab5b29a.gif)
+![mping](https://cloud.githubusercontent.com/assets/1210536/17332326/5461ba4a-5909-11e6-9293-d02bb5007bdc.gif)
 
 ## Usage
 
