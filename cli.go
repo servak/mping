@@ -18,7 +18,7 @@ type response struct {
 	rtt  time.Duration
 }
 
-func Run(hostnames []string, maxRtt int, _title string) {
+func Run(hostnames []string, maxRtt int, _title string, ipv6 bool) {
 	p := fastping.NewPinger()
 	results := make(map[string]*response)
 	onRecv, onIdle := make(chan *response), make(chan bool)
@@ -28,15 +28,35 @@ func Run(hostnames []string, maxRtt int, _title string) {
 	p.OnIdle = func() {
 		onIdle <- true
 	}
+	var (
+		ra  *net.IPAddr
+		err error
+	)
 
 	title = _title
 	i := 1
 	for _, hostname := range hostnames {
-		ra, err := net.ResolveIPAddr("ip4:icmp", hostname)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+		ip := net.ParseIP(hostname)
+		if ip == nil {
+			// hostname is not ipaddr.
+			if ipv6 {
+				ra, err = net.ResolveIPAddr("ip6:icmp", hostname)
+				if err != nil {
+					ra, err = net.ResolveIPAddr("ip4:icmp", hostname)
+				}
+			} else {
+				ra, err = net.ResolveIPAddr("ip4:icmp", hostname)
+			}
+
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+		} else {
+			// hostname is ipaddr
+			ra = &net.IPAddr{IP: ip}
 		}
+
 		p.AddIPAddr(ra)
 		results[ra.String()] = nil
 

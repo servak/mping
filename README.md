@@ -12,9 +12,9 @@ mping is a program to send ICMP echo.
 ## Usage
 
 ```
-> ./mping
+> mping -h
 Usage:
-  ./mping [options] [host ...]
+  mping [options] [host ...]
 
 Options:
   -f string
@@ -23,8 +23,11 @@ Options:
         max rtt of ping. (ms) (default 1000)
   -title string
         print title
-  -v    print version
+  -v6
+        use ip v6
+  -version
+        print version
 Example:
-  ./mping localhost 8.8.8.8
-  ./mping -f hostslist
+  mping localhost 8.8.8.8
+  mping -f hostslist
 ```
