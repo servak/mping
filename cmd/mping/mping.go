@@ -13,17 +13,19 @@ import (
 	"github.com/servak/mping"
 )
 
-const version = "v0.2"
+const version = "v0.3"
 
 func main() {
 	var filename string
 	var title string
 	var time int
-	var v bool
+	var ver bool
+	var ipv6 bool
 	flag.StringVar(&filename, "f", "", "use contents of file (shorthand)")
 	flag.StringVar(&title, "title", "", "print title")
 	flag.IntVar(&time, "t", 1000, "max rtt of ping. (ms)")
-	flag.BoolVar(&v, "v", false, "print version")
+	flag.BoolVar(&ver, "version", false, "print version")
+	flag.BoolVar(&ipv6, "v6", false, "use ip v6")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage:\n  %s [options] [host ...]\n\nOptions:\n", os.Args[0])
@@ -32,7 +34,7 @@ func main() {
 	}
 	flag.Parse()
 
-	if v {
+	if ver {
 		fmt.Printf("%s: %s\n", os.Args[0], version)
 		os.Exit(0)
 	}
@@ -78,7 +80,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	mping.Run(hosts, time, title)
+	mping.Run(hosts, time, title, ipv6)
 }
 
 func file2hostnames(fp *os.File) []string {
