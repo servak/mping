@@ -13,19 +13,19 @@ import (
 	"github.com/servak/mping"
 )
 
-const version = "v0.3"
+const version = "v0.4"
 
 func main() {
 	var filename string
 	var title string
-	var time int
+	var interval int
 	var ver bool
 	var ipv6 bool
-	flag.StringVar(&filename, "f", "", "use contents of file (shorthand)")
-	flag.StringVar(&title, "title", "", "print title")
-	flag.IntVar(&time, "t", 1000, "max rtt of ping. (ms)")
-	flag.BoolVar(&ver, "version", false, "print version")
-	flag.BoolVar(&ipv6, "v6", false, "use ip v6")
+	flag.StringVar(&filename, "f", "", "use contents of file")
+	flag.StringVar(&title, "t", "", "print title")
+	flag.IntVar(&interval, "i", 1000, "interval(ms)")
+	flag.BoolVar(&ver, "v", false, "print version of mping")
+	flag.BoolVar(&ipv6, "6", false, "use ip v6")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage:\n  %s [options] [host ...]\n\nOptions:\n", os.Args[0])
@@ -50,10 +50,9 @@ func main() {
 		p := os.Args[0]
 		msg := "mping need to 'root' privileges.\n"
 		msg += "try to issue the following command:\n"
-		msg += "        1. sudo chown root %s\n"
-		msg += "(Mac)   2. sudo chmod u+t %s\n"
-		msg += "(Linux) 2. sudo chmod u+s %s\n"
-		fmt.Printf(msg, p, p, p)
+		msg += "1. sudo chown root %s\n"
+		msg += "2. sudo chmod u+s %s\n"
+		fmt.Printf(msg, p, p)
 		os.Exit(1)
 	}
 
@@ -75,12 +74,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	if time == 0 {
+	if interval == 0 {
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	mping.Run(hosts, time, title, ipv6)
+	mping.Run(hosts, interval, title, ipv6)
 }
 
 func file2hostnames(fp *os.File) []string {
