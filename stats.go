@@ -73,6 +73,7 @@ type stats struct {
 func (s *stats) init() {
 	s.max = 0
 	s.min = 0
+	s.total = 0
 	s.last = 0
 	s.count = 0
 	s.success = 0
