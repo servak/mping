@@ -6,20 +6,22 @@ import (
 )
 
 const (
-	Host    = "Host"
-	Success = "Succ"
-	Loss    = "Loss(%)"
-	Last    = "Last"
-	Fail    = "Fail"
-	Avg     = "Avg"
-	Best    = "Best"
-	Worst   = "Worst"
+	Host         = "Host"
+	Success      = "Succ"
+	Loss         = "Loss(%)"
+	Last         = "Last"
+	Fail         = "Fail"
+	Avg          = "Avg"
+	Best         = "Best"
+	Worst        = "Worst"
+	LastSuccTime = "Last Success"
+	LastFailTime = "Last Fail"
 )
 
 type statistics []*stats
 
 func (s statistics) keys() []string {
-	return []string{Host, Success, Fail, Loss, Last, Avg, Best, Worst}
+	return []string{Host, Success, Fail, Loss, Last, Avg, Best, Worst, LastSuccTime, LastFailTime}
 }
 
 func (s statistics) Len() int {
@@ -58,16 +60,18 @@ func (s statistics) setSucceed(ip string, rtt time.Duration) {
 }
 
 type stats struct {
-	order    int
-	max      time.Duration
-	min      time.Duration
-	total    time.Duration
-	last     time.Duration
-	count    int
-	success  int
-	fail     int
-	hostname string
-	ip       string
+	order        int
+	max          time.Duration
+	min          time.Duration
+	total        time.Duration
+	last         time.Duration
+	count        int
+	success      int
+	fail         int
+	hostname     string
+	ip           string
+	lastFailTime time.Time
+	lastSuccTime time.Time
 }
 
 func (s *stats) init() {
@@ -78,6 +82,8 @@ func (s *stats) init() {
 	s.count = 0
 	s.success = 0
 	s.fail = 0
+	s.lastSuccTime = time.Time{}
+	s.lastFailTime = time.Time{}
 }
 
 func (s *stats) succeed(t time.Duration) {
@@ -93,11 +99,13 @@ func (s *stats) succeed(t time.Duration) {
 	s.total += t
 	s.count++
 	s.success++
+	s.lastSuccTime = time.Now()
 }
 
 func (s *stats) failed() {
 	s.count++
 	s.fail++
+	s.lastFailTime = time.Now()
 }
 
 func (s stats) loss() float64 {
@@ -134,6 +142,21 @@ func (s stats) values() map[string]string {
 	v[Avg] = fmt.Sprintf("%v", s.average())
 	v[Best] = fmt.Sprintf("%v", s.min)
 	v[Worst] = fmt.Sprintf("%v", s.max)
+
+	lastSuccTime := "-"
+	lastFailTime := "-"
+
+	if !s.lastSuccTime.IsZero() {
+		lastSuccTime = s.lastSuccTime.Format("15:04:05")
+	}
+
+	if !s.lastFailTime.IsZero() {
+		lastFailTime = s.lastFailTime.Format("15:04:05")
+	}
+
+	v[LastSuccTime] = lastSuccTime
+	v[LastFailTime] = lastFailTime
+
 	return v
 }
 
