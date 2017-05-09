@@ -1,1 +1,12 @@
 language: go
+before_deploy:
+  - go get -u github.com/laher/goxc
+  - mkdir -p $TRAVIS_BUILD_DIR/dist
+  - goxc -d=$TRAVIS_BUILD_DIR/dist -bc="linux,!arm 386 darwin" darwin -tasks=clean-destination,xc,archive,rmbin
+deploy:
+  provider: releases
+  api_key:
+    secure: ulPSDbg8lWFiQ8lZ8x/bZGVTezBtyTrCZMjcAHuKHJBQbDtCRzS0y5y8MoMpPUCYR5j6yS129wRmDKLRkXs4mius5gFIlpiA54VpLJNFz4LMdciyldPZ+fzBQZH+W6Plm0jUCfOOVgF1avx6SabTDdx5Q/sT+Oxo9Wz7EEFzhg43gn02IupZsRnkEzf/LU9FE38BfisHD9lnmRZVUWSiiAkj263pqN/VDhjISVtf1dXmuL2O/Mjfm4np17EvFDbInV+VF6q+fjM5G+1RSlz2coUBw0L95PSceh5WAdaWKDEa6KR9rGUquSnczGh0aI8f7fydRFzUCZfHLfEkONlsUJiQ3iWetqRpmTBU3UNUWIJL97fPpYUHK+M+Str6vsijjZac221hdPQHSZJj4AVZppS6ipPv/UW7WOoDpoOR4GLi84DrU0TSG97QTbFztgbs6NUpMTXQtqw8xilEq6SNybqGSL7a1FtxHvrEPeR8E/JyCrOFLYNGaDUE5RuBAr3F41aVg16CCrpQn3emf+akpg45H7HSIu7/j4d3RJ80Gvg9S9SeAKLwyFhCP/EL65PL/E2KRPjGBZlD+eVQmDMo3rdqIyiS/0hHxJ2ajHRAX7lYaupqUotl8Gvftnu3zXX+RnxUlCHl/MKZ3aE0ja1oZbg2HI9oD8NYVGOLKZ2nz8M=
+  file: $TRAVIS_BUILD_DIR/dist/**/*.{tar.gz,zip}
+  on:
+    repo: servak/mping
