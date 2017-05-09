@@ -11,4 +11,6 @@ deploy:
   file_glob: true
   file: $TRAVIS_BUILD_DIR/dist/**/*.{tar.gz,zip}
   on:
-    repo: servak/mping
+    tags: true
+    all_branches: true
+    condition: "$TRAVIS_TAG =~ ^v[0-9].*$"
