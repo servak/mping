@@ -2,7 +2,7 @@ language: go
 before_deploy:
   - go get -u github.com/laher/goxc
   - mkdir -p $TRAVIS_BUILD_DIR/dist
-  - goxc -d=$TRAVIS_BUILD_DIR/dist -bc="linux,!arm 386 darwin" darwin -tasks=clean-destination,xc,archive,rmbin
+  - goxc -d=$TRAVIS_BUILD_DIR/dist -bc="linux,!arm darwin" -tasks=clean-destination,xc,archive,rmbin
 deploy:
   provider: releases
   api_key:
