@@ -9,6 +9,19 @@ mping is a program to send ICMP echo.
 
 ![mping](https://cloud.githubusercontent.com/assets/1210536/17810864/9676f0ea-665a-11e6-99dd-8166789fc0d2.gif)
 
+## Permission
+
+```
+sudo setcap cap_net_raw=+ep mping
+```
+
+or
+
+```
+sudo chown root mping
+sudo chmod u+s mping
+```
+
 ## Usage
 
 ```

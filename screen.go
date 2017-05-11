@@ -68,7 +68,7 @@ func screenRedraw() {
 		tbPrint(0, 2+i, coldef, coldef, v)
 	}
 
-	tbPrint(0, h-1, coldef, coldef, "q: quite program, n: next page, p: previous page, s: sort, r: reverse mode, R: count reset")
+	tbPrint(0, h-1, coldef, coldef, "q: quit program, n: next page, p: previous page, s: sort, r: reverse mode, R: count reset")
 	termbox.Flush()
 }
 

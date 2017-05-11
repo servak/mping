@@ -8,7 +8,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"syscall"
 
 	"github.com/servak/mping"
 )
@@ -42,17 +41,6 @@ func main() {
 	_, err := os.Stat(filename)
 	if err != nil && flag.NArg() == 0 {
 		flag.Usage()
-		os.Exit(1)
-	}
-
-	uid := syscall.Geteuid()
-	if uid != 0 {
-		p := os.Args[0]
-		msg := "mping need to 'root' privileges.\n"
-		msg += "try to issue the following command:\n"
-		msg += "1. sudo chown root %s\n"
-		msg += "2. sudo chmod u+s %s\n"
-		fmt.Printf(msg, p, p)
 		os.Exit(1)
 	}
 
@@ -94,7 +82,7 @@ func file2hostnames(fp *os.File) []string {
 		}
 
 		line := r.ReplaceAllString(string(lb), "")
-		line = strings.Trim(line, " \n")
+		line = strings.Trim(line, "\t \n")
 		if line == "" {
 			continue
 		}
