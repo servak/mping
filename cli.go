@@ -68,17 +68,24 @@ func Run(hostnames []string, maxRtt int, _title string, ipv6 bool) {
 		i++
 	}
 
+	is_end := make(chan bool)
 	screenInit()
 	defer printScreenValues()
 	defer screenClose()
 	screenRedraw()
 
+	refreshTime := 100
+	if maxRtt > refreshTime {
+		refreshTime = maxRtt
+	}
 	p.MaxRTT = time.Millisecond * time.Duration(maxRtt)
 	p.RunLoop()
 	go func() {
-		t := time.NewTicker(time.Millisecond * 200)
+		t := time.NewTicker(time.Millisecond * time.Duration(refreshTime))
 		for {
 			select {
+			case <-is_end:
+				return
 			case <-t.C:
 				screenRedraw()
 			}
@@ -118,6 +125,7 @@ mainloop:
 		case termbox.EventKey:
 			switch ev.Ch {
 			case 'q':
+				is_end <- true
 				break mainloop
 			case 'n':
 				currentPage++
