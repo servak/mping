@@ -75,9 +75,9 @@ func Run(hostnames []string, maxRtt int, _title string, ipv6 bool) {
 	defer screenClose()
 	screenRedraw()
 
-	refreshTime := 100
+	refreshTime := 200
 	if maxRtt > refreshTime {
-		refreshTime = maxRtt
+		refreshTime = maxRtt / 2
 	}
 	p.MaxRTT = time.Millisecond * time.Duration(maxRtt)
 	p.RunLoop()
