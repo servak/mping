@@ -7,7 +7,7 @@ mping is a program to send ICMP echo.
 
 ## Demo
 
-![mping](https://cloud.githubusercontent.com/assets/1210536/17810864/9676f0ea-665a-11e6-99dd-8166789fc0d2.gif)
+[![asciicast](https://asciinema.org/a/a969qrzhs7gi11yv74gzecrl8.png)](https://asciinema.org/a/a969qrzhs7gi11yv74gzecrl8)
 
 ## Permission
 
@@ -39,6 +39,6 @@ Options:
        	print title
   -v   	print version of mping
 Example:
-  mping localhost 8.8.8.8
+  mping localhost 10.1.1.0/30 8.8.8.8
   mping -f hostslist
 ```
