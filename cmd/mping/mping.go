@@ -12,7 +12,7 @@ import (
 	"github.com/servak/mping"
 )
 
-const version = "v0.4"
+const version = "v0.0.4"
 
 func main() {
 	var filename string

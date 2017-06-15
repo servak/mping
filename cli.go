@@ -19,6 +19,7 @@ type response struct {
 }
 
 func Run(hostnames []string, maxRtt int, _title string, ipv6 bool) {
+	hostnames = parseCidr(hostnames)
 	p := fastping.NewPinger()
 	results := make(map[string]*response)
 	onRecv, onIdle := make(chan *response), make(chan bool)
@@ -74,9 +75,9 @@ func Run(hostnames []string, maxRtt int, _title string, ipv6 bool) {
 	defer screenClose()
 	screenRedraw()
 
-	refreshTime := 100
+	refreshTime := 200
 	if maxRtt > refreshTime {
-		refreshTime = maxRtt
+		refreshTime = maxRtt / 2
 	}
 	p.MaxRTT = time.Millisecond * time.Duration(maxRtt)
 	p.RunLoop()
@@ -152,6 +153,32 @@ mainloop:
 			}
 		case termbox.EventError:
 			panic(ev.Err)
+		}
+	}
+}
+
+func parseCidr(_hosts []string) []string {
+	hosts := []string{}
+	for _, h := range _hosts {
+		ip, ipnet, err := net.ParseCIDR(h)
+		if err != nil {
+			hosts = append(hosts, h)
+			continue
+		}
+
+		for ip := ip.Mask(ipnet.Mask); ipnet.Contains(ip); ipInc(ip) {
+			hosts = append(hosts, ip.String())
+		}
+	}
+
+	return hosts
+}
+
+func ipInc(ip net.IP) {
+	for j := len(ip) - 1; j >= 0; j-- {
+		ip[j]++
+		if ip[j] > 0 {
+			break
 		}
 	}
 }
