@@ -37,6 +37,7 @@ Options:
        	use contents of file
   -i int
        	interval(ms) (default 1000)
+  -q   	quiet mode
   -t string
        	print title
   -v   	print version of mping

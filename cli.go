@@ -18,7 +18,7 @@ type response struct {
 	rtt  time.Duration
 }
 
-func Run(hostnames []string, maxRtt int, count int, _title string, ipv6 bool) {
+func Run(hostnames []string, maxRtt int, count int, quiet bool, _title string, ipv6 bool) {
 	hostnames = parseCidr(hostnames)
 	doCount := count != 0
 	p := fastping.NewPinger()
@@ -72,10 +72,12 @@ func Run(hostnames []string, maxRtt int, count int, _title string, ipv6 bool) {
 
 	is_tick_end := make(chan bool)
 	done := make(chan struct{})
-	screenInit()
 	defer printScreenValues()
-	defer screenClose()
-	screenRedraw()
+	if !quiet {
+		screenInit()
+		defer screenClose()
+		screenRedraw()
+	}
 
 	refreshTime := 200
 	if maxRtt > refreshTime {
@@ -83,17 +85,21 @@ func Run(hostnames []string, maxRtt int, count int, _title string, ipv6 bool) {
 	}
 	p.MaxRTT = time.Millisecond * time.Duration(maxRtt)
 	p.RunLoop()
-	go func() {
-		t := time.NewTicker(time.Millisecond * time.Duration(refreshTime))
-		for {
-			select {
-			case <-is_tick_end:
-				return
-			case <-t.C:
-				screenRedraw()
+
+	if !quiet {
+		go func() {
+			t := time.NewTicker(time.Millisecond * time.Duration(refreshTime))
+			for {
+				select {
+				case <-is_tick_end:
+					return
+				case <-t.C:
+					screenRedraw()
+				}
 			}
-		}
-	}()
+		}()
+	}
+
 	go func() {
 		idleCount := 0
 		for {
