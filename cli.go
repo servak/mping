@@ -18,8 +18,9 @@ type response struct {
 	rtt  time.Duration
 }
 
-func Run(hostnames []string, maxRtt int, _title string, ipv6 bool) {
+func Run(hostnames []string, maxRtt int, count int, _title string, ipv6 bool) {
 	hostnames = parseCidr(hostnames)
+	doCount := count != 0
 	p := fastping.NewPinger()
 	results := make(map[string]*response)
 	onRecv, onIdle := make(chan *response), make(chan bool)
@@ -69,7 +70,8 @@ func Run(hostnames []string, maxRtt int, _title string, ipv6 bool) {
 		i++
 	}
 
-	is_end := make(chan bool)
+	is_tick_end := make(chan bool)
+	done := make(chan struct{})
 	screenInit()
 	defer printScreenValues()
 	defer screenClose()
@@ -85,7 +87,7 @@ func Run(hostnames []string, maxRtt int, _title string, ipv6 bool) {
 		t := time.NewTicker(time.Millisecond * time.Duration(refreshTime))
 		for {
 			select {
-			case <-is_end:
+			case <-is_tick_end:
 				return
 			case <-t.C:
 				screenRedraw()
@@ -93,6 +95,7 @@ func Run(hostnames []string, maxRtt int, _title string, ipv6 bool) {
 		}
 	}()
 	go func() {
+		idleCount := 0
 		for {
 			select {
 			case res := <-onRecv:
@@ -111,50 +114,62 @@ func Run(hostnames []string, maxRtt int, _title string, ipv6 bool) {
 					}
 					results[ip] = nil
 				}
+				if doCount {
+					idleCount += 1
+					if idleCount >= count {
+						close(done)
+						return
+					}
+				}
 			case <-p.Done():
 				if err := p.Err(); err != nil {
 					log.Println("Ping failed:", err)
 				}
+				close(done)
 				return
 			}
 		}
 	}()
 
-mainloop:
-	for {
-		switch ev := termbox.PollEvent(); ev.Type {
-		case termbox.EventKey:
-			switch ev.Ch {
-			case 'q':
-				is_end <- true
-				break mainloop
-			case 'n':
-				currentPage++
-				if currentPage > pageLength {
-					currentPage = 0
+	go func() {
+		for {
+			switch ev := termbox.PollEvent(); ev.Type {
+			case termbox.EventKey:
+				switch ev.Ch {
+				case 'q':
+					is_tick_end <- true
+					close(done)
+					return
+				case 'n':
+					currentPage++
+					if currentPage > pageLength {
+						currentPage = 0
+					}
+				case 's':
+					sortType++
+				case 'r':
+					if reverse {
+						reverse = false
+					} else {
+						reverse = true
+					}
+				case 'R':
+					for _, x := range totalStats {
+						x.init()
+					}
+				case 'p':
+					currentPage--
+					if currentPage < 0 {
+						currentPage = pageLength
+					}
 				}
-			case 's':
-				sortType++
-			case 'r':
-				if reverse {
-					reverse = false
-				} else {
-					reverse = true
-				}
-			case 'R':
-				for _, x := range totalStats {
-					x.init()
-				}
-			case 'p':
-				currentPage--
-				if currentPage < 0 {
-					currentPage = pageLength
-				}
+			case termbox.EventError:
+				panic(ev.Err)
 			}
-		case termbox.EventError:
-			panic(ev.Err)
 		}
-	}
+	}()
+
+	<-done
 }
 
 func parseCidr(_hosts []string) []string {

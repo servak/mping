@@ -31,6 +31,8 @@ Usage:
 
 Options:
   -6   	use ip v6
+  -c int
+       	stop after receiving <count> response packets
   -f string
        	use contents of file
   -i int
