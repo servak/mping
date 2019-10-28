@@ -18,11 +18,15 @@ func main() {
 	var filename string
 	var title string
 	var interval int
+	var count int
+	var quiet bool
 	var ver bool
 	var ipv6 bool
 	flag.StringVar(&filename, "f", "", "use contents of file")
 	flag.StringVar(&title, "t", "", "print title")
 	flag.IntVar(&interval, "i", 1000, "interval(ms)")
+	flag.IntVar(&count, "c", 0, "stop after receiving <count> response packets")
+	flag.BoolVar(&quiet, "q", false, "quiet mode")
 	flag.BoolVar(&ver, "v", false, "print version of mping")
 	flag.BoolVar(&ipv6, "6", false, "use ip v6")
 
@@ -67,7 +71,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	mping.Run(hosts, interval, title, ipv6)
+	mping.Run(hosts, interval, count, quiet, title, ipv6)
 }
 
 func file2hostnames(fp *os.File) []string {

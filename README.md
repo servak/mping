@@ -31,10 +31,13 @@ Usage:
 
 Options:
   -6   	use ip v6
+  -c int
+       	stop after receiving <count> response packets
   -f string
        	use contents of file
   -i int
        	interval(ms) (default 1000)
+  -q   	quiet mode
   -t string
        	print title
   -v   	print version of mping
