@@ -5,36 +5,108 @@ import (
 	"time"
 )
 
+type SortType uint8
+
 const (
-	Host         = "Host"
-	Success      = "Succ"
-	Loss         = "Loss(%)"
-	Last         = "Last"
-	Fail         = "Fail"
-	Avg          = "Avg"
-	Best         = "Best"
-	Worst        = "Worst"
-	LastSuccTime = "Last Success"
-	LastFailTime = "Last Fail"
+	Host SortType = iota
+	Success
+	Fail
+	Loss
+	Last
+	Avg
+	Best
+	Worst
+	LastSuccTime
+	LastFailTime
 )
 
-type statistics []*stats
+func (s SortType) String() string {
+	switch s {
+	case Host:
+		return "Host"
+	case Success:
+		return "Succ"
+	case Loss:
+		return "Loss(%)"
+	case Last:
+		return "Last"
+	case Fail:
+		return "Fail"
+	case Avg:
+		return "Avg"
+	case Best:
+		return "Best"
+	case Worst:
+		return "Worst"
+	case LastSuccTime:
+		return "Last Success"
+	case LastFailTime:
+		return "Last Fail"
+	}
 
-func (s statistics) keys() []string {
-	return []string{Host, Success, Fail, Loss, Last, Avg, Best, Worst, LastSuccTime, LastFailTime}
+	return ""
 }
 
-func (s statistics) Len() int {
-	return len(s)
+func NewStatistics() Statistics {
+	return Statistics{
+		sortType: Success,
+		values:   []*stats{},
+	}
 }
 
-func (s statistics) Swap(i, j int) {
-	s[i], s[j] = s[j], s[i]
+type Statistics struct {
+	values   []*stats
+	sortType SortType
 }
 
-func (s statistics) getMaxLength(key string) int {
-	length := len(key)
-	for _, v := range s {
+func (s *Statistics) SetNextSort() {
+	s.sortType++
+	if int(s.sortType) >= len(s.keys()) {
+		s.sortType = 0
+	}
+}
+
+func (s Statistics) keys() []SortType {
+	return []SortType{Host, Success, Fail, Loss, Last, Avg, Best, Worst, LastSuccTime, LastFailTime}
+}
+
+func (s Statistics) Len() int {
+	return len(s.values)
+}
+
+func (s Statistics) Swap(i, j int) {
+	s.values[i], s.values[j] = s.values[j], s.values[i]
+}
+
+func (s Statistics) Less(i, j int) bool {
+	switch s.sortType {
+	case Host:
+		return len(s.values[i].hostname) < len(s.values[j].hostname)
+	case Success:
+		return s.values[i].success < s.values[j].success
+	case Loss:
+		return s.values[i].fail > s.values[j].fail
+	case Last:
+		return s.values[i].last < s.values[j].last
+	case Fail:
+		return s.values[i].fail < s.values[j].fail
+	case Avg:
+		return s.values[i].average() < s.values[j].average()
+	case Best:
+		return s.values[i].min < s.values[j].min
+	case Worst:
+		return s.values[i].max < s.values[j].max
+	case LastSuccTime:
+		return s.values[i].lastSuccTime.After(s.values[j].lastSuccTime)
+	case LastFailTime:
+		return s.values[i].lastFailTime.After(s.values[j].lastFailTime)
+	}
+	return true
+}
+
+func (s Statistics) getMaxLength(key SortType) int {
+	length := len(key.String())
+	for _, v := range s.values {
 		if l := len(v.values()[key]); length < l {
 			length = l
 		}
@@ -43,18 +115,20 @@ func (s statistics) getMaxLength(key string) int {
 	return length
 }
 
-func (s statistics) setFailed(ip string) {
-	for _, v := range s {
+func (s Statistics) setFailed(ip string) {
+	for _, v := range s.values {
 		if v.ip == ip {
 			v.failed()
+			return
 		}
 	}
 }
 
-func (s statistics) setSucceed(ip string, rtt time.Duration) {
-	for _, v := range s {
+func (s Statistics) setSucceed(ip string, rtt time.Duration) {
+	for _, v := range s.values {
 		if v.ip == ip {
 			v.succeed(rtt)
+			return
 		}
 	}
 }
@@ -128,8 +202,8 @@ func (s stats) average() time.Duration {
 	return time.Duration(int(s.total) / s.success)
 }
 
-func (s stats) values() map[string]string {
-	v := make(map[string]string)
+func (s stats) values() map[SortType]string {
+	v := make(map[SortType]string)
 	v[Host] = s.hostname
 	if s.hostname != s.ip {
 		v[Host] = fmt.Sprintf("%s(%s)", s.hostname, s.ip)
@@ -138,10 +212,10 @@ func (s stats) values() map[string]string {
 	v[Success] = fmt.Sprintf("%d", s.success)
 	v[Fail] = fmt.Sprintf("%d", s.fail)
 	v[Loss] = fmt.Sprintf("%5.1f%%", s.loss())
-	v[Last] = fmt.Sprintf("%v", s.last)
-	v[Avg] = fmt.Sprintf("%v", s.average())
-	v[Best] = fmt.Sprintf("%v", s.min)
-	v[Worst] = fmt.Sprintf("%v", s.max)
+	v[Last] = durationFormater(s.last)
+	v[Avg] = durationFormater(s.average())
+	v[Best] = durationFormater(s.min)
+	v[Worst] = durationFormater(s.max)
 
 	lastSuccTime := "-"
 	lastFailTime := "-"
@@ -160,58 +234,12 @@ func (s stats) values() map[string]string {
 	return v
 }
 
-type byLast struct {
-	statistics
-}
-
-func (b byLast) Less(i, j int) bool {
-	return b.statistics[i].last < b.statistics[j].last
-}
-
-type byAvg struct {
-	statistics
-}
-
-func (b byAvg) Less(i, j int) bool {
-	return b.statistics[i].average() < b.statistics[j].average()
-}
-
-type byWorst struct {
-	statistics
-}
-
-func (b byWorst) Less(i, j int) bool {
-	return b.statistics[i].max < b.statistics[j].max
-}
-
-type bySuccess struct {
-	statistics
-}
-
-func (b bySuccess) Less(i, j int) bool {
-	return b.statistics[i].success < b.statistics[j].success
-}
-
-type byLoss struct {
-	statistics
-}
-
-func (b byLoss) Less(i, j int) bool {
-	return b.statistics[i].fail < b.statistics[j].fail
-}
-
-type byBest struct {
-	statistics
-}
-
-func (b byBest) Less(i, j int) bool {
-	return b.statistics[i].min < b.statistics[j].min
-}
-
-type byHost struct {
-	statistics
-}
-
-func (b byHost) Less(i, j int) bool {
-	return len(b.statistics[i].hostname) < len(b.statistics[j].hostname)
+func durationFormater(duration time.Duration) string {
+	if duration.Microseconds() < 1000 {
+		return fmt.Sprintf("%3dµs", duration.Microseconds())
+	} else if duration.Milliseconds() < 1000 {
+		return fmt.Sprintf("%3dms", duration.Milliseconds())
+	} else {
+		return fmt.Sprintf("%3.0fs", duration.Seconds())
+	}
 }

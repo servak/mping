@@ -9,11 +9,13 @@ import (
 	"github.com/nsf/termbox-go"
 )
 
-var sortType = 1
-var currentPage = 0
-var pageLength = 1
-var reverse = false
-var title = ""
+var (
+	currentPage = 0
+	pageLength  = 1
+	reverse     = false
+	title       = ""
+	maxRtt      = 0
+)
 
 const (
 	coldef     = termbox.ColorDefault
@@ -40,10 +42,13 @@ func screenClose() {
 }
 
 func screenRedraw() {
-	termbox.Clear(coldef, coldef)
+	err := termbox.Clear(coldef, coldef)
+	if err != nil {
+		return
+	}
 	w, h := termbox.Size()
 	pageSize := h - IgnoreLine
-	pageLength = len(totalStats) / (pageSize + 1)
+	pageLength = len(statTable.values) / (pageSize + 1)
 	// if change screen size
 	if pageLength < currentPage {
 		currentPage = 0
@@ -51,7 +56,7 @@ func screenRedraw() {
 
 	drawTop(currentPage, pageLength, w)
 
-	header, body := drawTotalStats()
+	header, body := drawstatTable()
 	bold := coldef | termbox.AttrBold
 	tbPrint(0, 1, bold, coldef, header)
 	begin := currentPage * pageSize
@@ -73,14 +78,11 @@ func screenRedraw() {
 }
 
 func drawTop(page, pageSize, width int) {
-	keys := totalStats.keys()
-	if sortType >= len(keys) {
-		sortType = 0
-	}
-	msg := fmt.Sprintf("Sort: %s", keys[sortType])
+	msg := fmt.Sprintf("Sort: %s", statTable.sortType)
 	if reverse {
 		msg += ", Reverse mode"
 	}
+	msg += fmt.Sprintf(", Interval: %dms", maxRtt)
 
 	lmsg := fmt.Sprintf("[%d/%d]", page+1, pageSize+1)
 	tbPrint(0, 0, termbox.ColorMagenta, coldef, msg)
@@ -88,32 +90,11 @@ func drawTop(page, pageSize, width int) {
 	tbPrint(width-len(lmsg), 0, termbox.ColorMagenta, coldef, lmsg)
 }
 
-func getSortInterface(s statistics, str string) (t sort.Interface) {
-	switch str {
-	case Host:
-		t = byHost{s}
-	case Success:
-		t = bySuccess{s}
-	case Loss, Fail:
-		t = byLoss{s}
-	case Best:
-		t = byBest{s}
-	case Last:
-		t = byLast{s}
-	case Avg:
-		t = byAvg{s}
-	case Worst:
-		t = byWorst{s}
-	}
-
-	return
-}
-
-func drawTotalStats() (string, []string) {
-	headers := totalStats.keys()
+func drawstatTable() (string, []string) {
+	headers := statTable.keys()
 	length := make([]int, len(headers))
 	for i, k := range headers {
-		length[i] = totalStats.getMaxLength(k)
+		length[i] = statTable.getMaxLength(k)
 	}
 
 	// print header
@@ -124,15 +105,14 @@ func drawTotalStats() (string, []string) {
 	header := strings.Join(msg, "  ")
 	body := []string{}
 
-	t := getSortInterface(totalStats, headers[sortType])
 	if reverse {
-		sort.Sort(sort.Reverse(t))
+		sort.Sort(sort.Reverse(statTable))
 	} else {
-		sort.Sort(t)
+		sort.Sort(statTable)
 	}
 
 	// print body
-	for _, _stats := range totalStats {
+	for _, _stats := range statTable.values {
 		v := _stats.values()
 		msg = []string{}
 		for i, h := range headers {
@@ -145,7 +125,7 @@ func drawTotalStats() (string, []string) {
 }
 
 func printScreenValues() {
-	header, body := drawTotalStats()
+	header, body := drawstatTable()
 	fmt.Println(header)
 	for _, v := range body {
 		fmt.Println(v)

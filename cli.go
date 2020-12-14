@@ -11,18 +11,21 @@ import (
 	"github.com/servak/go-fastping"
 )
 
-var totalStats statistics = []*stats{}
+var statTable Statistics
 
 type response struct {
 	addr *net.IPAddr
 	rtt  time.Duration
 }
 
-func Run(hostnames []string, maxRtt int, count int, quiet bool, _title string, ipv6 bool) {
+// Run...
+func Run(hostnames []string, _maxRtt, size, count int, quiet bool, _title string, ipv6 bool) {
 	hostnames = parseCidr(hostnames)
 	doCount := count != 0
-	p := fastping.NewPinger()
+	statTable = NewStatistics()
 	results := make(map[string]*response)
+	p := fastping.NewPinger()
+	p.Size = size
 	onRecv, onIdle := make(chan *response), make(chan bool)
 	p.OnRecv = func(addr *net.IPAddr, t time.Duration) {
 		onRecv <- &response{addr: addr, rtt: t}
@@ -36,8 +39,19 @@ func Run(hostnames []string, maxRtt int, count int, quiet bool, _title string, i
 	)
 
 	title = _title
+	maxRtt = _maxRtt
 	i := 1
 	for _, hostname := range hostnames {
+		hit := false
+		for _, s := range statTable.values {
+			if s.hostname == hostname {
+				hit = true
+				break
+			}
+		}
+		if hit {
+			continue
+		}
 		ip := net.ParseIP(hostname)
 		if ip == nil {
 			// hostname is not ipaddr.
@@ -62,7 +76,7 @@ func Run(hostnames []string, maxRtt int, count int, quiet bool, _title string, i
 		p.AddIPAddr(ra)
 		results[ra.String()] = nil
 
-		totalStats = append(totalStats, &stats{
+		statTable.values = append(statTable.values, &stats{
 			order:    i,
 			hostname: hostname,
 			ip:       ra.String(),
@@ -70,7 +84,7 @@ func Run(hostnames []string, maxRtt int, count int, quiet bool, _title string, i
 		i++
 	}
 
-	is_tick_end := make(chan bool)
+	isTickEnd := make(chan bool)
 	done := make(chan struct{})
 	defer printScreenValues()
 	if !quiet {
@@ -91,7 +105,7 @@ func Run(hostnames []string, maxRtt int, count int, quiet bool, _title string, i
 			t := time.NewTicker(time.Millisecond * time.Duration(refreshTime))
 			for {
 				select {
-				case <-is_tick_end:
+				case <-isTickEnd:
 					return
 				case <-t.C:
 					screenRedraw()
@@ -111,17 +125,17 @@ func Run(hostnames []string, maxRtt int, count int, quiet bool, _title string, i
 			case <-onIdle:
 				for ip, r := range results {
 					if r == nil {
-						totalStats.setFailed(ip)
+						statTable.setFailed(ip)
 					} else {
 						if r.rtt == 0 {
 							r.rtt = p.MaxRTT
 						}
-						totalStats.setSucceed(ip, r.rtt)
+						statTable.setSucceed(ip, r.rtt)
 					}
 					results[ip] = nil
 				}
 				if doCount {
-					idleCount += 1
+					idleCount++
 					if idleCount >= count {
 						close(done)
 						return
@@ -139,11 +153,12 @@ func Run(hostnames []string, maxRtt int, count int, quiet bool, _title string, i
 
 	go func() {
 		for {
-			switch ev := termbox.PollEvent(); ev.Type {
+			ev := termbox.PollEvent()
+			switch ev.Type {
 			case termbox.EventKey:
 				switch ev.Ch {
 				case 'q':
-					is_tick_end <- true
+					isTickEnd <- true
 					close(done)
 					return
 				case 'n':
@@ -152,7 +167,7 @@ func Run(hostnames []string, maxRtt int, count int, quiet bool, _title string, i
 						currentPage = 0
 					}
 				case 's':
-					sortType++
+					statTable.SetNextSort()
 				case 'r':
 					if reverse {
 						reverse = false
@@ -160,7 +175,7 @@ func Run(hostnames []string, maxRtt int, count int, quiet bool, _title string, i
 						reverse = true
 					}
 				case 'R':
-					for _, x := range totalStats {
+					for _, x := range statTable.values {
 						x.init()
 					}
 				case 'p':
@@ -169,6 +184,10 @@ func Run(hostnames []string, maxRtt int, count int, quiet bool, _title string, i
 						currentPage = pageLength
 					}
 				}
+			case termbox.EventInterrupt:
+				isTickEnd <- true
+				close(done)
+				return
 			case termbox.EventError:
 				panic(ev.Err)
 			}
@@ -187,8 +206,8 @@ func parseCidr(_hosts []string) []string {
 			continue
 		}
 
-		for ip := ip.Mask(ipnet.Mask); ipnet.Contains(ip); ipInc(ip) {
-			hosts = append(hosts, ip.String())
+		for i := ip.Mask(ipnet.Mask); ipnet.Contains(i); ipInc(i) {
+			hosts = append(hosts, i.String())
 		}
 	}
 
