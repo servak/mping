@@ -8,12 +8,17 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/servak/mping"
 )
 
-const version = "v0.0.5"
+var (
+	Version   string
+	Revision  string
+	GoVersion = runtime.Version()
+)
 
 func main() {
 	var (
@@ -43,7 +48,7 @@ func main() {
 	flag.Parse()
 
 	if ver {
-		fmt.Printf("%s: %s\n", os.Args[0], version)
+		fmt.Printf("mping, version: %s (revision: %s, goversion: %s)", Version, Revision, GoVersion)
 		os.Exit(0)
 	}
 
