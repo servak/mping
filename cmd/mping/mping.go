@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -12,19 +13,23 @@ import (
 	"github.com/servak/mping"
 )
 
-const version = "v0.0.4"
+const version = "v0.0.5"
 
 func main() {
-	var filename string
-	var title string
-	var interval int
-	var count int
-	var quiet bool
-	var ver bool
-	var ipv6 bool
+	var (
+		filename string
+		title    string
+		interval int
+		count    int
+		size     int
+		quiet    bool
+		ver      bool
+		ipv6     bool
+	)
 	flag.StringVar(&filename, "f", "", "use contents of file")
 	flag.StringVar(&title, "t", "", "print title")
 	flag.IntVar(&interval, "i", 1000, "interval(ms)")
+	flag.IntVar(&size, "s", 56, "Specifies the number of data bytes to be sent.  The default is 56, which translates into 64 ICMP data bytes when combined with the 8 bytes of ICMP header data.")
 	flag.IntVar(&count, "c", 0, "stop after receiving <count> response packets")
 	flag.BoolVar(&quiet, "q", false, "quiet mode")
 	flag.BoolVar(&ver, "v", false, "print version of mping")
@@ -57,9 +62,7 @@ func main() {
 		hosts = file2hostnames(fp)
 	}
 
-	for _, h := range flag.Args() {
-		hosts = append(hosts, h)
-	}
+	hosts = append(hosts, flag.Args()...)
 
 	if len(hosts) == 0 {
 		fmt.Println("Host not found.")
@@ -71,7 +74,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	mping.Run(hosts, interval, count, quiet, title, ipv6)
+	mping.Run(hosts, interval, size, count, quiet, title, ipv6)
 }
 
 func file2hostnames(fp *os.File) []string {
@@ -81,7 +84,7 @@ func file2hostnames(fp *os.File) []string {
 
 	for {
 		lb, _, err := reader.ReadLine()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 
