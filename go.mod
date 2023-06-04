@@ -5,7 +5,6 @@ go 1.20
 require (
 	github.com/awesome-gocui/gocui v1.1.0
 	github.com/jedib0t/go-pretty/v6 v6.4.6
-	github.com/nsf/termbox-go v1.1.1
 	golang.org/x/net v0.0.0-20220722155237-a158d28d115b
 )
 
