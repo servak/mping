@@ -1,4 +1,4 @@
-package mping
+package stats
 
 import (
 	"testing"
@@ -19,8 +19,8 @@ func TestStatsLoss(t *testing.T) {
 
 	for _, v := range lossTests {
 		s := stats{
-			count: v.count,
-			fail:  v.fail,
+			sent: v.count,
+			fail: v.fail,
 		}
 
 		if s.loss() != v.want {

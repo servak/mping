@@ -6,12 +6,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"regexp"
 	"runtime"
 	"strings"
 
-	"github.com/servak/mping"
+	"github.com/servak/mping/internal/command"
+	"github.com/servak/mping/internal/config"
+	"github.com/servak/mping/internal/prober"
+	"github.com/servak/mping/internal/ui"
 )
 
 var (
@@ -79,7 +83,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	mping.Run(hosts, interval, size, count, quiet, title, ipv6)
+	hosts = parseCidr(hosts)
+	cfg := &config.Config{
+		Prober: &prober.ProberConfig{
+			ICMP: &prober.ICMPConfig{
+				Interval: "100ms",
+				Timeout:  "1s",
+			},
+		},
+		UI: &ui.UIConfig{
+			CUI: &ui.CUIConfig{
+				Border: true,
+			},
+		},
+	}
+	command.GocuiRun(hosts, cfg)
 }
 
 func file2hostnames(fp *os.File) []string {
@@ -102,4 +120,30 @@ func file2hostnames(fp *os.File) []string {
 	}
 
 	return hosts
+}
+
+func parseCidr(_hosts []string) []string {
+	hosts := []string{}
+	for _, h := range _hosts {
+		ip, ipnet, err := net.ParseCIDR(h)
+		if err != nil {
+			hosts = append(hosts, h)
+			continue
+		}
+
+		for i := ip.Mask(ipnet.Mask); ipnet.Contains(i); ipInc(i) {
+			hosts = append(hosts, i.String())
+		}
+	}
+
+	return hosts
+}
+
+func ipInc(ip net.IP) {
+	for j := len(ip) - 1; j >= 0; j-- {
+		ip[j]++
+		if ip[j] > 0 {
+			break
+		}
+	}
 }
