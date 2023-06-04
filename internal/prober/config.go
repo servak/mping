@@ -19,6 +19,22 @@ type (
 	}
 )
 
+func (cfg ICMPConfig) GetInterval() (time.Duration, error) {
+	sinterval := "1s"
+	if cfg.Interval != "" {
+		sinterval = cfg.Interval
+	}
+	return convertToDuration(sinterval)
+}
+
+func (cfg ICMPConfig) GetTimeout() (time.Duration, error) {
+	stimeout := cfg.Timeout
+	if stimeout == "" {
+		return cfg.GetInterval()
+	}
+	return convertToDuration(stimeout)
+}
+
 func convertToDuration(s string) (time.Duration, error) {
 	if strings.HasSuffix(s, "ms") {
 		milliseconds, err := strconv.Atoi(strings.TrimSuffix(s, "ms"))

@@ -51,19 +51,11 @@ func NewICMPProber(targets []string, cfg *ICMPConfig) (*ICMPProber, error) {
 		}
 		addrs = append(addrs, ip)
 	}
-	sinterval := "1s"
-	if cfg.Interval != "" {
-		sinterval = cfg.Interval
-	}
-	stimeout := cfg.Timeout
-	if stimeout == "" {
-		stimeout = sinterval
-	}
-	interval, err := convertToDuration(sinterval)
+	interval, err := cfg.GetInterval()
 	if err != nil {
 		return nil, err
 	}
-	timeout, err := convertToDuration(stimeout)
+	timeout, err := cfg.GetTimeout()
 	if err != nil {
 		return nil, err
 	}

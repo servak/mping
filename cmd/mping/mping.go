@@ -87,7 +87,7 @@ func main() {
 	cfg := &config.Config{
 		Prober: &prober.ProberConfig{
 			ICMP: &prober.ICMPConfig{
-				Interval: "100ms",
+				Interval: fmt.Sprintf("%dms", interval),
 				Timeout:  "1s",
 			},
 		},

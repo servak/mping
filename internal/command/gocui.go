@@ -17,6 +17,7 @@ func GocuiRun(hostnames []string, cfg *config.Config) {
 		fmt.Println(err.Error())
 		os.Exit(1)
 	}
+	interval, _ := cfg.Prober.ICMP.GetInterval() // already error checked in NewICMPProber
 	manager := stats.NewMetricsManager()
 
 	res := make(chan *prober.Event)
@@ -31,7 +32,7 @@ func GocuiRun(hostnames []string, cfg *config.Config) {
 
 	go func() {
 		for {
-			time.Sleep(time.Millisecond * 100)
+			time.Sleep(interval / 2)
 			r.Update()
 		}
 	}()
