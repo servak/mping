@@ -74,7 +74,7 @@ func main() {
 		cfg.Prober.ICMP.Interval = fmt.Sprintf("%dms", interval)
 	}
 	cfg.UI.CUI.Title = title
-	command.GocuiRun(hosts, cfg)
+	command.Run(hosts, cfg)
 }
 
 func file2hostnames(fp *os.File) []string {

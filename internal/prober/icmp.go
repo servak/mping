@@ -39,10 +39,7 @@ type (
 )
 
 func NewICMPProber(addrs []*net.IPAddr, cfg *ICMPConfig) (*ICMPProber, error) {
-	// icmp
 	c, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
-	// udp
-	// c, err := icmp.ListenPacket("udp6", "fe80::1%en0")
 	interval, err := cfg.GetInterval()
 	if err != nil {
 		return nil, err

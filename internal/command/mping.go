@@ -12,7 +12,7 @@ import (
 	"github.com/servak/mping/internal/ui"
 )
 
-func GocuiRun(hostnames []string, cfg *config.Config) {
+func Run(hostnames []string, cfg *config.Config) {
 	addrs := make(map[string]*net.IPAddr)
 	for _, h := range hostnames {
 		ip, err := net.ResolveIPAddr("ip4", h)
