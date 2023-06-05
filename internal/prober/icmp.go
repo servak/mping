@@ -38,19 +38,11 @@ type (
 	}
 )
 
-func NewICMPProber(targets []string, cfg *ICMPConfig) (*ICMPProber, error) {
+func NewICMPProber(addrs []*net.IPAddr, cfg *ICMPConfig) (*ICMPProber, error) {
 	// icmp
 	c, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
 	// udp
 	// c, err := icmp.ListenPacket("udp6", "fe80::1%en0")
-	var addrs []*net.IPAddr
-	for _, v := range targets {
-		ip, err := net.ResolveIPAddr("ip4", v)
-		if err != nil {
-			return nil, err
-		}
-		addrs = append(addrs, ip)
-	}
 	interval, err := cfg.GetInterval()
 	if err != nil {
 		return nil, err

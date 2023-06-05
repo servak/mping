@@ -1,6 +1,8 @@
 package stats
 
 import (
+	"fmt"
+	"net"
 	"sort"
 	"sync"
 	"time"
@@ -15,9 +17,23 @@ type MetricsManager struct {
 }
 
 // 新しいMetricsManagerを生成
-func NewMetricsManager() *MetricsManager {
+func NewMetricsManager(targets map[string]string) *MetricsManager {
+	metrics := make(map[string]*Metrics)
+	count := 1
+	for k, v := range targets {
+		name := v
+		if net.ParseIP(v) == nil {
+			name = fmt.Sprintf("%s(%s)", v, k)
+		}
+		metrics[k] = &Metrics{
+			ID:   count,
+			Name: name,
+		}
+		count++
+	}
 	return &MetricsManager{
-		metrics: make(map[string]*Metrics),
+		metrics: metrics,
+		counter: count,
 	}
 }
 
@@ -29,23 +45,13 @@ func (mm *MetricsManager) GetMetrics(host string) *Metrics {
 	m, ok := mm.metrics[host]
 	if !ok {
 		mm.counter++
-		m = &Metrics{ID: mm.counter}
+		m = &Metrics{
+			ID:   mm.counter,
+			Name: host,
+		}
 		mm.metrics[host] = m
 	}
 	return m
-}
-
-// 全てのMetricsを取得
-func (mm *MetricsManager) GetAllMetrics() map[string]*Metrics {
-	mm.mu.Lock()
-	defer mm.mu.Unlock()
-
-	// 新しいマップを生成して、その中に全てのMetricsをコピー
-	copiedMetrics := make(map[string]*Metrics)
-	for host, metrics := range mm.metrics {
-		copiedMetrics[host] = metrics
-	}
-	return copiedMetrics
 }
 
 // 全てのMetricsをリセット
@@ -53,8 +59,8 @@ func (mm *MetricsManager) ResetAllMetrics() {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 
-	for host := range mm.metrics {
-		mm.metrics[host] = &Metrics{}
+	for _, m := range mm.metrics {
+		m.Reset()
 	}
 }
 
@@ -101,32 +107,22 @@ func (mm *MetricsManager) Subscribe(res chan *prober.Event) {
 	}()
 }
 
-type HostMetrics struct {
-	Hostname string
-	Metrics  *Metrics
-}
-
-func (mm *MetricsManager) GetSortedMetricsByKey(k Key) []HostMetrics {
+func (mm *MetricsManager) GetSortedMetricsByKey(k Key) []Metrics {
 	mm.mu.Lock()
-	defer mm.mu.Unlock()
-
-	// HostMetricsのスライスを作成
-	hostMetrics := make([]HostMetrics, 0, len(mm.metrics))
-	for host, metrics := range mm.metrics {
-		hostMetrics = append(hostMetrics, HostMetrics{
-			Hostname: host,
-			Metrics:  metrics,
-		})
+	var res []Metrics
+	for _, m := range mm.metrics {
+		res = append(res, *m)
 	}
-	sort.SliceStable(hostMetrics, func(i, j int) bool {
-		return hostMetrics[i].Metrics.ID < hostMetrics[j].Metrics.ID
+	mm.mu.Unlock()
+	sort.SliceStable(res, func(i, j int) bool {
+		return res[i].ID < res[j].ID
 	})
-	sort.SliceStable(hostMetrics, func(i, j int) bool {
-		mi := hostMetrics[i].Metrics
-		mj := hostMetrics[j].Metrics
+	sort.SliceStable(res, func(i, j int) bool {
+		mi := res[i]
+		mj := res[j]
 		switch k {
 		case Host:
-			return len(hostMetrics[i].Hostname) > len(hostMetrics[j].Hostname)
+			return len(res[i].Name) > len(res[j].Name)
 		case Sent:
 			return mi.Total > mj.Total
 		case Success:
@@ -150,8 +146,7 @@ func (mm *MetricsManager) GetSortedMetricsByKey(k Key) []HostMetrics {
 		}
 		return false
 	})
-
-	return hostMetrics
+	return res
 }
 
 func rejectLess(i, j time.Duration) bool {

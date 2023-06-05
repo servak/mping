@@ -1,7 +1,6 @@
 package stats
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -50,7 +49,16 @@ func (m *Metrics) Sent() {
 	m.Total++
 }
 
-// for debug
-func (m *Metrics) Values() string {
-	return fmt.Sprintf("%d %d %v", m.Total, m.Successful, m.Failed)
+func (m *Metrics) Reset() {
+	m.Total = 0
+	m.Successful = 0
+	m.Failed = 0
+	m.Loss = 0.0
+	m.TotalRTT = time.Duration(0)
+	m.AverageRTT = time.Duration(0)
+	m.MinimumRTT = time.Duration(0)
+	m.MaximumRTT = time.Duration(0)
+	m.LastRTT = time.Duration(0)
+	m.LastFailTime = time.Time{}
+	m.LastSuccTime = time.Time{}
 }

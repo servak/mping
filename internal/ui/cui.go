@@ -63,17 +63,17 @@ func (c *CUI) genTable() table.Writer {
 	tf := timeFormater
 	for _, m := range c.mm.GetSortedMetricsByKey(c.key) {
 		t.AppendRow(table.Row{
-			m.Hostname,
-			m.Metrics.Total,
-			m.Metrics.Successful,
-			m.Metrics.Failed,
-			fmt.Sprintf("%5.1f%%", m.Metrics.Loss),
-			df(m.Metrics.LastRTT),
-			df(m.Metrics.AverageRTT),
-			df(m.Metrics.MinimumRTT),
-			df(m.Metrics.MaximumRTT),
-			tf(m.Metrics.LastSuccTime),
-			tf(m.Metrics.LastFailTime),
+			m.Name,
+			m.Total,
+			m.Successful,
+			m.Failed,
+			fmt.Sprintf("%5.1f%%", m.Loss),
+			df(m.LastRTT),
+			df(m.AverageRTT),
+			df(m.MinimumRTT),
+			df(m.MaximumRTT),
+			tf(m.LastSuccTime),
+			tf(m.LastFailTime),
 		})
 	}
 	return t
@@ -132,6 +132,21 @@ func (c *CUI) Close() {
 	c.g.Close()
 }
 
+func (c *CUI) keybindings() error {
+	keymaps := map[string]func(*gocui.Gui, *gocui.View) error{
+		"q": c.quit,
+		"s": c.changeSort,
+		"R": c.reset,
+	}
+	for k, v := range keymaps {
+		keyForced, modForced := gocui.MustParse(k)
+		if err := c.g.SetKeybinding("", keyForced, modForced, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c CUI) quit(g *gocui.Gui, v *gocui.View) error {
 	c.Close()
 	t := c.genTable()
@@ -158,16 +173,7 @@ func (c *CUI) changeSort(g *gocui.Gui, v *gocui.View) error {
 	return nil
 }
 
-func (c *CUI) keybindings() error {
-	keymaps := map[string]func(*gocui.Gui, *gocui.View) error{
-		"q": c.quit,
-		"s": c.changeSort,
-	}
-	for k, v := range keymaps {
-		keyForced, modForced := gocui.MustParse(k)
-		if err := c.g.SetKeybinding("", keyForced, modForced, v); err != nil {
-			return err
-		}
-	}
+func (c *CUI) reset(g *gocui.Gui, v *gocui.View) error {
+	c.mm.ResetAllMetrics()
 	return nil
 }

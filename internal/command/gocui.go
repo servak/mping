@@ -2,6 +2,7 @@ package command
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"time"
 
@@ -12,13 +13,22 @@ import (
 )
 
 func GocuiRun(hostnames []string, cfg *config.Config) {
-	probe, err := prober.NewICMPProber(hostnames, cfg.Prober.ICMP)
+	addrs := make(map[string]*net.IPAddr)
+	for _, h := range hostnames {
+		ip, err := net.ResolveIPAddr("ip4", h)
+		if err != nil {
+			continue
+		}
+		addrs[h] = ip
+	}
+
+	probe, err := prober.NewICMPProber(mapValues(addrs), cfg.Prober.ICMP)
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(1)
 	}
 	interval, _ := cfg.Prober.ICMP.GetInterval() // already error checked in NewICMPProber
-	manager := stats.NewMetricsManager()
+	manager := stats.NewMetricsManager(convertString(addrs))
 
 	res := make(chan *prober.Event)
 	manager.Subscribe(res)
@@ -42,4 +52,20 @@ func GocuiRun(hostnames []string, cfg *config.Config) {
 		}
 	}()
 	r.Run()
+}
+
+func mapValues[T any](ms map[string]T) []T {
+	var res []T
+	for _, v := range ms {
+		res = append(res, v)
+	}
+	return res
+}
+
+func convertString[T fmt.Stringer](ms map[string]T) map[string]string {
+	res := make(map[string]string)
+	for k, v := range ms {
+		res[v.String()] = k
+	}
+	return res
 }
