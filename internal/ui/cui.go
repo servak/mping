@@ -82,8 +82,10 @@ func (c *CUI) Run() error {
 			if !errors.Is(err, gocui.ErrUnknownView) {
 				return err
 			}
+			v.Highlight = true
 			v.Frame = false
 			v.Clear()
+			v.SelFgColor = gocui.ColorMagenta
 			fmt.Fprintln(v, fmt.Sprintf("Sort: %s, Interval: %dms", c.key, c.interval.Milliseconds()))
 		}
 		if v, err := g.SetView(MAIN_VIEW, 0, 0, maxX, maxY-1, 0); err != nil {
