@@ -101,6 +101,14 @@ func (c *CUI) Run() error {
 			v.Clear()
 			fmt.Fprintln(v, c.render())
 		}
+		if v, err := g.SetView("footer", 0, maxY-2, maxX, maxY, 0); err != nil {
+			if !errors.Is(err, gocui.ErrUnknownView) {
+				return err
+			}
+			v.Frame = false
+			v.Clear()
+			fmt.Fprintln(v, "q: quit program, n: next page, p: previous page, s: sort, r: reverse mode, R: count reset")
+		}
 		return nil
 	}
 
