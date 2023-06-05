@@ -28,7 +28,6 @@ func main() {
 		title    string
 		interval int
 		count    int
-		size     int
 		quiet    bool
 		ver      bool
 		ipv6     bool
@@ -36,7 +35,6 @@ func main() {
 	flag.StringVar(&filename, "f", "", "use contents of file")
 	flag.StringVar(&title, "t", "", "print title")
 	flag.IntVar(&interval, "i", 0, "interval(ms) if 0 use config-setting")
-	flag.IntVar(&size, "s", 56, "Specifies the number of data bytes to be sent.  The default is 56, which translates into 64 ICMP data bytes when combined with the 8 bytes of ICMP header data.")
 	flag.IntVar(&count, "c", 0, "stop after receiving <count> response packets")
 	flag.BoolVar(&quiet, "q", false, "quiet mode")
 	flag.BoolVar(&ver, "v", false, "print version of mping")
@@ -81,6 +79,7 @@ func main() {
 	if interval != 0 {
 		cfg.Prober.ICMP.Interval = fmt.Sprintf("%dms", interval)
 	}
+	cfg.UI.CUI.Title = title
 	command.GocuiRun(hosts, cfg)
 }
 

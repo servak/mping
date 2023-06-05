@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -23,21 +24,22 @@ type (
 	}
 
 	CUIConfig struct {
-		Border bool `yaml:"border"`
+		Title    string        `yaml:"-"`
+		Interval time.Duration `yaml:"-"`
+		Border   bool          `yaml:"border"`
 	}
 )
 
-func NewCUI(mm *stats.MetricsManager, interval time.Duration, cfg *CUIConfig) (*CUI, error) {
+func NewCUI(mm *stats.MetricsManager, cfg *CUIConfig) (*CUI, error) {
 	g, err := gocui.NewGui(gocui.OutputNormal, true)
 	if err != nil {
 		return nil, err
 	}
 	return &CUI{
-		g:        g,
-		mm:       mm,
-		config:   cfg,
-		key:      stats.Success,
-		interval: interval,
+		g:      g,
+		mm:     mm,
+		config: cfg,
+		key:    stats.Success,
 	}, nil
 }
 
@@ -86,7 +88,13 @@ func (c *CUI) Run() error {
 			v.Frame = false
 			v.Clear()
 			v.SelFgColor = gocui.ColorMagenta
-			fmt.Fprintln(v, fmt.Sprintf("Sort: %s, Interval: %dms", c.key, c.interval.Milliseconds()))
+			msg := fmt.Sprintf("Sort: %s, Interval: %dms", c.key, c.config.Interval.Milliseconds())
+			marginN := (maxX/2 - len(c.config.Title)/2) - len(msg)
+			if marginN < 0 {
+				marginN = 1
+			}
+			margin := strings.Repeat(" ", marginN)
+			fmt.Fprintln(v, msg+margin+c.config.Title)
 		}
 		if v, err := g.SetView(MAIN_VIEW, 0, 0, maxX, maxY-1, 0); err != nil {
 			if !errors.Is(err, gocui.ErrUnknownView) {
@@ -173,8 +181,15 @@ func (c *CUI) changeSort(g *gocui.Gui, v *gocui.View) error {
 		if err != nil {
 			return err
 		}
+		maxX, _ := g.Size()
 		v.Clear()
-		fmt.Fprintln(v, fmt.Sprintf("Sort: %s, Interval: %dms", c.key, c.interval.Milliseconds()))
+		msg := fmt.Sprintf("Sort: %s, Interval: %dms", c.key, c.config.Interval.Milliseconds())
+		marginN := (maxX/2 - len(c.config.Title)/2) - len(msg)
+		if marginN < 0 {
+			marginN = 1
+		}
+		margin := strings.Repeat(" ", marginN)
+		fmt.Fprintln(v, msg+margin+c.config.Title)
 		return nil
 	})
 	return nil

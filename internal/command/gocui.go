@@ -29,12 +29,12 @@ func GocuiRun(hostnames []string, cfg *config.Config) {
 	}
 	interval, _ := cfg.Prober.ICMP.GetInterval() // already error checked in NewICMPProber
 	manager := stats.NewMetricsManager(convertString(addrs))
-
 	res := make(chan *prober.Event)
 	manager.Subscribe(res)
 	go probe.Start(res)
 
-	r, err := ui.NewCUI(manager, interval, cfg.UI.CUI)
+	cfg.UI.CUI.Interval = interval
+	r, err := ui.NewCUI(manager, cfg.UI.CUI)
 	if err != nil {
 		fmt.Println(err)
 		return
