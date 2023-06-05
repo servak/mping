@@ -42,21 +42,6 @@ func NewCUI(mm *stats.MetricsManager, interval time.Duration, cfg *CUIConfig) (*
 }
 
 func (c *CUI) render() string {
-	t := c.genTable()
-	_, y := c.g.Size()
-	if c.config.Border {
-		t.SetStyle(table.StyleLight)
-		t.SetPageSize(y - 6)
-	} else {
-		t.SetStyle(table.Style{
-			Options: table.OptionsNoBordersAndSeparators,
-		})
-		t.SetPageSize(y - 3)
-	}
-	return t.Render()
-}
-
-func (c *CUI) genTable() table.Writer {
 	t := table.NewWriter()
 	t.AppendHeader(table.Row{stats.Host, stats.Sent, stats.Success, stats.Fail, stats.Loss, stats.Last, stats.Avg, stats.Best, stats.Worst, stats.LastSuccTime, stats.LastFailTime})
 	df := durationFormater
@@ -76,7 +61,18 @@ func (c *CUI) genTable() table.Writer {
 			tf(m.LastFailTime),
 		})
 	}
-	return t
+	if c.config.Border {
+		t.SetStyle(table.StyleLight)
+	} else {
+		t.SetStyle(table.Style{
+			Box: table.StyleBoxLight,
+			Options: table.Options{
+				DrawBorder:      false,
+				SeparateColumns: false,
+			},
+		})
+	}
+	return t.Render()
 }
 
 func (c *CUI) Run() error {
@@ -88,7 +84,7 @@ func (c *CUI) Run() error {
 			}
 			v.Frame = false
 			v.Clear()
-			fmt.Fprintln(v, fmt.Sprintf("Sort: %s, Interval: %s", c.key, durationFormater(c.interval)))
+			fmt.Fprintln(v, fmt.Sprintf("Sort: %s, Interval: %dms", c.key, c.interval.Milliseconds()))
 		}
 		if v, err := g.SetView(MAIN_VIEW, 0, 0, maxX, maxY-1, 0); err != nil {
 			if !errors.Is(err, gocui.ErrUnknownView) {
@@ -107,7 +103,7 @@ func (c *CUI) Run() error {
 			}
 			v.Frame = false
 			v.Clear()
-			fmt.Fprintln(v, "q: quit program, n: next page, p: previous page, s: sort, r: reverse mode, R: count reset")
+			fmt.Fprintln(v, "q: quit, j: down, k: up, s: sort, R: reset")
 		}
 		return nil
 	}
@@ -117,7 +113,6 @@ func (c *CUI) Run() error {
 	if err != nil {
 		return err
 	}
-
 	if err = c.g.MainLoop(); err != nil && err != gocui.ErrQuit {
 		return err
 	}
@@ -130,7 +125,9 @@ func (c *CUI) Update() {
 		if err != nil {
 			return err
 		}
+		ox, oy := v.Origin()
 		v.Clear()
+		v.SetOrigin(ox, oy)
 		fmt.Fprint(v, c.render())
 		return nil
 	})
@@ -144,6 +141,8 @@ func (c *CUI) keybindings() error {
 	keymaps := map[string]func(*gocui.Gui, *gocui.View) error{
 		"q": c.quit,
 		"s": c.changeSort,
+		"j": originDown,
+		"k": originUp,
 		"R": c.reset,
 	}
 	for k, v := range keymaps {
@@ -157,9 +156,7 @@ func (c *CUI) keybindings() error {
 
 func (c CUI) quit(g *gocui.Gui, v *gocui.View) error {
 	c.Close()
-	t := c.genTable()
-	t.SetStyle(table.StyleLight)
-	fmt.Println(t.Render())
+	fmt.Println(c.render())
 	return gocui.ErrQuit
 }
 
@@ -175,7 +172,7 @@ func (c *CUI) changeSort(g *gocui.Gui, v *gocui.View) error {
 			return err
 		}
 		v.Clear()
-		fmt.Fprintln(v, fmt.Sprintf("Sort: %s, Interval: %s", c.key, durationFormater(c.interval)))
+		fmt.Fprintln(v, fmt.Sprintf("Sort: %s, Interval: %dms", c.key, c.interval.Milliseconds()))
 		return nil
 	})
 	return nil
@@ -184,4 +181,28 @@ func (c *CUI) changeSort(g *gocui.Gui, v *gocui.View) error {
 func (c *CUI) reset(g *gocui.Gui, v *gocui.View) error {
 	c.mm.ResetAllMetrics()
 	return nil
+}
+
+func originDown(g *gocui.Gui, v *gocui.View) error {
+	if v == nil {
+		return nil
+	}
+	_, wy := v.Size()
+	ox, oy := v.Origin()
+	bottom := len(v.ViewBufferLines())
+	if (bottom - oy) <= wy {
+		return nil
+	}
+	return v.SetOrigin(ox, oy+1)
+}
+
+func originUp(g *gocui.Gui, v *gocui.View) error {
+	if v == nil {
+		return nil
+	}
+	ox, oy := v.Origin()
+	if oy == 0 {
+		return nil
+	}
+	return v.SetOrigin(ox, oy-1)
 }
