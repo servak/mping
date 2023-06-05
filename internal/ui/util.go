@@ -6,7 +6,9 @@ import (
 )
 
 func durationFormater(duration time.Duration) string {
-	if duration.Microseconds() < 1000 {
+	if duration == 0 {
+		return "-"
+	} else if duration.Microseconds() < 1000 {
 		return fmt.Sprintf("%3dµs", duration.Microseconds())
 	} else if duration.Milliseconds() < 1000 {
 		return fmt.Sprintf("%3dms", duration.Milliseconds())

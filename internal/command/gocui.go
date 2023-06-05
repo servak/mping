@@ -24,15 +24,20 @@ func GocuiRun(hostnames []string, cfg *config.Config) {
 	manager.Subscribe(res)
 	go probe.Start(res)
 
-	r, err := ui.NewCUI(manager, cfg.UI.CUI)
+	r, err := ui.NewCUI(manager, interval, cfg.UI.CUI)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
+	refreshTime := time.Millisecond * 250 // Minimum refresh time that can be set
+	if refreshTime < (interval / 2) {
+		refreshTime = interval / 2
+	}
+
 	go func() {
 		for {
-			time.Sleep(interval / 2)
+			time.Sleep(refreshTime)
 			r.Update()
 		}
 	}()

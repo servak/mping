@@ -11,6 +11,7 @@ import (
 type MetricsManager struct {
 	metrics map[string]*Metrics
 	mu      sync.Mutex
+	counter int
 }
 
 // 新しいMetricsManagerを生成
@@ -27,7 +28,8 @@ func (mm *MetricsManager) GetMetrics(host string) *Metrics {
 
 	m, ok := mm.metrics[host]
 	if !ok {
-		m = &Metrics{}
+		mm.counter++
+		m = &Metrics{ID: mm.counter}
 		mm.metrics[host] = m
 	}
 	return m
@@ -117,32 +119,47 @@ func (mm *MetricsManager) GetSortedMetricsByKey(k Key) []HostMetrics {
 		})
 	}
 	sort.SliceStable(hostMetrics, func(i, j int) bool {
+		return hostMetrics[i].Metrics.ID < hostMetrics[j].Metrics.ID
+	})
+	sort.SliceStable(hostMetrics, func(i, j int) bool {
+		mi := hostMetrics[i].Metrics
+		mj := hostMetrics[j].Metrics
 		switch k {
 		case Host:
 			return len(hostMetrics[i].Hostname) > len(hostMetrics[j].Hostname)
 		case Sent:
-			return hostMetrics[i].Metrics.Total > hostMetrics[j].Metrics.Total
+			return mi.Total > mj.Total
 		case Success:
-			return hostMetrics[i].Metrics.Successful > hostMetrics[j].Metrics.Successful
+			return mi.Successful > mj.Successful
 		case Loss:
-			return hostMetrics[i].Metrics.Loss > hostMetrics[j].Metrics.Loss
-		case Last:
-			return hostMetrics[i].Metrics.LastRTT > hostMetrics[j].Metrics.LastRTT
+			return mi.Loss > mj.Loss
 		case Fail:
-			return hostMetrics[i].Metrics.Failed > hostMetrics[j].Metrics.Failed
+			return mi.Failed > mj.Failed
+		case Last:
+			return rejectLess(mi.LastRTT, mj.LastRTT)
 		case Avg:
-			return hostMetrics[i].Metrics.AverageRTT > hostMetrics[j].Metrics.AverageRTT
+			return rejectLess(mi.AverageRTT, mj.AverageRTT)
 		case Best:
-			return hostMetrics[i].Metrics.MinimumRTT > hostMetrics[j].Metrics.MinimumRTT
+			return rejectLess(mi.MinimumRTT, mj.MinimumRTT)
 		case Worst:
-			return hostMetrics[i].Metrics.MaximumRTT > hostMetrics[j].Metrics.MaximumRTT
+			return rejectLess(mi.MaximumRTT, mj.MaximumRTT)
 		case LastSuccTime:
-			return !hostMetrics[i].Metrics.LastSuccTime.After(hostMetrics[j].Metrics.LastSuccTime)
+			return mi.LastSuccTime.After(mj.LastSuccTime)
 		case LastFailTime:
-			return !hostMetrics[i].Metrics.LastFailTime.After(hostMetrics[j].Metrics.LastFailTime)
+			return mi.LastFailTime.After(mj.LastFailTime)
 		}
 		return false
 	})
 
 	return hostMetrics
+}
+
+func rejectLess(i, j time.Duration) bool {
+	if i == 0 {
+		return false
+	}
+	if j == 0 {
+		return true
+	}
+	return i < j
 }

@@ -14,8 +14,6 @@ import (
 
 	"github.com/servak/mping/internal/command"
 	"github.com/servak/mping/internal/config"
-	"github.com/servak/mping/internal/prober"
-	"github.com/servak/mping/internal/ui"
 )
 
 var (
@@ -37,7 +35,7 @@ func main() {
 	)
 	flag.StringVar(&filename, "f", "", "use contents of file")
 	flag.StringVar(&title, "t", "", "print title")
-	flag.IntVar(&interval, "i", 1000, "interval(ms)")
+	flag.IntVar(&interval, "i", 0, "interval(ms) if 0 use config-setting")
 	flag.IntVar(&size, "s", 56, "Specifies the number of data bytes to be sent.  The default is 56, which translates into 64 ICMP data bytes when combined with the 8 bytes of ICMP header data.")
 	flag.IntVar(&count, "c", 0, "stop after receiving <count> response packets")
 	flag.BoolVar(&quiet, "q", false, "quiet mode")
@@ -78,24 +76,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	if interval == 0 {
-		flag.Usage()
-		os.Exit(1)
-	}
-
 	hosts = parseCidr(hosts)
-	cfg := &config.Config{
-		Prober: &prober.ProberConfig{
-			ICMP: &prober.ICMPConfig{
-				Interval: fmt.Sprintf("%dms", interval),
-				Timeout:  "1s",
-			},
-		},
-		UI: &ui.UIConfig{
-			CUI: &ui.CUIConfig{
-				Border: true,
-			},
-		},
+	cfg, _ := config.LoadFile(".mping.yml")
+	if interval != 0 {
+		cfg.Prober.ICMP.Interval = fmt.Sprintf("%dms", interval)
 	}
 	command.GocuiRun(hosts, cfg)
 }

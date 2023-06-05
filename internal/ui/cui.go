@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
 
@@ -14,9 +15,11 @@ const MAIN_VIEW = "main"
 
 type (
 	CUI struct {
-		g      *gocui.Gui
-		mm     *stats.MetricsManager
-		config *CUIConfig
+		g        *gocui.Gui
+		mm       *stats.MetricsManager
+		config   *CUIConfig
+		interval time.Duration
+		key      stats.Key
 	}
 
 	CUIConfig struct {
@@ -24,19 +27,21 @@ type (
 	}
 )
 
-func NewCUI(mm *stats.MetricsManager, cfg *CUIConfig) (*CUI, error) {
+func NewCUI(mm *stats.MetricsManager, interval time.Duration, cfg *CUIConfig) (*CUI, error) {
 	g, err := gocui.NewGui(gocui.OutputNormal, true)
 	if err != nil {
 		return nil, err
 	}
 	return &CUI{
-		g:      g,
-		mm:     mm,
-		config: cfg,
+		g:        g,
+		mm:       mm,
+		config:   cfg,
+		key:      stats.Success,
+		interval: interval,
 	}, nil
 }
 
-func (c CUI) render() string {
+func (c *CUI) render() string {
 	t := c.genTable()
 	_, y := c.g.Size()
 	if c.config.Border {
@@ -51,18 +56,18 @@ func (c CUI) render() string {
 	return t.Render()
 }
 
-func (c CUI) genTable() table.Writer {
+func (c *CUI) genTable() table.Writer {
 	t := table.NewWriter()
 	t.AppendHeader(table.Row{stats.Host, stats.Sent, stats.Success, stats.Fail, stats.Loss, stats.Last, stats.Avg, stats.Best, stats.Worst, stats.LastSuccTime, stats.LastFailTime})
 	df := durationFormater
 	tf := timeFormater
-	for _, m := range c.mm.GetSortedMetricsByKey(stats.Success) {
+	for _, m := range c.mm.GetSortedMetricsByKey(c.key) {
 		t.AppendRow(table.Row{
 			m.Hostname,
 			m.Metrics.Total,
 			m.Metrics.Successful,
 			m.Metrics.Failed,
-			m.Metrics.Loss,
+			fmt.Sprintf("%5.1f%%", m.Metrics.Loss),
 			df(m.Metrics.LastRTT),
 			df(m.Metrics.AverageRTT),
 			df(m.Metrics.MinimumRTT),
@@ -74,7 +79,7 @@ func (c CUI) genTable() table.Writer {
 	return t
 }
 
-func (c CUI) Run() error {
+func (c *CUI) Run() error {
 	layout := func(g *gocui.Gui) error {
 		maxX, maxY := g.Size()
 		if v, err := g.SetView("header", 0, -1, maxX, 1, 0); err != nil {
@@ -83,7 +88,7 @@ func (c CUI) Run() error {
 			}
 			v.Frame = false
 			v.Clear()
-			fmt.Fprintln(v, "Sort: Succ, Interval: 1000ms")
+			fmt.Fprintln(v, fmt.Sprintf("Sort: %s, Interval: %s", c.key, durationFormater(c.interval)))
 		}
 		if v, err := g.SetView(MAIN_VIEW, 0, 0, maxX, maxY-1, 0); err != nil {
 			if !errors.Is(err, gocui.ErrUnknownView) {
@@ -111,7 +116,7 @@ func (c CUI) Run() error {
 	return nil
 }
 
-func (c CUI) Update() {
+func (c *CUI) Update() {
 	c.g.Update(func(g *gocui.Gui) error {
 		v, err := g.View(MAIN_VIEW)
 		if err != nil {
@@ -123,7 +128,7 @@ func (c CUI) Update() {
 	})
 }
 
-func (c CUI) Close() {
+func (c *CUI) Close() {
 	c.g.Close()
 }
 
@@ -135,9 +140,28 @@ func (c CUI) quit(g *gocui.Gui, v *gocui.View) error {
 	return gocui.ErrQuit
 }
 
+func (c *CUI) changeSort(g *gocui.Gui, v *gocui.View) error {
+	if int(c.key+1) < len(stats.Keys()) {
+		c.key++
+	} else {
+		c.key = 0
+	}
+	c.g.Update(func(g *gocui.Gui) error {
+		v, err := g.View("header")
+		if err != nil {
+			return err
+		}
+		v.Clear()
+		fmt.Fprintln(v, fmt.Sprintf("Sort: %s, Interval: %s", c.key, durationFormater(c.interval)))
+		return nil
+	})
+	return nil
+}
+
 func (c *CUI) keybindings() error {
 	keymaps := map[string]func(*gocui.Gui, *gocui.View) error{
 		"q": c.quit,
+		"s": c.changeSort,
 	}
 	for k, v := range keymaps {
 		keyForced, modForced := gocui.MustParse(k)

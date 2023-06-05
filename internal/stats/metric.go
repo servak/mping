@@ -6,6 +6,7 @@ import (
 )
 
 type Metrics struct {
+	ID           int
 	Total        int
 	Successful   int
 	Failed       int

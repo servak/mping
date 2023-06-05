@@ -25,7 +25,7 @@ func (s Key) String() string {
 	case Success:
 		return "Succ"
 	case Loss:
-		return "Loss(%)"
+		return "Loss"
 	case Last:
 		return "Last"
 	case Fail:
