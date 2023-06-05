@@ -27,18 +27,12 @@ func main() {
 		filename string
 		title    string
 		interval int
-		count    int
-		quiet    bool
 		ver      bool
-		ipv6     bool
 	)
 	flag.StringVar(&filename, "f", "", "use contents of file")
 	flag.StringVar(&title, "t", "", "print title")
 	flag.IntVar(&interval, "i", 0, "interval(ms) if 0 use config-setting")
-	flag.IntVar(&count, "c", 0, "stop after receiving <count> response packets")
-	flag.BoolVar(&quiet, "q", false, "quiet mode")
 	flag.BoolVar(&ver, "v", false, "print version of mping")
-	flag.BoolVar(&ipv6, "6", false, "use ip v6")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage:\n  %s [options] [host ...]\n\nOptions:\n", os.Args[0])
