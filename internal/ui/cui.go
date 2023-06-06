@@ -24,22 +24,22 @@ type (
 	}
 
 	CUIConfig struct {
-		Title    string        `yaml:"-"`
-		Interval time.Duration `yaml:"-"`
-		Border   bool          `yaml:"border"`
+		Title  string `yaml:"-"`
+		Border bool   `yaml:"border"`
 	}
 )
 
-func NewCUI(mm *stats.MetricsManager, cfg *CUIConfig) (*CUI, error) {
+func NewCUI(mm *stats.MetricsManager, cfg *CUIConfig, interval time.Duration) (*CUI, error) {
 	g, err := gocui.NewGui(gocui.OutputNormal, true)
 	if err != nil {
 		return nil, err
 	}
 	return &CUI{
-		g:      g,
-		mm:     mm,
-		config: cfg,
-		key:    stats.Success,
+		g:        g,
+		mm:       mm,
+		config:   cfg,
+		interval: interval,
+		key:      stats.Success,
 	}, nil
 }
 
@@ -88,7 +88,7 @@ func (c *CUI) Run() error {
 			v.Frame = false
 			v.Clear()
 			v.SelFgColor = gocui.ColorMagenta
-			msg := fmt.Sprintf("Sort: %s, Interval: %dms", c.key, c.config.Interval.Milliseconds())
+			msg := fmt.Sprintf("Sort: %s, Interval: %dms", c.key, c.interval.Milliseconds())
 			marginN := (maxX/2 - len(c.config.Title)/2) - len(msg)
 			if marginN < 0 {
 				marginN = 1
@@ -183,7 +183,7 @@ func (c *CUI) changeSort(g *gocui.Gui, v *gocui.View) error {
 		}
 		maxX, _ := g.Size()
 		v.Clear()
-		msg := fmt.Sprintf("Sort: %s, Interval: %dms", c.key, c.config.Interval.Milliseconds())
+		msg := fmt.Sprintf("Sort: %s, Interval: %dms", c.key, c.interval.Milliseconds())
 		marginN := (maxX/2 - len(c.config.Title)/2) - len(msg)
 		if marginN < 0 {
 			marginN = 1

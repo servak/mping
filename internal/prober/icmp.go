@@ -10,19 +10,25 @@ import (
 
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
+)
+
+const (
+	ICMPV4 ProbeType = "icmpv4"
+	ICMPV6 ProbeType = "icmpv6"
 )
 
 type (
 	ICMPProber struct {
-		c        *icmp.PacketConn
-		body     []byte
-		targets  []*net.IPAddr
-		interval time.Duration
-		timeout  time.Duration
-		runCnt   int
-		runID    int
-		tables   map[runTime]map[string]bool
-		mu       sync.Mutex
+		version ProbeType
+		c       *icmp.PacketConn
+		body    []byte
+		targets []*net.IPAddr
+		timeout time.Duration
+		runCnt  int
+		runID   int
+		tables  map[runTime]map[string]bool
+		mu      sync.Mutex
 	}
 
 	runTime struct {
@@ -38,25 +44,24 @@ type (
 	}
 )
 
-func NewICMPProber(addrs []*net.IPAddr, cfg *ICMPConfig) (*ICMPProber, error) {
-	c, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
-	interval, err := cfg.GetInterval()
-	if err != nil {
-		return nil, err
-	}
-	timeout, err := cfg.GetTimeout()
-	if err != nil {
-		return nil, err
+func NewICMPProber(t ProbeType, addrs []*net.IPAddr, cfg *ICMPConfig) (*ICMPProber, error) {
+	var (
+		c   *icmp.PacketConn
+		err error
+	)
+	if t == ICMPV4 {
+		c, err = icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+	} else {
+		c, err = icmp.ListenPacket("ip6:ipv6-icmp", "::")
 	}
 	return &ICMPProber{
-		c:        c,
-		timeout:  timeout,
-		tables:   make(map[runTime]map[string]bool),
-		targets:  addrs,
-		interval: interval,
-		runID:    os.Getpid() & 0xffff,
-		runCnt:   0,
-		body:     []byte(cfg.Body),
+		version: t,
+		c:       c,
+		tables:  make(map[runTime]map[string]bool),
+		targets: addrs,
+		runID:   os.Getpid() & 0xffff,
+		runCnt:  0,
+		body:    []byte(cfg.Body),
 	}, err
 }
 
@@ -151,8 +156,14 @@ func (p *ICMPProber) checkTimeout(r chan *Event) {
 }
 
 func (p *ICMPProber) makeEchoMsg() icmp.Message {
+	var t icmp.Type
+	if p.version == ICMPV4 {
+		t = ipv4.ICMPTypeEcho
+	} else {
+		t = ipv6.ICMPTypeEchoRequest
+	}
 	return icmp.Message{
-		Type: ipv4.ICMPTypeEcho,
+		Type: t,
 		Code: 0,
 		Body: &icmp.Echo{
 			ID:   p.runID,
@@ -191,7 +202,11 @@ func (p *ICMPProber) recvPkts(r chan *Event) {
 			fmt.Printf("Error reading ICMP packet: %s\n", err)
 			os.Exit(1)
 		}
-		rm, err := icmp.ParseMessage(ipv4.ICMPTypeEchoReply.Protocol(), pktbuf[:n])
+		proto := ipv4.ICMPTypeEchoReply.Protocol()
+		if p.version == ICMPV6 {
+			proto = ipv6.ICMPTypeEchoReply.Protocol()
+		}
+		rm, err := icmp.ParseMessage(proto, pktbuf[:n])
 		if err != nil {
 			fmt.Printf("Error parsing ICMP message: %s\n", err)
 			os.Exit(1)
@@ -199,25 +214,24 @@ func (p *ICMPProber) recvPkts(r chan *Event) {
 		offset := 0
 		var pkt = rcvdPkt{
 			target: ip.String(),
-			// ICMP packet body starts from the 5th byte
-			id:  binary.BigEndian.Uint16(pktbuf[offset+4 : offset+6]),
-			seq: binary.BigEndian.Uint16(pktbuf[offset+6 : offset+8]),
+			id:     binary.BigEndian.Uint16(pktbuf[offset+4 : offset+6]),
+			seq:    binary.BigEndian.Uint16(pktbuf[offset+6 : offset+8]),
 		}
 		if pkt.id != uint16(p.runID) {
 			continue
 		}
-
-		if rm.Type == ipv4.ICMPTypeEchoReply && rm.Code == 0 {
-			p.success(r, int(pkt.seq), pkt.target)
-		} else {
-			fmt.Printf("Received unexpected ICMP message from %s: %+v\n", ip.String(), rm)
-			os.Exit(1)
+		if rm.Code == 0 {
+			switch rm.Type {
+			case ipv4.ICMPTypeEchoReply, ipv6.ICMPTypeEchoReply:
+				p.success(r, int(pkt.seq), pkt.target)
+			}
 		}
 	}
 }
 
-func (p *ICMPProber) Start(r chan *Event) error {
-	ticker := time.NewTicker(p.interval)
+func (p *ICMPProber) Start(r chan *Event, interval, timeout time.Duration) error {
+	p.timeout = timeout
+	ticker := time.NewTicker(interval)
 	go p.recvPkts(r)
 	for {
 		select {

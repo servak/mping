@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/pflag"
 
@@ -38,8 +39,8 @@ func main() {
 	pflag.StringVarP(&filename, "fiilename", "f", "", "use contents of file")
 	pflag.StringVarP(&title, "title", "n", "", "print title")
 	pflag.StringVarP(&path, "config", "c", "~/.mping.yml", "config path")
-	pflag.IntVarP(&interval, "interval", "i", 0, "interval(ms)")
-	pflag.IntVarP(&timeout, "timeout", "t", 0, "timeout(ms)")
+	pflag.IntVarP(&interval, "interval", "i", 1000, "interval(ms)")
+	pflag.IntVarP(&timeout, "timeout", "t", 1000, "timeout(ms)")
 	pflag.BoolVarP(&version, "version", "v", false, "print version")
 	pflag.Parse()
 
@@ -51,6 +52,11 @@ func main() {
 	if version {
 		fmt.Printf("mping, version: %s (revision: %s, goversion: %s)\n", Version, Revision, GoVersion)
 		os.Exit(0)
+	}
+
+	if interval == 0 || timeout == 0 {
+		usage(os.Args[0])
+		return
 	}
 
 	_, err := os.Stat(filename)
@@ -78,14 +84,10 @@ func main() {
 	hosts = parseCidr(hosts)
 	cfgPath, _ := filepath.Abs(path)
 	cfg, _ := config.LoadFile(cfgPath)
-	if interval != 0 {
-		cfg.Prober.ICMP.Interval = fmt.Sprintf("%dms", interval)
-	}
-	if timeout != 0 {
-		cfg.Prober.ICMP.Timeout = fmt.Sprintf("%dms", timeout)
-	}
 	cfg.UI.CUI.Title = title
-	command.Run(hosts, cfg)
+	_interval := time.Duration(interval) * time.Millisecond
+	_timeout := time.Duration(timeout) * time.Millisecond
+	command.Run(hosts, cfg, _interval, _timeout)
 }
 
 func usage(progname string) {

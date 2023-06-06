@@ -9,16 +9,20 @@ import (
 )
 
 type Config struct {
-	Prober *prober.ProberConfig `yaml:"prober"`
-	UI     *ui.UIConfig         `yaml:"ui"`
+	Prober map[string]*prober.ProberConfig `yaml:"prober"`
+	UI     *ui.UIConfig                    `yaml:"ui"`
 }
 
 func DefaultConfig() *Config {
 	return &Config{
-		Prober: &prober.ProberConfig{
-			ICMP: &prober.ICMPConfig{
-				Interval: "1s",
-				Timeout:  "1s",
+		Prober: map[string]*prober.ProberConfig{
+			string(prober.ICMPV4): {
+				Probe: prober.ICMPV4,
+				ICMP:  &prober.ICMPConfig{},
+			},
+			string(prober.ICMPV6): {
+				Probe: prober.ICMPV6,
+				ICMP:  &prober.ICMPConfig{},
 			},
 		},
 		UI: &ui.UIConfig{

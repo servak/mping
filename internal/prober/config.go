@@ -9,31 +9,14 @@ import (
 
 type (
 	ProberConfig struct {
-		ICMP *ICMPConfig `yaml:"icmp"`
+		Probe ProbeType   `yaml:"probe"`
+		ICMP  *ICMPConfig `yaml:"icmp"`
 	}
 
 	ICMPConfig struct {
-		Body     string `yaml:"body"`
-		Timeout  string `yaml:"timeout"`
-		Interval string `yaml:"interval"`
+		Body string `yaml:"body"`
 	}
 )
-
-func (cfg ICMPConfig) GetInterval() (time.Duration, error) {
-	sinterval := "1s"
-	if cfg.Interval != "" {
-		sinterval = cfg.Interval
-	}
-	return convertToDuration(sinterval)
-}
-
-func (cfg ICMPConfig) GetTimeout() (time.Duration, error) {
-	stimeout := cfg.Timeout
-	if stimeout == "" {
-		return cfg.GetInterval()
-	}
-	return convertToDuration(stimeout)
-}
 
 func convertToDuration(s string) (time.Duration, error) {
 	if strings.HasSuffix(s, "ms") {
