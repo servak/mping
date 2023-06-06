@@ -42,7 +42,7 @@ func main() {
 	flag.Parse()
 
 	if ver {
-		fmt.Printf("mping, version: %s (revision: %s, goversion: %s)", Version, Revision, GoVersion)
+		fmt.Printf("mping, version: %s (revision: %s, goversion: %s)\n", Version, Revision, GoVersion)
 		os.Exit(0)
 	}
 
