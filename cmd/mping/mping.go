@@ -3,14 +3,16 @@ package main
 import (
 	"bufio"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
+
+	"github.com/spf13/pflag"
 
 	"github.com/servak/mping/internal/command"
 	"github.com/servak/mping/internal/config"
@@ -24,31 +26,36 @@ var (
 
 func main() {
 	var (
+		help     bool
 		filename string
 		title    string
+		path     string
 		interval int
-		ver      bool
+		timeout  int
+		version  bool
 	)
-	flag.StringVar(&filename, "f", "", "use contents of file")
-	flag.StringVar(&title, "t", "", "print title")
-	flag.IntVar(&interval, "i", 0, "interval(ms) if 0 use config-setting")
-	flag.BoolVar(&ver, "v", false, "print version of mping")
+	pflag.BoolVarP(&help, "help", "h", false, "Display help and exit")
+	pflag.StringVarP(&filename, "fiilename", "f", "", "use contents of file")
+	pflag.StringVarP(&title, "title", "n", "", "print title")
+	pflag.StringVarP(&path, "config", "c", "~/.mping.yml", "config path")
+	pflag.IntVarP(&interval, "interval", "i", 0, "interval(ms)")
+	pflag.IntVarP(&timeout, "timeout", "t", 0, "timeout(ms)")
+	pflag.BoolVarP(&version, "version", "v", false, "print version")
+	pflag.Parse()
 
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage:\n  %s [options] [host ...]\n\nOptions:\n", os.Args[0])
-		flag.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "Example:\n  %s localhost 8.8.8.8\n  %s -f hostslist\n", os.Args[0], os.Args[0])
+	if help {
+		usage(os.Args[0])
+		return
 	}
-	flag.Parse()
 
-	if ver {
+	if version {
 		fmt.Printf("mping, version: %s (revision: %s, goversion: %s)\n", Version, Revision, GoVersion)
 		os.Exit(0)
 	}
 
 	_, err := os.Stat(filename)
-	if err != nil && flag.NArg() == 0 {
-		flag.Usage()
+	if err != nil && pflag.NArg() == 0 {
+		usage(os.Args[0])
 		os.Exit(1)
 	}
 
@@ -61,7 +68,7 @@ func main() {
 		hosts = file2hostnames(fp)
 	}
 
-	hosts = append(hosts, flag.Args()...)
+	hosts = append(hosts, pflag.Args()...)
 
 	if len(hosts) == 0 {
 		fmt.Println("Host not found.")
@@ -69,12 +76,23 @@ func main() {
 	}
 
 	hosts = parseCidr(hosts)
-	cfg, _ := config.LoadFile(".mping.yml")
+	cfgPath, _ := filepath.Abs(path)
+	cfg, _ := config.LoadFile(cfgPath)
 	if interval != 0 {
 		cfg.Prober.ICMP.Interval = fmt.Sprintf("%dms", interval)
 	}
+	if timeout != 0 {
+		cfg.Prober.ICMP.Timeout = fmt.Sprintf("%dms", timeout)
+	}
 	cfg.UI.CUI.Title = title
 	command.Run(hosts, cfg)
+}
+
+func usage(progname string) {
+	fmt.Fprintf(os.Stderr, "Usage: %s [OPTIONS] [TARGET...]\n", progname)
+	fmt.Fprintln(os.Stderr, "Options:")
+	pflag.PrintDefaults()
+	fmt.Fprintf(os.Stderr, "Examples:\n  %s localhost 8.8.8.8\n  %s -f hostslist\n", progname, progname)
 }
 
 func file2hostnames(fp *os.File) []string {
