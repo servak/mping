@@ -122,7 +122,7 @@ func (mm *MetricsManager) GetSortedMetricsByKey(k Key) []Metrics {
 		mj := res[j]
 		switch k {
 		case Host:
-			return len(res[i].Name) > len(res[j].Name)
+			return res[i].Name < res[j].Name
 		case Sent:
 			return mi.Total > mj.Total
 		case Success:
