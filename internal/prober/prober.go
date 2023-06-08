@@ -21,6 +21,7 @@ type Event struct {
 	Result   reason
 	SentTime time.Time
 	Rtt      time.Duration
+	Message  string
 }
 
 type Prober interface {

@@ -74,11 +74,11 @@ func (mm *MetricsManager) Success(host string, rtt time.Duration, sentTime time.
 }
 
 // ホストに対する失敗を登録
-func (mm *MetricsManager) Failed(host string, sentTime time.Time) {
+func (mm *MetricsManager) Failed(host string, sentTime time.Time, msg string) {
 	m := mm.GetMetrics(host)
 
 	mm.mu.Lock()
-	m.Fail(sentTime)
+	m.Fail(sentTime, msg)
 	mm.mu.Unlock()
 }
 
@@ -99,9 +99,9 @@ func (mm *MetricsManager) Subscribe(res chan *prober.Event) {
 			case prober.SUCCESS:
 				mm.Success(r.Target, r.Rtt, r.SentTime)
 			case prober.TIMEOUT:
-				mm.Failed(r.Target, r.SentTime)
+				mm.Failed(r.Target, r.SentTime, r.Message)
 			case prober.FAILED:
-				mm.Failed(r.Target, r.SentTime)
+				mm.Failed(r.Target, r.SentTime, r.Message)
 			}
 		}
 	}()

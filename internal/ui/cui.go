@@ -45,7 +45,7 @@ func NewCUI(mm *stats.MetricsManager, cfg *CUIConfig, interval time.Duration) (*
 
 func (c *CUI) render() string {
 	t := table.NewWriter()
-	t.AppendHeader(table.Row{stats.Host, stats.Sent, stats.Success, stats.Fail, stats.Loss, stats.Last, stats.Avg, stats.Best, stats.Worst, stats.LastSuccTime, stats.LastFailTime})
+	t.AppendHeader(table.Row{stats.Host, stats.Sent, stats.Success, stats.Fail, stats.Loss, stats.Last, stats.Avg, stats.Best, stats.Worst, stats.LastSuccTime, stats.LastFailTime, "FAIL Reason"})
 	df := durationFormater
 	tf := timeFormater
 	for _, m := range c.mm.GetSortedMetricsByKey(c.key) {
@@ -61,6 +61,7 @@ func (c *CUI) render() string {
 			df(m.MaximumRTT),
 			tf(m.LastSuccTime),
 			tf(m.LastFailTime),
+			m.LastFailDetail,
 		})
 	}
 	if c.config.Border {

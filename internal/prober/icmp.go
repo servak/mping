@@ -109,7 +109,7 @@ func (p *ICMPProber) success(r chan *Event, runCnt int, addr string) {
 	}
 }
 
-func (p *ICMPProber) failed(r chan *Event, runCnt int, addr string) {
+func (p *ICMPProber) failed(r chan *Event, runCnt int, addr string, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for k, table := range p.tables {
@@ -124,6 +124,7 @@ func (p *ICMPProber) failed(r chan *Event, runCnt int, addr string) {
 			Result:   FAILED,
 			SentTime: k.sentTime,
 			Rtt:      0,
+			Message:  err.Error(),
 		}
 		return
 	}
@@ -145,6 +146,7 @@ func (p *ICMPProber) checkTimeout(r chan *Event) {
 					Result:   TIMEOUT,
 					SentTime: rt.sentTime,
 					Rtt:      p.timeout,
+					Message:  "timeout",
 				}
 			}
 		}
@@ -189,7 +191,7 @@ func (p *ICMPProber) probe(r chan *Event) {
 		_, err := p.c.WriteTo(b, t)
 		p.sent(r, t.String())
 		if err != nil {
-			p.failed(r, p.runCnt, t.String())
+			p.failed(r, p.runCnt, t.String(), err)
 		}
 	}
 }
