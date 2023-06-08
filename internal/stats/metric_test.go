@@ -22,7 +22,7 @@ func TestMetrics(t *testing.T) {
 	}
 
 	m.Sent()
-	m.Fail(now)
+	m.Fail(now, "timeout")
 
 	if m.Total != 2 || m.Successful != 1 || m.Failed != 1 {
 		t.Errorf("Invalid values after first failure: Total = %d, Successful = %d, Failed = %d", m.Total, m.Successful, m.Failed)

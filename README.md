@@ -1,13 +1,19 @@
 mping
 =====
 
-[![build_status](https://travis-ci.org/servak/mping.svg?branch=master)](https://travis-ci.org/servak/mping)
+![go workflow](https://github.com/servak/mping/actions/workflows/go.yml/badge.svg)
 
 mping is a program to send ICMP echo.
 
 ## Demo
 
-[![asciicast](https://asciinema.org/a/a969qrzhs7gi11yv74gzecrl8.png)](https://asciinema.org/a/a969qrzhs7gi11yv74gzecrl8)
+![Demo](mping.gif)
+
+## Install
+
+```
+go install github.com/servak/mping/cmd/mping@latest
+```
 
 ## Permission
 
@@ -25,23 +31,17 @@ sudo chmod u+s mping
 ## Usage
 
 ```
-> mping
-Usage:
-  mping [options] [host ...]
-
+Usage: mping [OPTIONS] [TARGET...]
 Options:
-  -6   	use ip v6
-  -c int
-       	stop after receiving <count> response packets
-  -f string
-       	use contents of file
-  -i int
-       	interval(ms) (default 1000)
-  -q   	quiet mode
-  -t string
-       	print title
-  -v   	print version of mping
-Example:
-  mping localhost 10.1.1.0/30 8.8.8.8
+  -c, --config string      config path (default "~/.mping.yml")
+  -f, --fiilename string   use contents of file
+  -h, --help               Display help and exit
+  -i, --interval int       interval(ms) (default 1000)
+  -t, --timeout int        timeout(ms) (default 1000)
+  -n, --title string       print title
+  -v, --version            print version
+Examples:
+  mping localhost google.com 8.8.8.8 192.168.1.0/24
+  mping google.com icmpv6:google.com
   mping -f hostslist
 ```

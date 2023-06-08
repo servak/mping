@@ -2,7 +2,10 @@ package prober
 
 import "time"
 
-type reason uint8
+type (
+	reason    uint8
+	ProbeType string
+)
 
 const (
 	SENT reason = iota
@@ -18,8 +21,9 @@ type Event struct {
 	Result   reason
 	SentTime time.Time
 	Rtt      time.Duration
+	Message  string
 }
 
 type Prober interface {
-	Start(chan *Event) error
+	Start(chan *Event, time.Duration, time.Duration) error
 }
