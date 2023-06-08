@@ -94,7 +94,7 @@ func usage(progname string) {
 	fmt.Fprintf(os.Stderr, "Usage: %s [OPTIONS] [TARGET...]\n", progname)
 	fmt.Fprintln(os.Stderr, "Options:")
 	pflag.PrintDefaults()
-	fmt.Fprintf(os.Stderr, "Examples:\n  %s localhost 8.8.8.8\n  %s -f hostslist\n", progname, progname)
+	fmt.Fprintf(os.Stderr, "Examples:\n  %s localhost google.com 8.8.8.8 192.168.1.0/24\n  %s google.com icmpv6:google.com\n  %s -f hostslist\n", progname, progname, progname)
 }
 
 func file2hostnames(fp *os.File) []string {
