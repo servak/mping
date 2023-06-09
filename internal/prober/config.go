@@ -11,10 +11,16 @@ type (
 	ProberConfig struct {
 		Probe ProbeType   `yaml:"probe"`
 		ICMP  *ICMPConfig `yaml:"icmp"`
+		HTTP  *HTTPConfig `yaml:"http"`
 	}
 
 	ICMPConfig struct {
 		Body string `yaml:"body"`
+	}
+
+	HTTPConfig struct {
+		ExpectCode int    `yaml:"expect_code"`
+		ExpectBody string `yaml:"expect_body"`
 	}
 )
 

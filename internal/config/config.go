@@ -24,6 +24,13 @@ func DefaultConfig() *Config {
 				Probe: prober.ICMPV6,
 				ICMP:  &prober.ICMPConfig{},
 			},
+			string(prober.HTTP): {
+				Probe: prober.HTTP,
+				HTTP: &prober.HTTPConfig{
+					ExpectCode: 200,
+					ExpectBody: "",
+				},
+			},
 		},
 		UI: &ui.UIConfig{
 			CUI: &ui.CUIConfig{

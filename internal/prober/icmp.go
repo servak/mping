@@ -80,7 +80,6 @@ func (p *ICMPProber) sent(r chan *Event, addr string) {
 	r <- &Event{
 		Target: addr,
 		Result: SENT,
-		Rtt:    0,
 	}
 }
 

@@ -69,10 +69,10 @@ func taintDefaultProbe(hostnames []string) []string {
 func splitProber(targets []string, cfg *config.Config) map[*prober.ProberConfig][]string {
 	rules := make(map[*prober.ProberConfig][]string)
 	for _, t := range targets {
-		for k, cfg := range cfg.Prober {
+		for k, c := range cfg.Prober {
 			if strings.HasPrefix(t, k) {
 				idx := strings.Index(t, ":")
-				rules[cfg] = append(rules[cfg], t[idx+1:])
+				rules[c] = append(rules[c], t[idx+1:])
 				break
 			}
 		}
@@ -109,6 +109,14 @@ func newProber(cfg *prober.ProberConfig, targets []string) (prober.Prober, map[s
 			entryList[ip.String()] = h
 		}
 		probe, err = prober.NewICMPProber(prober.ICMPV6, addrs, cfg.ICMP)
+	case prober.HTTP:
+		var ts []string
+		for _, h := range targets {
+			t := "http:" + h
+			ts = append(ts, t)
+			entryList[t] = t
+		}
+		probe = prober.NewHTTPProber(ts, cfg.HTTP)
 	default:
 		err = fmt.Errorf("%s not found. please set implement prober.", cfg.Probe)
 	}

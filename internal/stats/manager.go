@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,7 +23,7 @@ func NewMetricsManager(targets map[string]string) *MetricsManager {
 	count := 1
 	for k, v := range targets {
 		name := v
-		if net.ParseIP(v) == nil {
+		if net.ParseIP(v) == nil && !strings.Contains(v, ":") {
 			name = fmt.Sprintf("%s(%s)", v, k)
 		}
 		metrics[k] = &Metrics{
