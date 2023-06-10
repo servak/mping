@@ -14,27 +14,33 @@ import (
 )
 
 func Run(hostnames []string, cfg *config.Config, interval, timeout time.Duration) {
-	probeTargets := splitProber(taintDefaultProbe(hostnames), cfg)
-	entryList := make(map[string]string) // for metricsManager
+	probeTargets := splitProber(addDefaultProbeType(hostnames), cfg)
 	res := make(chan *prober.Event)
+	manager := stats.NewMetricsManager()
+	startProbers(probeTargets, res, interval, timeout, manager)
+
+	manager.Subscribe(res)
+	startUI(manager, cfg.UI.CUI, interval)
+}
+
+func startProbers(probeTargets map[*prober.ProberConfig][]string, res chan *prober.Event, interval, timeout time.Duration, manager *stats.MetricsManager) {
 	for cfg, targets := range probeTargets {
-		prober, entries, err := newProber(cfg, targets)
+		prober, err := newProber(cfg, manager, targets)
 		if err != nil {
 			fmt.Println(err.Error())
 			os.Exit(1)
 		}
-		for k, v := range entries {
-			entryList[k] = v
-		}
 		go prober.Start(res, interval, timeout)
 	}
-	manager := stats.NewMetricsManager(entryList)
-	manager.Subscribe(res)
-	r, err := ui.NewCUI(manager, cfg.UI.CUI, interval)
+}
+
+func startUI(manager *stats.MetricsManager, cui *ui.CUIConfig, interval time.Duration) {
+	r, err := ui.NewCUI(manager, cui, interval)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+
 	refreshTime := time.Millisecond * 250 // Minimum refresh time that can be set
 	if refreshTime < (interval / 2) {
 		refreshTime = interval / 2
@@ -46,10 +52,11 @@ func Run(hostnames []string, cfg *config.Config, interval, timeout time.Duration
 			r.Update()
 		}
 	}()
+
 	r.Run()
 }
 
-func taintDefaultProbe(hostnames []string) []string {
+func addDefaultProbeType(hostnames []string) []string {
 	var res []string
 	for _, h := range hostnames {
 		if strings.Contains(h, ":") {
@@ -69,10 +76,13 @@ func taintDefaultProbe(hostnames []string) []string {
 func splitProber(targets []string, cfg *config.Config) map[*prober.ProberConfig][]string {
 	rules := make(map[*prober.ProberConfig][]string)
 	for _, t := range targets {
+		probeTypeAndTarget := strings.SplitN(t, ":", 2)
+		if len(probeTypeAndTarget) != 2 {
+			continue
+		}
 		for k, c := range cfg.Prober {
-			if strings.HasPrefix(t, k) {
-				idx := strings.Index(t, ":")
-				rules[c] = append(rules[c], t[idx+1:])
+			if probeTypeAndTarget[0] == k {
+				rules[c] = append(rules[c], probeTypeAndTarget[1])
 				break
 			}
 		}
@@ -80,45 +90,42 @@ func splitProber(targets []string, cfg *config.Config) map[*prober.ProberConfig]
 	return rules
 }
 
-func newProber(cfg *prober.ProberConfig, targets []string) (prober.Prober, map[string]string, error) {
+func newProber(cfg *prober.ProberConfig, manager *stats.MetricsManager, targets []string) (prober.Prober, error) {
 	var (
 		probe prober.Prober
 		err   error
 	)
-	entryList := make(map[string]string)
 	switch cfg.Probe {
-	case prober.ICMPV4:
+	case prober.ICMPV4, prober.ICMPV6:
+		resolvType := "ip4"
+		if cfg.Probe == prober.ICMPV6 {
+			resolvType = "ip6"
+		}
 		var addrs []*net.IPAddr
 		for _, h := range targets {
-			ip, err := net.ResolveIPAddr("ip4", h)
+			ip, err := net.ResolveIPAddr(resolvType, h)
 			if err != nil {
 				continue
 			}
 			addrs = append(addrs, ip)
-			entryList[ip.String()] = h
-		}
-		probe, err = prober.NewICMPProber(prober.ICMPV4, addrs, cfg.ICMP)
-	case prober.ICMPV6:
-		var addrs []*net.IPAddr
-		for _, h := range targets {
-			ip, err := net.ResolveIPAddr("ip6", h)
-			if err != nil {
-				continue
+
+			name := ip.String()
+			if net.ParseIP(h) == nil {
+				name = fmt.Sprintf("%s(%s)", h, name)
 			}
-			addrs = append(addrs, ip)
-			entryList[ip.String()] = h
+			manager.Register(ip.String(), name)
 		}
-		probe, err = prober.NewICMPProber(prober.ICMPV6, addrs, cfg.ICMP)
+		probe, err = prober.NewICMPProber(cfg.Probe, addrs, cfg.ICMP)
 	case prober.HTTP:
 		var ts []string
 		for _, h := range targets {
 			t := "http:" + h
 			ts = append(ts, t)
-			entryList[t] = t
+			manager.Register(t, t)
 		}
 		probe = prober.NewHTTPProber(ts, cfg.HTTP)
 	default:
 		err = fmt.Errorf("%s not found. please set implement prober.", cfg.Probe)
 	}
-	return probe, entryList, err
+	return probe, err
 }
