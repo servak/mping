@@ -108,14 +108,13 @@ func newProber(cfg *prober.ProberConfig, manager *stats.MetricsManager, targets 
 				continue
 			}
 			addrs = append(addrs, ip)
-
 			name := ip.String()
 			if net.ParseIP(h) == nil {
 				name = fmt.Sprintf("%s(%s)", h, name)
 			}
 			manager.Register(ip.String(), name)
 		}
-		probe, err = prober.NewICMPProber(cfg.Probe, addrs, cfg.ICMP)
+		probe, err = prober.NewICMPProber(cfg.Probe, uniqueStringer(addrs), cfg.ICMP)
 	case prober.HTTP:
 		var ts []string
 		for _, h := range targets {
@@ -123,9 +122,33 @@ func newProber(cfg *prober.ProberConfig, manager *stats.MetricsManager, targets 
 			ts = append(ts, t)
 			manager.Register(t, t)
 		}
-		probe = prober.NewHTTPProber(ts, cfg.HTTP)
+		probe = prober.NewHTTPProber(unique(ts), cfg.HTTP)
 	default:
 		err = fmt.Errorf("%s not found. please set implement prober.", cfg.Probe)
 	}
 	return probe, err
+}
+
+func unique[T comparable](s []T) []T {
+	inResult := make(map[T]bool)
+	var result []T
+	for _, str := range s {
+		if _, ok := inResult[str]; !ok {
+			inResult[str] = true
+			result = append(result, str)
+		}
+	}
+	return result
+}
+
+func uniqueStringer[T fmt.Stringer](s []T) []T {
+	inResult := make(map[string]bool)
+	var result []T
+	for _, str := range s {
+		if _, ok := inResult[str.String()]; !ok {
+			inResult[str.String()] = true
+			result = append(result, str)
+		}
+	}
+	return result
 }

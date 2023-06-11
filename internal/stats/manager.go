@@ -22,6 +22,10 @@ func NewMetricsManager() *MetricsManager {
 }
 
 func (mm *MetricsManager) Register(target, name string) {
+	v, ok := mm.metrics[target]
+	if ok && v.Name != target {
+		return
+	}
 	mm.metrics[target] = &Metrics{
 		Name: name,
 	}
