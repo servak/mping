@@ -1,10 +1,7 @@
 package stats
 
 import (
-	"fmt"
-	"net"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,27 +11,23 @@ import (
 type MetricsManager struct {
 	metrics map[string]*Metrics
 	mu      sync.Mutex
-	counter int
 }
 
 // 新しいMetricsManagerを生成
-func NewMetricsManager(targets map[string]string) *MetricsManager {
+func NewMetricsManager() *MetricsManager {
 	metrics := make(map[string]*Metrics)
-	count := 1
-	for k, v := range targets {
-		name := v
-		if net.ParseIP(v) == nil && !strings.Contains(v, ":") {
-			name = fmt.Sprintf("%s(%s)", v, k)
-		}
-		metrics[k] = &Metrics{
-			ID:   count,
-			Name: name,
-		}
-		count++
-	}
 	return &MetricsManager{
 		metrics: metrics,
-		counter: count,
+	}
+}
+
+func (mm *MetricsManager) Register(target, name string) {
+	v, ok := mm.metrics[target]
+	if ok && v.Name != target {
+		return
+	}
+	mm.metrics[target] = &Metrics{
+		Name: name,
 	}
 }
 
@@ -45,9 +38,7 @@ func (mm *MetricsManager) GetMetrics(host string) *Metrics {
 
 	m, ok := mm.metrics[host]
 	if !ok {
-		mm.counter++
 		m = &Metrics{
-			ID:   mm.counter,
 			Name: host,
 		}
 		mm.metrics[host] = m
@@ -115,9 +106,11 @@ func (mm *MetricsManager) GetSortedMetricsByKey(k Key) []Metrics {
 		res = append(res, *m)
 	}
 	mm.mu.Unlock()
-	sort.SliceStable(res, func(i, j int) bool {
-		return res[i].ID < res[j].ID
-	})
+	if k != Host {
+		sort.SliceStable(res, func(i, j int) bool {
+			return res[i].Name < res[j].Name
+		})
+	}
 	sort.SliceStable(res, func(i, j int) bool {
 		mi := res[i]
 		mj := res[j]

@@ -5,7 +5,6 @@ import (
 )
 
 type Metrics struct {
-	ID             int
 	Name           string
 	Total          int
 	Successful     int
