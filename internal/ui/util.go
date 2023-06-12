@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func durationFormater(duration time.Duration) string {
+func DurationFormater(duration time.Duration) string {
 	if duration == 0 {
 		return "-"
 	} else if duration.Microseconds() < 1000 {
@@ -17,7 +17,7 @@ func durationFormater(duration time.Duration) string {
 	}
 }
 
-func timeFormater(t time.Time) string {
+func TimeFormater(t time.Time) string {
 	if t.IsZero() {
 		return "-"
 	}

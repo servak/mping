@@ -46,8 +46,8 @@ func NewCUI(mm *stats.MetricsManager, cfg *CUIConfig, interval time.Duration) (*
 func (c *CUI) render() string {
 	t := table.NewWriter()
 	t.AppendHeader(table.Row{stats.Host, stats.Sent, stats.Success, stats.Fail, stats.Loss, stats.Last, stats.Avg, stats.Best, stats.Worst, stats.LastSuccTime, stats.LastFailTime, "FAIL Reason"})
-	df := durationFormater
-	tf := timeFormater
+	df := DurationFormater
+	tf := TimeFormater
 	for _, m := range c.mm.GetSortedMetricsByKey(c.key) {
 		t.AppendRow(table.Row{
 			m.Name,
@@ -114,7 +114,7 @@ func (c *CUI) Run() error {
 			}
 			v.Frame = false
 			v.Clear()
-			fmt.Fprintln(v, "q: quit, j: down, k: up, s: sort, R: reset")
+			fmt.Fprintln(v, "q:quit, s:sort, R:reset, move(k:up, j:down, g:top, G:bottom, u:pageUp, d:pageDown)")
 		}
 		return nil
 	}
@@ -154,6 +154,10 @@ func (c *CUI) keybindings() error {
 		"s": c.changeSort,
 		"j": originDown,
 		"k": originUp,
+		"g": originGoTop,
+		"G": originGoBottom,
+		"u": originPageUp,
+		"d": originPageDown,
 		"R": c.reset,
 	}
 	for k, v := range keymaps {
@@ -206,21 +210,64 @@ func originDown(g *gocui.Gui, v *gocui.View) error {
 		return nil
 	}
 	_, wy := v.Size()
-	ox, oy := v.Origin()
+	_, oy := v.Origin()
 	bottom := len(v.ViewBufferLines())
 	if (bottom - oy) <= wy {
 		return nil
 	}
-	return v.SetOrigin(ox, oy+1)
+	return v.SetOrigin(0, oy+1)
 }
 
 func originUp(g *gocui.Gui, v *gocui.View) error {
 	if v == nil {
 		return nil
 	}
-	ox, oy := v.Origin()
+	_, oy := v.Origin()
 	if oy == 0 {
 		return nil
 	}
-	return v.SetOrigin(ox, oy-1)
+	return v.SetOrigin(0, oy-1)
+}
+
+func originGoTop(g *gocui.Gui, v *gocui.View) error {
+	if v == nil {
+		return nil
+	}
+	return v.SetOrigin(0, 0)
+}
+
+func originGoBottom(g *gocui.Gui, v *gocui.View) error {
+	if v == nil {
+		return nil
+	}
+	_, wy := v.Size()
+	bottom := len(v.ViewBufferLines())
+	return v.SetOrigin(0, bottom-wy)
+}
+
+func originPageDown(g *gocui.Gui, v *gocui.View) error {
+	if v == nil {
+		return nil
+	}
+	_, wy := v.Size()
+	_, oy := v.Origin()
+	slide := wy + oy
+	bottom := len(v.ViewBufferLines())
+	if (bottom - wy) < slide {
+		return v.SetOrigin(0, (bottom - wy))
+	}
+	return v.SetOrigin(0, slide)
+}
+
+func originPageUp(g *gocui.Gui, v *gocui.View) error {
+	if v == nil {
+		return nil
+	}
+	_, wy := v.Size()
+	_, oy := v.Origin()
+	slide := oy - wy
+	if 0 > slide {
+		return v.SetOrigin(0, 0)
+	}
+	return v.SetOrigin(0, slide)
 }
