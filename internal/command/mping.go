@@ -22,6 +22,7 @@ func NewPingCmd() *cobra.Command {
 		Short:         "",
 		SilenceErrors: true,
 		SilenceUsage:  true,
+		Args:          cobra.MinimumNArgs(0),
 		Example: `mping 1.1.1.1 8.8.8.8
 mping icmpv6:google.com
 mping http://google.com`,
@@ -67,7 +68,13 @@ mping http://google.com`,
 			cfg.SetTitle(title)
 			_interval := time.Duration(interval) * time.Millisecond
 			_timeout := time.Duration(timeout) * time.Millisecond
-			run(hosts, cfg, _interval, _timeout)
+
+			res := make(chan *prober.Event)
+			probeTargets := splitProber(addDefaultProbeType(hosts), cfg)
+			manager := stats.NewMetricsManager()
+			startProbers(probeTargets, res, _interval, _timeout, manager)
+			manager.Subscribe(res)
+			startCUI(manager, cfg.UI.CUI, _interval)
 			return nil
 		},
 	}
@@ -82,16 +89,6 @@ mping http://google.com`,
 	return cmd
 }
 
-func run(hostnames []string, cfg *config.Config, interval, timeout time.Duration) {
-	probeTargets := splitProber(addDefaultProbeType(hostnames), cfg)
-	res := make(chan *prober.Event)
-	manager := stats.NewMetricsManager()
-	startProbers(probeTargets, res, interval, timeout, manager)
-
-	manager.Subscribe(res)
-	startUI(manager, cfg.UI.CUI, interval)
-}
-
 func startProbers(probeTargets map[*prober.ProberConfig][]string, res chan *prober.Event, interval, timeout time.Duration, manager *stats.MetricsManager) {
 	for cfg, targets := range probeTargets {
 		prober, err := newProber(cfg, manager, targets)
@@ -103,7 +100,7 @@ func startProbers(probeTargets map[*prober.ProberConfig][]string, res chan *prob
 	}
 }
 
-func startUI(manager *stats.MetricsManager, cui *ui.CUIConfig, interval time.Duration) {
+func startCUI(manager *stats.MetricsManager, cui *ui.CUIConfig, interval time.Duration) {
 	r, err := ui.NewCUI(manager, cui, interval)
 	if err != nil {
 		fmt.Println(err)
