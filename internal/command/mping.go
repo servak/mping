@@ -1,9 +1,11 @@
 package command
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -11,9 +13,76 @@ import (
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/ui"
+	"github.com/spf13/cobra"
 )
 
-func Run(hostnames []string, cfg *config.Config, interval, timeout time.Duration) {
+func NewPingCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           "mping [IP or HOSTNAME]...",
+		Short:         "",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Example: `mping 1.1.1.1 8.8.8.8
+mping icmpv6:google.com
+mping http://google.com`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			flags := cmd.Flags()
+			interval, err := flags.GetInt("interval")
+			if err != nil {
+				return err
+			}
+			timeout, err := flags.GetInt("timeout")
+			if err != nil {
+				return err
+			}
+			if interval == 0 && timeout == 0 {
+				return errors.New("both interval and timeout can't be zero")
+			} else if interval == 0 {
+				return errors.New("interval can't be zero")
+			} else if timeout == 0 {
+				return errors.New("timeout can't be zero")
+			}
+			title, err := flags.GetString("title")
+			if err != nil {
+				return err
+			}
+			path, err := flags.GetString("config")
+			if err != nil {
+				return err
+			}
+			filename, err := flags.GetString("filename")
+			if err != nil {
+				return err
+			}
+
+			hosts := parseHostnames(args, filename)
+			if len(hosts) == 0 {
+				cmd.Println("Please set hostname or ip.")
+				cmd.Help()
+				return nil
+			}
+
+			cfgPath, _ := filepath.Abs(path)
+			cfg, _ := config.LoadFile(cfgPath)
+			cfg.SetTitle(title)
+			_interval := time.Duration(interval) * time.Millisecond
+			_timeout := time.Duration(timeout) * time.Millisecond
+			run(hosts, cfg, _interval, _timeout)
+			return nil
+		},
+	}
+
+	flags := cmd.Flags()
+	flags.StringP("filename", "f", "", "use contents of file")
+	flags.StringP("title", "n", "", "print title")
+	flags.StringP("config", "c", "~/.mping.yml", "config path")
+	flags.IntP("interval", "i", 1000, "interval(ms)")
+	flags.IntP("timeout", "t", 1000, "timeout(ms)")
+
+	return cmd
+}
+
+func run(hostnames []string, cfg *config.Config, interval, timeout time.Duration) {
 	probeTargets := splitProber(addDefaultProbeType(hostnames), cfg)
 	res := make(chan *prober.Event)
 	manager := stats.NewMetricsManager()

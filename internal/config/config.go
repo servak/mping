@@ -13,6 +13,10 @@ type Config struct {
 	UI     *ui.UIConfig                    `yaml:"ui"`
 }
 
+func (c *Config) SetTitle(t string) {
+	c.UI.CUI.Title = t
+}
+
 func DefaultConfig() *Config {
 	return &Config{
 		Prober: map[string]*prober.ProberConfig{
