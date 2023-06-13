@@ -31,6 +31,12 @@ type (
 		mu      sync.Mutex
 	}
 
+	ICMPConfig struct {
+		Body string `yaml:"body"`
+		TOS  int    `yaml:"tos"`
+		TTL  int    `yaml:"ttl"`
+	}
+
 	runTime struct {
 		runCnt   int
 		sentTime time.Time
@@ -51,6 +57,16 @@ func NewICMPProber(t ProbeType, addrs []*net.IPAddr, cfg *ICMPConfig) (*ICMPProb
 	)
 	if t == ICMPV4 {
 		c, err = icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+		if err != nil {
+			return nil, err
+		}
+		p := c.IPv4PacketConn()
+		if cfg.TOS != 0 {
+			p.SetTOS(cfg.TOS)
+		}
+		if cfg.TTL != 0 {
+			p.SetTTL(cfg.TTL)
+		}
 	} else {
 		c, err = icmp.ListenPacket("ip6:ipv6-icmp", "::")
 	}

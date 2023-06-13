@@ -13,15 +13,6 @@ type (
 		ICMP  *ICMPConfig `yaml:"icmp"`
 		HTTP  *HTTPConfig `yaml:"http"`
 	}
-
-	ICMPConfig struct {
-		Body string `yaml:"body"`
-	}
-
-	HTTPConfig struct {
-		ExpectCode int    `yaml:"expect_code"`
-		ExpectBody string `yaml:"expect_body"`
-	}
 )
 
 func convertToDuration(s string) (time.Duration, error) {
