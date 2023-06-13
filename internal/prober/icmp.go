@@ -176,6 +176,9 @@ func (p *ICMPProber) makeEchoMsg() icmp.Message {
 
 func (p *ICMPProber) probe(r chan *Event) {
 	p.runCnt++
+	if p.runCnt > 65535 {
+		p.runCnt = 1
+	}
 	m := p.makeEchoMsg()
 
 	b, err := m.Marshal(nil)
