@@ -2,7 +2,7 @@ package command
 
 import (
 	"errors"
-	"fmt"
+	"sync"
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -66,20 +66,33 @@ mping batch http://google.com`,
 			res := make(chan *prober.Event)
 			probeTargets := splitProber(addDefaultProbeType(hosts), cfg)
 			manager := stats.NewMetricsManager()
-			startProbers(probeTargets, res, _interval, _timeout, manager)
 			manager.Subscribe(res)
-			ticker := time.NewTicker(_interval)
-			cmd.Print("probe")
-			for range ticker.C {
-				counter--
-				if 0 < counter {
-					cmd.Print(".")
-					continue
-				}
-				cmd.Println("")
-				cmd.Println(render(manager))
-				break
+			probers := setupProbers(probeTargets, res, manager)
+			var wg sync.WaitGroup
+			for _, p := range probers {
+				wg.Add(1)
+				go func(p prober.Prober) {
+					p.Start(res, _interval, _timeout)
+					wg.Done()
+				}(p)
 			}
+			cmd.Print("probe")
+			for {
+				if 0 >= counter {
+					break
+				}
+				counter--
+				cmd.Print(".")
+				time.Sleep(_interval)
+			}
+			for _, p := range probers {
+				p.Stop()
+			}
+			wg.Wait()
+			cmd.Print("\r")
+			t := ui.TableRender(manager, stats.Success)
+			t.SetStyle(table.StyleLight)
+			cmd.Println(t.Render())
 			return nil
 		},
 	}
@@ -92,29 +105,4 @@ mping batch http://google.com`,
 	flags.IntP("count", "", 10, "repeat count")
 
 	return cmd
-}
-
-func render(mm *stats.MetricsManager) string {
-	t := table.NewWriter()
-	t.AppendHeader(table.Row{stats.Host, stats.Sent, stats.Success, stats.Fail, stats.Loss, stats.Last, stats.Avg, stats.Best, stats.Worst, stats.LastSuccTime, stats.LastFailTime, "FAIL Reason"})
-	df := ui.DurationFormater
-	tf := ui.TimeFormater
-	for _, m := range mm.GetSortedMetricsByKey(stats.Host) {
-		t.AppendRow(table.Row{
-			m.Name,
-			m.Total,
-			m.Successful,
-			m.Failed,
-			fmt.Sprintf("%5.1f%%", m.Loss),
-			df(m.LastRTT),
-			df(m.AverageRTT),
-			df(m.MinimumRTT),
-			df(m.MaximumRTT),
-			tf(m.LastSuccTime),
-			tf(m.LastFailTime),
-			m.LastFailDetail,
-		})
-	}
-	t.SetStyle(table.StyleLight)
-	return t.Render()
 }

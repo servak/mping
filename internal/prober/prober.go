@@ -26,4 +26,5 @@ type Event struct {
 
 type Prober interface {
 	Start(chan *Event, time.Duration, time.Duration) error
+	Stop()
 }
