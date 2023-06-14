@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/servak/mping/internal/config"
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/ui"
-	"github.com/spf13/cobra"
 )
 
 func NewPingCmd() *cobra.Command {
@@ -63,8 +63,7 @@ mping http://google.com`,
 				return nil
 			}
 
-			cfgPath, _ := filepath.Abs(path)
-			cfg, _ := config.LoadFile(cfgPath)
+			cfg, _ := config.LoadFile(path)
 			cfg.SetTitle(title)
 			_interval := time.Duration(interval) * time.Millisecond
 			_timeout := time.Duration(timeout) * time.Millisecond

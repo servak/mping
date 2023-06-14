@@ -2,10 +2,14 @@ package config
 
 import (
 	"os"
+	"os/user"
+	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/ui"
-	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
@@ -50,8 +54,15 @@ func Load(s string) (*Config, error) {
 	return cfg, err
 }
 
-func LoadFile(s string) (*Config, error) {
-	out, err := os.ReadFile(s)
+func LoadFile(path string) (*Config, error) {
+	if strings.HasPrefix(path, "~") {
+		usr, err := user.Current()
+		if err == nil {
+			path = strings.Replace(path, "~", usr.HomeDir, 1)
+		}
+	}
+	cfgPath, _ := filepath.Abs(path)
+	out, err := os.ReadFile(cfgPath)
 	if err != nil {
 		return DefaultConfig(), err
 	}

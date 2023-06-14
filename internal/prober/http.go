@@ -15,11 +15,18 @@ const (
 	HTTPS ProbeType = "https"
 )
 
-type HTTPProber struct {
-	client  *http.Client
-	targets []string
-	config  *HTTPConfig
-}
+type (
+	HTTPProber struct {
+		client  *http.Client
+		targets []string
+		config  *HTTPConfig
+	}
+
+	HTTPConfig struct {
+		ExpectCode int    `yaml:"expect_code"`
+		ExpectBody string `yaml:"expect_body"`
+	}
+)
 
 func NewHTTPProber(targets []string, cfg *HTTPConfig) *HTTPProber {
 	return &HTTPProber{
