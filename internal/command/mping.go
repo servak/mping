@@ -6,8 +6,10 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/spf13/cobra"
 
 	"github.com/servak/mping/internal/config"
@@ -71,9 +73,29 @@ mping http://google.com`,
 			res := make(chan *prober.Event)
 			probeTargets := splitProber(addDefaultProbeType(hosts), cfg)
 			manager := stats.NewMetricsManager()
-			startProbers(probeTargets, res, _interval, _timeout, manager)
+			probers := setupProbers(probeTargets, res, manager)
 			manager.Subscribe(res)
-			startCUI(manager, cfg.UI.CUI, _interval)
+			var wg sync.WaitGroup
+			for _, p := range probers {
+				wg.Add(1)
+				go func(p prober.Prober) {
+					p.Start(res, _interval, _timeout)
+					wg.Done()
+				}(p)
+			}
+			go func() {
+				startCUI(manager, cfg.UI.CUI, _interval)
+				for _, p := range probers {
+					p.Stop()
+				}
+			}()
+
+			cmd.Print("Waiting for the results of the probe. Please stand by.")
+			wg.Wait()
+			cmd.Print("\r")
+			t := ui.TableRender(manager, stats.Success)
+			t.SetStyle(table.StyleLight)
+			cmd.Println(t.Render())
 			return nil
 		},
 	}
@@ -88,15 +110,17 @@ mping http://google.com`,
 	return cmd
 }
 
-func startProbers(probeTargets map[*prober.ProberConfig][]string, res chan *prober.Event, interval, timeout time.Duration, manager *stats.MetricsManager) {
+func setupProbers(probeTargets map[*prober.ProberConfig][]string, res chan *prober.Event, manager *stats.MetricsManager) []prober.Prober {
+	var probers []prober.Prober
 	for cfg, targets := range probeTargets {
-		prober, err := newProber(cfg, manager, targets)
+		p, err := newProber(cfg, manager, targets)
 		if err != nil {
 			fmt.Println(err.Error())
 			os.Exit(1)
 		}
-		go prober.Start(res, interval, timeout)
+		probers = append(probers, p)
 	}
+	return probers
 }
 
 func startCUI(manager *stats.MetricsManager, cui *ui.CUIConfig, interval time.Duration) {

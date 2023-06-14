@@ -11,10 +11,13 @@ mping is a program to send ICMP echo.
 
 ## Install
 
+https://github.com/servak/mping/releases
+
+## Build
+
 ```
 go install github.com/servak/mping/cmd/mping@latest
 ```
-
 ## Permission
 
 ```
@@ -31,17 +34,27 @@ sudo chmod u+s mping
 ## Usage
 
 ```
-Usage: mping [OPTIONS] [TARGET...]
-Options:
-  -c, --config string      config path (default "~/.mping.yml")
-  -f, --fiilename string   use contents of file
-  -h, --help               Display help and exit
-  -i, --interval int       interval(ms) (default 1000)
-  -t, --timeout int        timeout(ms) (default 1000)
-  -n, --title string       print title
-  -v, --version            print version
+Usage:
+  mping [IP or HOSTNAME]... [flags]
+  mping [command]
+
 Examples:
-  mping localhost google.com 8.8.8.8 192.168.1.0/24
-  mping google.com icmpv6:google.com
-  mping -f hostslist
+mping 1.1.1.1 8.8.8.8
+mping icmpv6:google.com
+mping http://google.com
+
+Available Commands:
+  batch       Disables TUI and performs probing for a set number of iterations
+  help        Help about any command
+
+Flags:
+  -c, --config string     config path (default "~/.mping.yml")
+  -f, --filename string   use contents of file
+  -h, --help              help for mping
+  -i, --interval int      interval(ms) (default 1000)
+  -t, --timeout int       timeout(ms) (default 1000)
+  -n, --title string      print title
+  -v, --version           Display version
+
+Use "mping [command] --help" for more information about a command.
 ```

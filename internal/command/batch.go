@@ -2,8 +2,7 @@ package command
 
 import (
 	"errors"
-	"fmt"
-	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -44,10 +43,6 @@ mping batch http://google.com`,
 			} else if timeout == 0 {
 				return errors.New("timeout can't be zero")
 			}
-			title, err := flags.GetString("title")
-			if err != nil {
-				return err
-			}
 			path, err := flags.GetString("config")
 			if err != nil {
 				return err
@@ -64,65 +59,50 @@ mping batch http://google.com`,
 				return nil
 			}
 
-			cfgPath, _ := filepath.Abs(path)
-			cfg, _ := config.LoadFile(cfgPath)
-			cfg.SetTitle(title)
+			cfg, _ := config.LoadFile(path)
 			_interval := time.Duration(interval) * time.Millisecond
 			_timeout := time.Duration(timeout) * time.Millisecond
 
 			res := make(chan *prober.Event)
 			probeTargets := splitProber(addDefaultProbeType(hosts), cfg)
 			manager := stats.NewMetricsManager()
-			startProbers(probeTargets, res, _interval, _timeout, manager)
 			manager.Subscribe(res)
-			ticker := time.NewTicker(_interval)
-			cmd.Print("probe")
-			for range ticker.C {
-				counter--
-				if 0 < counter {
-					cmd.Print(".")
-					continue
-				}
-				cmd.Println("")
-				cmd.Println(render(manager))
-				break
+			probers := setupProbers(probeTargets, res, manager)
+			var wg sync.WaitGroup
+			for _, p := range probers {
+				wg.Add(1)
+				go func(p prober.Prober) {
+					p.Start(res, _interval, _timeout)
+					wg.Done()
+				}(p)
 			}
+			cmd.Print("probe")
+			for {
+				if 0 >= counter {
+					break
+				}
+				counter--
+				cmd.Print(".")
+				time.Sleep(_interval)
+			}
+			for _, p := range probers {
+				p.Stop()
+			}
+			wg.Wait()
+			cmd.Print("\r")
+			t := ui.TableRender(manager, stats.Success)
+			t.SetStyle(table.StyleLight)
+			cmd.Println(t.Render())
 			return nil
 		},
 	}
 
 	flags := cmd.Flags()
 	flags.StringP("filename", "f", "", "use contents of file")
-	flags.StringP("title", "n", "", "print title")
 	flags.StringP("config", "c", "~/.mping.yml", "config path")
 	flags.IntP("interval", "i", 1000, "interval(ms)")
 	flags.IntP("timeout", "t", 1000, "timeout(ms)")
 	flags.IntP("count", "", 10, "repeat count")
 
 	return cmd
-}
-
-func render(mm *stats.MetricsManager) string {
-	t := table.NewWriter()
-	t.AppendHeader(table.Row{stats.Host, stats.Sent, stats.Success, stats.Fail, stats.Loss, stats.Last, stats.Avg, stats.Best, stats.Worst, stats.LastSuccTime, stats.LastFailTime, "FAIL Reason"})
-	df := ui.DurationFormater
-	tf := ui.TimeFormater
-	for _, m := range mm.GetSortedMetricsByKey(stats.Host) {
-		t.AppendRow(table.Row{
-			m.Name,
-			m.Total,
-			m.Successful,
-			m.Failed,
-			fmt.Sprintf("%5.1f%%", m.Loss),
-			df(m.LastRTT),
-			df(m.AverageRTT),
-			df(m.MinimumRTT),
-			df(m.MaximumRTT),
-			tf(m.LastSuccTime),
-			tf(m.LastFailTime),
-			m.LastFailDetail,
-		})
-	}
-	t.SetStyle(table.StyleLight)
-	return t.Render()
 }

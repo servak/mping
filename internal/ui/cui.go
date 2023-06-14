@@ -45,26 +45,7 @@ func NewCUI(mm *stats.MetricsManager, cfg *CUIConfig, interval time.Duration) (*
 }
 
 func (c *CUI) render() string {
-	t := table.NewWriter()
-	t.AppendHeader(table.Row{stats.Host, stats.Sent, stats.Success, stats.Fail, stats.Loss, stats.Last, stats.Avg, stats.Best, stats.Worst, stats.LastSuccTime, stats.LastFailTime, "FAIL Reason"})
-	df := DurationFormater
-	tf := TimeFormater
-	for _, m := range c.mm.GetSortedMetricsByKey(c.key) {
-		t.AppendRow(table.Row{
-			m.Name,
-			m.Total,
-			m.Successful,
-			m.Failed,
-			fmt.Sprintf("%5.1f%%", m.Loss),
-			df(m.LastRTT),
-			df(m.AverageRTT),
-			df(m.MinimumRTT),
-			df(m.MaximumRTT),
-			tf(m.LastSuccTime),
-			tf(m.LastFailTime),
-			m.LastFailDetail,
-		})
-	}
+	t := TableRender(c.mm, c.key)
 	if c.config.Border {
 		t.SetStyle(table.StyleLight)
 	} else {
@@ -172,7 +153,6 @@ func (c *CUI) keybindings() error {
 
 func (c CUI) quit(g *gocui.Gui, v *gocui.View) error {
 	c.Close()
-	fmt.Println(c.render())
 	return gocui.ErrQuit
 }
 

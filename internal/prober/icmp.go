@@ -20,15 +20,17 @@ const (
 
 type (
 	ICMPProber struct {
-		version ProbeType
-		c       *icmp.PacketConn
-		body    []byte
-		targets []*net.IPAddr
-		timeout time.Duration
-		runCnt  int
-		runID   int
-		tables  map[runTime]map[string]bool
-		mu      sync.Mutex
+		version  ProbeType
+		c        *icmp.PacketConn
+		body     []byte
+		targets  []*net.IPAddr
+		timeout  time.Duration
+		runCnt   int
+		runID    int
+		tables   map[runTime]map[string]bool
+		mu       sync.Mutex
+		exitChan chan bool
+		wg       sync.WaitGroup
 	}
 
 	ICMPConfig struct {
@@ -71,13 +73,14 @@ func NewICMPProber(t ProbeType, addrs []*net.IPAddr, cfg *ICMPConfig) (*ICMPProb
 		c, err = icmp.ListenPacket("ip6:ipv6-icmp", "::")
 	}
 	return &ICMPProber{
-		version: t,
-		c:       c,
-		tables:  make(map[runTime]map[string]bool),
-		targets: addrs,
-		runID:   os.Getpid() & 0xffff,
-		runCnt:  0,
-		body:    []byte(cfg.Body),
+		version:  t,
+		c:        c,
+		tables:   make(map[runTime]map[string]bool),
+		targets:  addrs,
+		runID:    os.Getpid() & 0xffff,
+		runCnt:   0,
+		body:     []byte(cfg.Body),
+		exitChan: make(chan bool),
 	}, err
 }
 
@@ -253,11 +256,30 @@ func (p *ICMPProber) Start(r chan *Event, interval, timeout time.Duration) error
 	p.timeout = timeout
 	ticker := time.NewTicker(interval)
 	go p.recvPkts(r)
-	for {
-		select {
-		case <-ticker.C:
-			p.probe(r)
-			go p.checkTimeout(r)
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		for {
+			select {
+			case <-p.exitChan:
+				return
+			case <-ticker.C:
+				p.probe(r)
+				go p.checkTimeout(r)
+			}
 		}
+	}()
+	p.wg.Wait()
+	for {
+		p.checkTimeout(r)
+		if len(p.tables) == 0 {
+			break
+		}
+		time.Sleep(interval)
 	}
+	return nil
+}
+
+func (p *ICMPProber) Stop() {
+	p.exitChan <- true
 }

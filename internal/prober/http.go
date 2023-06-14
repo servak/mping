@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,9 +18,11 @@ const (
 
 type (
 	HTTPProber struct {
-		client  *http.Client
-		targets []string
-		config  *HTTPConfig
+		client   *http.Client
+		targets  []string
+		config   *HTTPConfig
+		exitChan chan bool
+		wg       sync.WaitGroup
 	}
 
 	HTTPConfig struct {
@@ -30,9 +33,10 @@ type (
 
 func NewHTTPProber(targets []string, cfg *HTTPConfig) *HTTPProber {
 	return &HTTPProber{
-		client:  &http.Client{},
-		targets: targets,
-		config:  cfg,
+		client:   &http.Client{},
+		targets:  targets,
+		config:   cfg,
+		exitChan: make(chan bool),
 	}
 }
 
@@ -64,6 +68,8 @@ func (p *HTTPProber) failed(r chan *Event, target string, now time.Time, err err
 }
 
 func (p *HTTPProber) probe(r chan *Event, target string) {
+	p.wg.Add(1)
+	defer p.wg.Done()
 	now := time.Now()
 	p.sent(r, target)
 	resp, err := p.client.Get(target)
@@ -99,12 +105,24 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 func (p *HTTPProber) Start(r chan *Event, interval, timeout time.Duration) error {
 	p.client.Timeout = timeout
 	ticker := time.NewTicker(interval)
-	for {
-		select {
-		case <-ticker.C:
-			for _, target := range p.targets {
-				go p.probe(r, target)
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		for {
+			select {
+			case <-p.exitChan:
+				return
+			case <-ticker.C:
+				for _, target := range p.targets {
+					go p.probe(r, target)
+				}
 			}
 		}
-	}
+	}()
+	p.wg.Wait()
+	return nil
+}
+
+func (p *HTTPProber) Stop() {
+	p.exitChan <- true
 }
