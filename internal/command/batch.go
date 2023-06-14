@@ -3,7 +3,6 @@ package command
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -44,10 +43,6 @@ mping batch http://google.com`,
 			} else if timeout == 0 {
 				return errors.New("timeout can't be zero")
 			}
-			title, err := flags.GetString("title")
-			if err != nil {
-				return err
-			}
 			path, err := flags.GetString("config")
 			if err != nil {
 				return err
@@ -64,9 +59,7 @@ mping batch http://google.com`,
 				return nil
 			}
 
-			cfgPath, _ := filepath.Abs(path)
-			cfg, _ := config.LoadFile(cfgPath)
-			cfg.SetTitle(title)
+			cfg, _ := config.LoadFile(path)
 			_interval := time.Duration(interval) * time.Millisecond
 			_timeout := time.Duration(timeout) * time.Millisecond
 
@@ -93,7 +86,6 @@ mping batch http://google.com`,
 
 	flags := cmd.Flags()
 	flags.StringP("filename", "f", "", "use contents of file")
-	flags.StringP("title", "n", "", "print title")
 	flags.StringP("config", "c", "~/.mping.yml", "config path")
 	flags.IntP("interval", "i", 1000, "interval(ms)")
 	flags.IntP("timeout", "t", 1000, "timeout(ms)")
