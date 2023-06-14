@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -63,8 +62,7 @@ mping http://google.com`,
 				return nil
 			}
 
-			cfgPath, _ := filepath.Abs(path)
-			cfg, _ := config.LoadFile(cfgPath)
+			cfg, _ := config.LoadFile(path)
 			cfg.SetTitle(title)
 			_interval := time.Duration(interval) * time.Millisecond
 			_timeout := time.Duration(timeout) * time.Millisecond
