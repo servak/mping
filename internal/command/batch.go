@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/spf13/cobra"
+
 	"github.com/servak/mping/internal/config"
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/ui"
-	"github.com/spf13/cobra"
 )
 
 func NewPingBatchCmd() *cobra.Command {

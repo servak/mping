@@ -6,9 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/ui"
-	"gopkg.in/yaml.v3"
 )
 
 type Config struct {

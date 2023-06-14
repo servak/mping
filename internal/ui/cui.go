@@ -9,6 +9,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 
 	"github.com/awesome-gocui/gocui"
+
 	"github.com/servak/mping/internal/stats"
 )
 

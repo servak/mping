@@ -8,11 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/servak/mping/internal/config"
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/ui"
-	"github.com/spf13/cobra"
 )
 
 func NewPingCmd() *cobra.Command {
