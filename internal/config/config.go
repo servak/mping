@@ -39,6 +39,13 @@ func DefaultConfig() *Config {
 					ExpectBody: "",
 				},
 			},
+			string(prober.HTTPS): {
+				Probe: prober.HTTPS,
+				HTTP: &prober.HTTPConfig{
+					ExpectCode: 200,
+					ExpectBody: "",
+				},
+			},
 		},
 		UI: &ui.UIConfig{
 			CUI: &ui.CUIConfig{
