@@ -204,10 +204,10 @@ func newProber(cfg *prober.ProberConfig, manager *stats.MetricsManager, targets 
 			manager.Register(ip.String(), name)
 		}
 		probe, err = prober.NewICMPProber(cfg.Probe, uniqueStringer(addrs), cfg.ICMP)
-	case prober.HTTP:
+	case prober.HTTP, prober.HTTPS:
 		var ts []string
 		for _, h := range targets {
-			t := "http:" + h
+			t := fmt.Sprintf("%s:%s", cfg.Probe, h)
 			ts = append(ts, t)
 			manager.Register(t, t)
 		}

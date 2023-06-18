@@ -1,6 +1,7 @@
 package prober
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -26,14 +27,37 @@ type (
 	}
 
 	HTTPConfig struct {
-		ExpectCode int    `yaml:"expect_code"`
-		ExpectBody string `yaml:"expect_body"`
+		Header              http.Header `yaml:"headers"`
+		ExpectCode          int         `yaml:"expect_code"`
+		ExpectBody          string      `yaml:"expect_body"`
+		SkipSSLVerification bool        `yaml:"skip_ssl_verification"`
+		RedirectOFF         bool        `yaml:"redirect_off"`
+	}
+
+	customTransport struct {
+		transport http.RoundTripper
+		headers   http.Header
 	}
 )
 
 func NewHTTPProber(targets []string, cfg *HTTPConfig) *HTTPProber {
+	var rd func(req *http.Request, via []*http.Request) error
+	if cfg.RedirectOFF {
+		rd = func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+	client := &http.Client{
+		Transport: &customTransport{
+			transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.SkipSSLVerification},
+			},
+			headers: cfg.Header,
+		},
+		CheckRedirect: rd,
+	}
 	return &HTTPProber{
-		client:   &http.Client{},
+		client:   client,
 		targets:  targets,
 		config:   cfg,
 		exitChan: make(chan bool),
@@ -125,4 +149,11 @@ func (p *HTTPProber) Start(r chan *Event, interval, timeout time.Duration) error
 
 func (p *HTTPProber) Stop() {
 	p.exitChan <- true
+}
+
+func (c *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	for k, v := range c.headers {
+		req.Header[k] = v
+	}
+	return c.transport.RoundTrip(req)
 }
