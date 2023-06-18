@@ -12,6 +12,8 @@ import (
 	"github.com/servak/mping/internal/ui"
 )
 
+const DefaultICMPBody = "mping"
+
 type Config struct {
 	Prober map[string]*prober.ProberConfig `yaml:"prober"`
 	UI     *ui.UIConfig                    `yaml:"ui"`
@@ -26,11 +28,15 @@ func DefaultConfig() *Config {
 		Prober: map[string]*prober.ProberConfig{
 			string(prober.ICMPV4): {
 				Probe: prober.ICMPV4,
-				ICMP:  &prober.ICMPConfig{},
+				ICMP: &prober.ICMPConfig{
+					Body: DefaultICMPBody,
+				},
 			},
 			string(prober.ICMPV6): {
 				Probe: prober.ICMPV6,
-				ICMP:  &prober.ICMPConfig{},
+				ICMP: &prober.ICMPConfig{
+					Body: DefaultICMPBody,
+				},
 			},
 			string(prober.HTTP): {
 				Probe: prober.HTTP,
@@ -74,4 +80,9 @@ func LoadFile(path string) (*Config, error) {
 		return DefaultConfig(), err
 	}
 	return Load(string(out))
+}
+
+func Marshal(c *Config) string {
+	out, _ := yaml.Marshal(c)
+	return string(out)
 }

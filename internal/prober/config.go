@@ -10,8 +10,8 @@ import (
 type (
 	ProberConfig struct {
 		Probe ProbeType   `yaml:"probe"`
-		ICMP  *ICMPConfig `yaml:"icmp"`
-		HTTP  *HTTPConfig `yaml:"http"`
+		ICMP  *ICMPConfig `yaml:"icmp,omitempty"`
+		HTTP  *HTTPConfig `yaml:"http,omitempty"`
 	}
 )
 

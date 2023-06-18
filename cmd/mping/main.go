@@ -19,7 +19,10 @@ func Execute() {
 	cmd.Version = Version
 	cmd.Flags().BoolP("version", "v", false, "Display version")
 	cmd.SetVersionTemplate(fmt.Sprintf("mping, version: {{ .Version }} (revision: %s, goversion: %s)", Revision, GoVersion))
-	cmd.AddCommand(command.NewPingBatchCmd())
+	cmd.AddCommand(
+		command.NewPingBatchCmd(),
+		command.NewConfigCmd(),
+	)
 	cmd.CompletionOptions.HiddenDefaultCmd = true
 	cmd.SetOutput(os.Stdout)
 
