@@ -133,7 +133,8 @@ func (c *CUI) Close() {
 func (c *CUI) keybindings() error {
 	keymaps := map[string]func(*gocui.Gui, *gocui.View) error{
 		"q": c.quit,
-		"s": c.changeSort,
+		"s": c.changeSort(false),
+		"S": c.changeSort(true),
 		"j": originDown,
 		"k": originUp,
 		"g": originGoTop,
@@ -156,29 +157,40 @@ func (c CUI) quit(g *gocui.Gui, v *gocui.View) error {
 	return gocui.ErrQuit
 }
 
-func (c *CUI) changeSort(g *gocui.Gui, v *gocui.View) error {
-	if int(c.key+1) < len(stats.Keys()) {
-		c.key++
-	} else {
-		c.key = 0
-	}
-	c.g.Update(func(g *gocui.Gui) error {
-		v, err := g.View("header")
-		if err != nil {
-			return err
+func (c *CUI) changeSort(reverse bool) func(*gocui.Gui, *gocui.View) error {
+	return func(g *gocui.Gui, v *gocui.View) error {
+		if reverse {
+			if int(c.key) == 0 {
+				c.key = stats.Key(len(stats.Keys()) - 1)
+			} else {
+				c.key--
+			}
+		} else {
+			if int(c.key+1) < len(stats.Keys()) {
+				c.key++
+			} else {
+				c.key = 0
+			}
 		}
-		maxX, _ := g.Size()
-		v.Clear()
-		msg := fmt.Sprintf("Sort: %s, Interval: %dms", c.key, c.interval.Milliseconds())
-		marginN := (maxX/2 - len(c.config.Title)/2) - len(msg)
-		if marginN < 0 {
-			marginN = 1
-		}
-		margin := strings.Repeat(" ", marginN)
-		fmt.Fprintln(v, msg+margin+c.config.Title)
+
+		c.g.Update(func(g *gocui.Gui) error {
+			v, err := g.View("header")
+			if err != nil {
+				return err
+			}
+			maxX, _ := g.Size()
+			v.Clear()
+			msg := fmt.Sprintf("Sort: %s, Interval: %dms", c.key, c.interval.Milliseconds())
+			marginN := (maxX/2 - len(c.config.Title)/2) - len(msg)
+			if marginN < 0 {
+				marginN = 1
+			}
+			margin := strings.Repeat(" ", marginN)
+			fmt.Fprintln(v, msg+margin+c.config.Title)
+			return nil
+		})
 		return nil
-	})
-	return nil
+	}
 }
 
 func (c *CUI) reset(g *gocui.Gui, v *gocui.View) error {
