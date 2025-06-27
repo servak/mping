@@ -57,6 +57,10 @@ mping http://google.com`,
 			if err != nil {
 				return err
 			}
+			sourceInterface, err := flags.GetString("interface")
+			if err != nil {
+				return err
+			}
 
 			hosts := parseHostnames(args, filename)
 			if len(hosts) == 0 {
@@ -67,6 +71,7 @@ mping http://google.com`,
 
 			cfg, _ := config.LoadFile(path)
 			cfg.SetTitle(title)
+			cfg.SetSourceInterface(sourceInterface)
 			_interval := time.Duration(interval) * time.Millisecond
 			_timeout := time.Duration(timeout) * time.Millisecond
 
@@ -104,6 +109,7 @@ mping http://google.com`,
 	flags.StringP("filename", "f", "", "use contents of file")
 	flags.StringP("title", "n", "", "print title")
 	flags.StringP("config", "c", "~/.mping.yml", "config path")
+	flags.StringP("interface", "I", "", "source interface (name or IP address)")
 	flags.IntP("interval", "i", 1000, "interval(ms)")
 	flags.IntP("timeout", "t", 1000, "timeout(ms)")
 

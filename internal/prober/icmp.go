@@ -34,9 +34,10 @@ type (
 	}
 
 	ICMPConfig struct {
-		Body string `yaml:"body"`
-		TOS  int    `yaml:"tos"`
-		TTL  int    `yaml:"ttl"`
+		Body            string `yaml:"body"`
+		TOS             int    `yaml:"tos"`
+		TTL             int    `yaml:"ttl"`
+		SourceInterface string `yaml:"source_interface"`
 	}
 
 	runTime struct {
@@ -57,8 +58,15 @@ func NewICMPProber(t ProbeType, addrs []*net.IPAddr, cfg *ICMPConfig) (*ICMPProb
 		c   *icmp.PacketConn
 		err error
 	)
+	
+	// Resolve source interface to IP address if specified
+	sourceAddr, err := resolveSourceInterface(cfg.SourceInterface, t)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve source interface: %v", err)
+	}
+	
 	if t == ICMPV4 {
-		c, err = icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+		c, err = icmp.ListenPacket("ip4:icmp", sourceAddr)
 		if err != nil {
 			return nil, err
 		}
@@ -70,7 +78,7 @@ func NewICMPProber(t ProbeType, addrs []*net.IPAddr, cfg *ICMPConfig) (*ICMPProb
 			p.SetTTL(cfg.TTL)
 		}
 	} else {
-		c, err = icmp.ListenPacket("ip6:ipv6-icmp", "::")
+		c, err = icmp.ListenPacket("ip6:ipv6-icmp", sourceAddr)
 	}
 	return &ICMPProber{
 		version:  t,
@@ -282,4 +290,57 @@ func (p *ICMPProber) Start(r chan *Event, interval, timeout time.Duration) error
 
 func (p *ICMPProber) Stop() {
 	p.exitChan <- true
+}
+
+// resolveSourceInterface resolves interface name or IP address to a bind address
+func resolveSourceInterface(sourceInterface string, probeType ProbeType) (string, error) {
+	if sourceInterface == "" {
+		// Return default bind address for the protocol
+		if probeType == ICMPV4 {
+			return "0.0.0.0", nil
+		}
+		return "::", nil
+	}
+	
+	// Try to parse as IP address first
+	ip := net.ParseIP(sourceInterface)
+	if ip != nil {
+		// Validate IP version matches probe type
+		if probeType == ICMPV4 && ip.To4() == nil {
+			return "", fmt.Errorf("IPv4 address required for ICMPv4, got: %s", sourceInterface)
+		}
+		if probeType == ICMPV6 && ip.To4() != nil {
+			return "", fmt.Errorf("IPv6 address required for ICMPv6, got: %s", sourceInterface)
+		}
+		return sourceInterface, nil
+	}
+	
+	// Try to resolve as interface name
+	iface, err := net.InterfaceByName(sourceInterface)
+	if err != nil {
+		return "", fmt.Errorf("interface not found: %s", sourceInterface)
+	}
+	
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return "", fmt.Errorf("failed to get addresses for interface %s: %v", sourceInterface, err)
+	}
+	
+	// Find appropriate IP address for the probe type
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		
+		if probeType == ICMPV4 && ipNet.IP.To4() != nil {
+			return ipNet.IP.String(), nil
+		}
+		if probeType == ICMPV6 && ipNet.IP.To4() == nil && !ipNet.IP.IsLoopback() {
+			return ipNet.IP.String(), nil
+		}
+	}
+	
+	return "", fmt.Errorf("no suitable %s address found on interface %s", 
+		map[ProbeType]string{ICMPV4: "IPv4", ICMPV6: "IPv6"}[probeType], sourceInterface)
 }
