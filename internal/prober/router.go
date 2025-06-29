@@ -18,16 +18,16 @@ func NewTargetRouter(probers []Prober) *TargetRouter {
 }
 
 // RouteTargets routes multiple targets and returns registration info
-func (r *TargetRouter) RouteTargets(targets []string) (map[string]string, error) {
-	registrations := make(map[string]string) // target -> displayName
+func (r *TargetRouter) RouteTargets(targets []string) ([]ProbeTarget, error) {
+	var registrations []ProbeTarget
 	
 	for _, target := range targets {
 		found := false
 		for _, prober := range r.probers {
-			displayName, err := prober.Accept(target)
+			probeTarget, err := prober.Accept(target)
 			if err == nil {
 				// Target accepted
-				registrations[target] = displayName
+				registrations = append(registrations, probeTarget)
 				found = true
 				break
 			}

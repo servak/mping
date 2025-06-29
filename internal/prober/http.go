@@ -65,19 +65,22 @@ func NewHTTPProber(cfg *HTTPConfig) *HTTPProber {
 	}
 }
 
-func (p *HTTPProber) Accept(target string) (string, error) {
+func (p *HTTPProber) Accept(target string) (ProbeTarget, error) {
 	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-		return "", ErrNotAccepted
+		return ProbeTarget{}, ErrNotAccepted
 	}
 	
 	// Validate URL format
 	if u, err := url.Parse(target); err == nil && u.Host != "" {
 		p.targets = append(p.targets, target)
-		// Use full URL as both target and display name for consistency
-		return target, nil
+		// For HTTP, Key and DisplayName are the same (full URL)
+		return ProbeTarget{
+			Key:         target,
+			DisplayName: target,
+		}, nil
 	}
 	
-	return "", fmt.Errorf("invalid HTTP URL format")
+	return ProbeTarget{}, fmt.Errorf("invalid HTTP URL format")
 }
 
 func (p *HTTPProber) HasTargets() bool {

@@ -30,8 +30,13 @@ type Event struct {
 	Message  string
 }
 
+type ProbeTarget struct {
+	Key         string
+	DisplayName string
+}
+
 type Prober interface {
-	Accept(target string) (displayName string, err error)
+	Accept(target string) (ProbeTarget, error)
 	HasTargets() bool
 	Start(chan *Event, time.Duration, time.Duration) error
 	Stop()

@@ -91,7 +91,7 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig) (*ICMPProber, error) {
 	}, err
 }
 
-func (p *ICMPProber) Accept(target string) (string, error) {
+func (p *ICMPProber) Accept(target string) (ProbeTarget, error) {
 	var hostname string
 	
 	// Check if it's legacy format (icmpv4:host or icmpv6:host)  
@@ -101,7 +101,7 @@ func (p *ICMPProber) Accept(target string) (string, error) {
 		// For ICMPv4, accept plain hostnames/IPs (without any protocol prefix)
 		hostname = target
 	} else {
-		return "", ErrNotAccepted
+		return ProbeTarget{}, ErrNotAccepted
 	}
 	
 	// Determine resolver type based on ICMP version
@@ -113,14 +113,14 @@ func (p *ICMPProber) Accept(target string) (string, error) {
 	// Resolve hostname to IP address
 	ip, err := net.ResolveIPAddr(resolvType, hostname)
 	if err != nil {
-		return "", fmt.Errorf("failed to resolve '%s': %w", hostname, err)
+		return ProbeTarget{}, fmt.Errorf("failed to resolve '%s': %w", hostname, err)
 	}
 	
 	// Check for duplicate IP addresses
 	ipStr := ip.String()
 	for _, existingIP := range p.targets {
 		if existingIP.String() == ipStr {
-			return "", fmt.Errorf("duplicate target: %s resolves to already registered IP %s", hostname, ipStr)
+			return ProbeTarget{}, fmt.Errorf("duplicate target: %s resolves to already registered IP %s", hostname, ipStr)
 		}
 	}
 	
@@ -133,7 +133,11 @@ func (p *ICMPProber) Accept(target string) (string, error) {
 	// Store target
 	p.targets = append(p.targets, ip)
 	
-	return displayName, nil
+	// Return ProbeTarget with IP as Key (for Event.Target) and formatted displayName
+	return ProbeTarget{
+		Key:         ipStr,
+		DisplayName: displayName,
+	}, nil
 }
 
 

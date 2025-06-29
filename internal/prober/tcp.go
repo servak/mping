@@ -34,18 +34,24 @@ func NewTCPProber(cfg *TCPConfig) *TCPProber {
 	}
 }
 
-func (p *TCPProber) Accept(target string) (string, error) {
+func (p *TCPProber) Accept(target string) (ProbeTarget, error) {
 	if !strings.HasPrefix(target, "tcp://") {
-		return "", ErrNotAccepted
+		return ProbeTarget{}, ErrNotAccepted
 	}
 	
 	host, port, err := p.parseTarget(target)
 	if err != nil {
-		return "", fmt.Errorf("invalid TCP target: %w", err)
+		return ProbeTarget{}, fmt.Errorf("invalid TCP target: %w", err)
 	}
 	
 	p.targets = append(p.targets, target)
-	return net.JoinHostPort(host, port), nil
+	displayName := net.JoinHostPort(host, port)
+	
+	// For TCP, Key and DisplayName are the same
+	return ProbeTarget{
+		Key:         displayName,
+		DisplayName: displayName,
+	}, nil
 }
 
 func (p *TCPProber) HasTargets() bool {
