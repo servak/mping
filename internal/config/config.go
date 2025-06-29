@@ -23,6 +23,16 @@ func (c *Config) SetTitle(t string) {
 	c.UI.CUI.Title = t
 }
 
+func (c *Config) SetSourceInterface(sourceInterface string) {
+	if sourceInterface != "" {
+		for _, prober := range c.Prober {
+			if prober.ICMP != nil {
+				prober.ICMP.SourceInterface = sourceInterface
+			}
+		}
+	}
+}
+
 func DefaultConfig() *Config {
 	return &Config{
 		Prober: map[string]*prober.ProberConfig{
