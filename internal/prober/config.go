@@ -29,6 +29,6 @@ func convertToDuration(s string) (time.Duration, error) {
 		}
 		return time.Duration(seconds) * time.Second, nil
 	} else {
-		return 0, fmt.Errorf("Invalid duration format")
+		return 0, fmt.Errorf("invalid duration format")
 	}
 }

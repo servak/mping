@@ -1,8 +1,6 @@
 module github.com/servak/mping
 
-go 1.23.0
-
-toolchain go1.24.4
+go 1.24
 
 require (
 	github.com/awesome-gocui/gocui v1.1.0

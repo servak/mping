@@ -219,7 +219,7 @@ func newProber(cfg *prober.ProberConfig, manager *stats.MetricsManager, targets 
 		}
 		probe = prober.NewHTTPProber(unique(ts), cfg.HTTP)
 	default:
-		err = fmt.Errorf("%s not found. please set implement prober.", cfg.Probe)
+		err = fmt.Errorf("%s not found, please set implement prober", cfg.Probe)
 	}
 	return probe, err
 }

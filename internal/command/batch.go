@@ -77,10 +77,7 @@ mping batch http://google.com`,
 				}(p)
 			}
 			cmd.Print("probe")
-			for {
-				if 0 >= counter {
-					break
-				}
+			for counter > 0 {
 				counter--
 				cmd.Print(".")
 				time.Sleep(_interval)
