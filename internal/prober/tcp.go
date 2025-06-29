@@ -13,15 +13,8 @@ const (
 )
 
 type (
-	TCPTarget struct {
-		Original    string
-		Host        string 
-		Port        string
-		DisplayName string
-	}
-	
 	TCPProber struct {
-		targets  []*TCPTarget
+		targets  []string
 		config   *TCPConfig
 		exitChan chan bool
 		wg       sync.WaitGroup
@@ -35,7 +28,7 @@ type (
 
 func NewTCPProber(cfg *TCPConfig) *TCPProber {
 	return &TCPProber{
-		targets:  make([]*TCPTarget, 0),
+		targets:  make([]string, 0),
 		config:   cfg,
 		exitChan: make(chan bool),
 	}
@@ -51,16 +44,8 @@ func (p *TCPProber) Accept(target string) (string, error) {
 		return "", fmt.Errorf("invalid TCP target: %w", err)
 	}
 	
-	displayName := net.JoinHostPort(host, port)
-	tcpTarget := &TCPTarget{
-		Original:    target,
-		Host:        host,
-		Port:        port,
-		DisplayName: displayName,
-	}
-	
-	p.targets = append(p.targets, tcpTarget)
-	return displayName, nil
+	p.targets = append(p.targets, target)
+	return net.JoinHostPort(host, port), nil
 }
 
 func (p *TCPProber) HasTargets() bool {
@@ -79,7 +64,7 @@ func (p *TCPProber) Start(result chan *Event, interval, timeout time.Duration) e
 				return
 			case <-ticker.C:
 				for _, target := range p.targets {
-					go p.sendProbeTarget(result, target, timeout)
+					go p.sendProbe(result, target, timeout)
 				}
 			}
 		}
@@ -94,9 +79,19 @@ func (p *TCPProber) Stop() {
 }
 
 
-func (p *TCPProber) sendProbeTarget(result chan *Event, target *TCPTarget, timeout time.Duration) {
+func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Duration) {
+	// Parse target to extract host and port
+	host, port, err := p.parseTarget(target)
+	if err != nil {
+		p.failed(result, target, time.Now(), err)
+		return
+	}
+
+	// Use host:port format for display
+	displayTarget := net.JoinHostPort(host, port)
+	
 	now := time.Now()
-	p.sent(result, target.DisplayName, now)
+	p.sent(result, displayTarget, now)
 
 	// Create dialer with timeout
 	dialer := &net.Dialer{
@@ -111,17 +106,17 @@ func (p *TCPProber) sendProbeTarget(result chan *Event, target *TCPTarget, timeo
 	}
 
 	// Attempt TCP connection
-	conn, err := dialer.Dial("tcp", net.JoinHostPort(target.Host, target.Port))
+	conn, err := dialer.Dial("tcp", net.JoinHostPort(host, port))
 	rtt := time.Since(now)
 
 	if err != nil {
-		p.failed(result, target.DisplayName, now, err)
+		p.failed(result, displayTarget, now, err)
 		return
 	}
 
 	// Close connection immediately after successful establishment
 	conn.Close()
-	p.success(result, target.DisplayName, now, rtt)
+	p.success(result, displayTarget, now, rtt)
 }
 
 func (p *TCPProber) parseTarget(target string) (host, port string, err error) {

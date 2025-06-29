@@ -25,7 +25,6 @@ type (
 		c        *icmp.PacketConn
 		body     []byte
 		targets  []*net.IPAddr
-		targetMap map[string]string  // IP -> displayName mapping
 		timeout  time.Duration
 		runCnt   int
 		runID    int
@@ -81,26 +80,25 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig) (*ICMPProber, error) {
 		c, err = icmp.ListenPacket("ip6:ipv6-icmp", sourceAddr)
 	}
 	return &ICMPProber{
-		version:   t,
-		c:         c,
-		tables:    make(map[runTime]map[string]bool),
-		targets:   make([]*net.IPAddr, 0),
-		targetMap: make(map[string]string),
-		runID:     os.Getpid() & 0xffff,
-		runCnt:    0,
-		body:      []byte(cfg.Body),
-		exitChan:  make(chan bool),
+		version:  t,
+		c:        c,
+		tables:   make(map[runTime]map[string]bool),
+		targets:  make([]*net.IPAddr, 0),
+		runID:    os.Getpid() & 0xffff,
+		runCnt:   0,
+		body:     []byte(cfg.Body),
+		exitChan: make(chan bool),
 	}, err
 }
 
 func (p *ICMPProber) Accept(target string) (string, error) {
 	var hostname string
 	
-	// Check if it's legacy format (icmpv4:host or icmpv6:host)
+	// Check if it's legacy format (icmpv4:host or icmpv6:host)  
 	if strings.HasPrefix(target, string(p.version)+":") {
 		hostname = strings.TrimPrefix(target, string(p.version)+":")
-	} else if p.version == ICMPV4 && isPlainHostname(target) {
-		// For ICMPv4, accept plain hostnames/IPs
+	} else if p.version == ICMPV4 && !strings.Contains(target, "://") && !strings.Contains(target, ":") {
+		// For ICMPv4, accept plain hostnames/IPs (without any protocol prefix)
 		hostname = target
 	} else {
 		return "", ErrNotAccepted
@@ -122,7 +120,7 @@ func (p *ICMPProber) Accept(target string) (string, error) {
 	ipStr := ip.String()
 	for _, existingIP := range p.targets {
 		if existingIP.String() == ipStr {
-			return p.targetMap[ipStr], nil // Return existing display name
+			return "", fmt.Errorf("duplicate target: %s resolves to already registered IP %s", hostname, ipStr)
 		}
 	}
 	
@@ -132,18 +130,12 @@ func (p *ICMPProber) Accept(target string) (string, error) {
 		displayName = fmt.Sprintf("%s(%s)", hostname, ip.String())
 	}
 	
-	// Store target and mapping
+	// Store target
 	p.targets = append(p.targets, ip)
-	p.targetMap[ipStr] = displayName
 	
 	return displayName, nil
 }
 
-// isPlainHostname checks if the target is a plain hostname/IP without protocol prefix
-func isPlainHostname(target string) bool {
-	// Not a URL scheme and not legacy format
-	return !strings.Contains(target, "://") && !strings.Contains(target, ":")
-}
 
 func (p *ICMPProber) HasTargets() bool {
 	return len(p.targets) > 0
