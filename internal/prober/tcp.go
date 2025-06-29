@@ -44,13 +44,22 @@ func (p *TCPProber) Accept(target string) (ProbeTarget, error) {
 		return ProbeTarget{}, fmt.Errorf("invalid TCP target: %w", err)
 	}
 	
-	p.targets = append(p.targets, target)
-	displayName := net.JoinHostPort(host, port)
+	// DNS解決を事前に実行
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return ProbeTarget{}, fmt.Errorf("failed to resolve '%s': %w", host, err)
+	}
 	
-	// For TCP, Key and DisplayName are the same
+	// 最初のIPを使用
+	ip := ips[0]
+	ipPort := net.JoinHostPort(ip.String(), port)
+	hostPort := net.JoinHostPort(host, port)
+	
+	p.targets = append(p.targets, ipPort) // IPアドレス:ポートの文字列
+	
 	return ProbeTarget{
-		Key:         displayName,
-		DisplayName: displayName,
+		Key:         ipPort,        // "1.2.3.4:80" - for Event.Target
+		DisplayName: hostPort,      // "google.com:80" - for display
 	}, nil
 }
 
@@ -86,18 +95,9 @@ func (p *TCPProber) Stop() {
 
 
 func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Duration) {
-	// Parse target to extract host and port
-	host, port, err := p.parseTarget(target)
-	if err != nil {
-		p.failed(result, target, time.Now(), err)
-		return
-	}
-
-	// Use host:port format for display
-	displayTarget := net.JoinHostPort(host, port)
-	
+	// target is already in "ip:port" format from Accept method
 	now := time.Now()
-	p.sent(result, displayTarget, now)
+	p.sent(result, target, now)
 
 	// Create dialer with timeout
 	dialer := &net.Dialer{
@@ -111,18 +111,18 @@ func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Du
 		}
 	}
 
-	// Attempt TCP connection
-	conn, err := dialer.Dial("tcp", net.JoinHostPort(host, port))
+	// Attempt TCP connection using pre-resolved IP:port
+	conn, err := dialer.Dial("tcp", target)
 	rtt := time.Since(now)
 
 	if err != nil {
-		p.failed(result, displayTarget, now, err)
+		p.failed(result, target, now, err)
 		return
 	}
 
 	// Close connection immediately after successful establishment
 	conn.Close()
-	p.success(result, displayTarget, now, rtt)
+	p.success(result, target, now, rtt)
 }
 
 func (p *TCPProber) parseTarget(target string) (host, port string, err error) {
