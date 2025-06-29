@@ -47,8 +47,6 @@ type (
 
 	rcvdPkt struct {
 		id, seq uint16
-		data    []byte
-		tsUnix  int64
 		target  string
 	}
 )
