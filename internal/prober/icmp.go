@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,7 +52,7 @@ type (
 	}
 )
 
-func NewICMPProber(t ProbeType, addrs []*net.IPAddr, cfg *ICMPConfig) (*ICMPProber, error) {
+func NewICMPProber(t ProbeType, cfg *ICMPConfig) (*ICMPProber, error) {
 	var (
 		c   *icmp.PacketConn
 		err error
@@ -82,12 +83,58 @@ func NewICMPProber(t ProbeType, addrs []*net.IPAddr, cfg *ICMPConfig) (*ICMPProb
 		version:  t,
 		c:        c,
 		tables:   make(map[runTime]map[string]bool),
-		targets:  addrs,
+		targets:  make([]*net.IPAddr, 0),
 		runID:    os.Getpid() & 0xffff,
 		runCnt:   0,
 		body:     []byte(cfg.Body),
 		exitChan: make(chan bool),
 	}, err
+}
+
+func (p *ICMPProber) Accept(target string) (string, error) {
+	var hostname string
+	
+	// Check if it's legacy format (icmpv4:host or icmpv6:host)
+	if strings.HasPrefix(target, string(p.version)+":") {
+		hostname = strings.TrimPrefix(target, string(p.version)+":")
+	} else if p.version == ICMPV4 && isPlainHostname(target) {
+		// For ICMPv4, accept plain hostnames/IPs
+		hostname = target
+	} else {
+		return "", ErrNotAccepted
+	}
+	
+	// Determine resolver type based on ICMP version
+	resolvType := "ip4"
+	if p.version == ICMPV6 {
+		resolvType = "ip6"
+	}
+	
+	// Resolve hostname to IP address
+	ip, err := net.ResolveIPAddr(resolvType, hostname)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve '%s': %w", hostname, err)
+	}
+	
+	p.targets = append(p.targets, ip)
+	
+	// Generate display name
+	displayName := ip.String()
+	if net.ParseIP(hostname) == nil {
+		displayName = fmt.Sprintf("%s(%s)", hostname, ip.String())
+	}
+	
+	return displayName, nil
+}
+
+// isPlainHostname checks if the target is a plain hostname/IP without protocol prefix
+func isPlainHostname(target string) bool {
+	// Not a URL scheme and not legacy format
+	return !strings.Contains(target, "://") && !strings.Contains(target, ":")
+}
+
+func (p *ICMPProber) HasTargets() bool {
+	return len(p.targets) > 0
 }
 
 func (p *ICMPProber) addTable(runCnt int, sentTime time.Time) {

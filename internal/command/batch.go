@@ -2,6 +2,7 @@ package command
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -64,10 +65,28 @@ mping batch http://google.com`,
 			_timeout := time.Duration(timeout) * time.Millisecond
 
 			res := make(chan *prober.Event)
-			probeTargets := splitProber(addDefaultProbeType(hosts), cfg)
+			
+			// Create all available probers
 			manager := stats.NewMetricsManager()
+			allProbers, err := createAllProbers(cfg)
+			if err != nil {
+				return fmt.Errorf("failed to create probers: %w", err)
+			}
+			
+			// Use TargetRouter for cleaner target handling
+			router := prober.NewTargetRouter(allProbers)
+			registrations, err := router.RouteTargets(hosts)
+			if err != nil {
+				return fmt.Errorf("failed to route targets: %w", err)
+			}
+			
+			// Register metrics
+			for target, displayName := range registrations {
+				manager.Register(target, displayName)
+			}
+			
+			probers := router.GetActiveProbers()
 			manager.Subscribe(res)
-			probers := setupProbers(probeTargets, res, manager)
 			var wg sync.WaitGroup
 			for _, p := range probers {
 				wg.Add(1)

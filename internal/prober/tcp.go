@@ -26,12 +26,30 @@ type (
 	}
 )
 
-func NewTCPProber(targets []string, cfg *TCPConfig) *TCPProber {
+func NewTCPProber(cfg *TCPConfig) *TCPProber {
 	return &TCPProber{
-		targets:  targets,
+		targets:  make([]string, 0),
 		config:   cfg,
 		exitChan: make(chan bool),
 	}
+}
+
+func (p *TCPProber) Accept(target string) (string, error) {
+	if !strings.HasPrefix(target, "tcp://") {
+		return "", ErrNotAccepted
+	}
+	
+	host, port, err := p.parseTarget(target)
+	if err != nil {
+		return "", fmt.Errorf("invalid TCP target: %w", err)
+	}
+	
+	p.targets = append(p.targets, target)
+	return net.JoinHostPort(host, port), nil
+}
+
+func (p *TCPProber) HasTargets() bool {
+	return len(p.targets) > 0
 }
 
 func (p *TCPProber) Start(result chan *Event, interval, timeout time.Duration) error {
