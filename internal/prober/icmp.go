@@ -25,6 +25,7 @@ type (
 		c        *icmp.PacketConn
 		body     []byte
 		targets  []*net.IPAddr
+		targetMap map[string]string  // IP -> displayName mapping
 		timeout  time.Duration
 		runCnt   int
 		runID    int
@@ -80,14 +81,15 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig) (*ICMPProber, error) {
 		c, err = icmp.ListenPacket("ip6:ipv6-icmp", sourceAddr)
 	}
 	return &ICMPProber{
-		version:  t,
-		c:        c,
-		tables:   make(map[runTime]map[string]bool),
-		targets:  make([]*net.IPAddr, 0),
-		runID:    os.Getpid() & 0xffff,
-		runCnt:   0,
-		body:     []byte(cfg.Body),
-		exitChan: make(chan bool),
+		version:   t,
+		c:         c,
+		tables:    make(map[runTime]map[string]bool),
+		targets:   make([]*net.IPAddr, 0),
+		targetMap: make(map[string]string),
+		runID:     os.Getpid() & 0xffff,
+		runCnt:    0,
+		body:      []byte(cfg.Body),
+		exitChan:  make(chan bool),
 	}, err
 }
 
@@ -116,13 +118,23 @@ func (p *ICMPProber) Accept(target string) (string, error) {
 		return "", fmt.Errorf("failed to resolve '%s': %w", hostname, err)
 	}
 	
-	p.targets = append(p.targets, ip)
+	// Check for duplicate IP addresses
+	ipStr := ip.String()
+	for _, existingIP := range p.targets {
+		if existingIP.String() == ipStr {
+			return p.targetMap[ipStr], nil // Return existing display name
+		}
+	}
 	
-	// Generate display name
+	// Generate display name for new target
 	displayName := ip.String()
 	if net.ParseIP(hostname) == nil {
 		displayName = fmt.Sprintf("%s(%s)", hostname, ip.String())
 	}
+	
+	// Store target and mapping
+	p.targets = append(p.targets, ip)
+	p.targetMap[ipStr] = displayName
 	
 	return displayName, nil
 }
@@ -263,7 +275,7 @@ func (p *ICMPProber) probe(r chan *Event) {
 	p.addTable(p.runCnt, n)
 	for _, t := range p.targets {
 		_, err := p.c.WriteTo(b, t)
-		p.sent(r, t.String())
+		p.sent(r, t.String())  // Use IP as event key
 		if err != nil {
 			p.failed(r, p.runCnt, t.String(), err)
 		}

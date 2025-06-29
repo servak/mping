@@ -70,10 +70,11 @@ func (p *HTTPProber) Accept(target string) (string, error) {
 		return "", ErrNotAccepted
 	}
 	
-	// Extract host from URL for display name
+	// Validate URL format
 	if u, err := url.Parse(target); err == nil && u.Host != "" {
 		p.targets = append(p.targets, target)
-		return u.Host, nil
+		// Use full URL as both target and display name for consistency
+		return target, nil
 	}
 	
 	return "", fmt.Errorf("invalid HTTP URL format")

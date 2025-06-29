@@ -80,9 +80,16 @@ mping batch http://google.com`,
 				return fmt.Errorf("failed to route targets: %w", err)
 			}
 			
-			// Register metrics
+			// Register metrics with proper key-displayName separation
 			for target, displayName := range registrations {
-				manager.Register(target, displayName)
+				// For ICMP targets, extract IP from displayName as key
+				if isICMPTarget(target) {
+					key := extractIPFromDisplayName(displayName)
+					manager.Register(key, displayName)
+				} else {
+					// For TCP/HTTP, use displayName as both key and display
+					manager.Register(displayName, displayName)
+				}
 			}
 			
 			probers := router.GetActiveProbers()

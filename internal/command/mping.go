@@ -3,6 +3,7 @@ package command
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -88,9 +89,16 @@ mping http://google.com`,
 				return fmt.Errorf("failed to route targets: %w", err)
 			}
 			
-			// Register metrics
+			// Register metrics with proper key-displayName separation
 			for target, displayName := range registrations {
-				manager.Register(target, displayName)
+				// For ICMP targets, extract IP from displayName as key
+				if isICMPTarget(target) {
+					key := extractIPFromDisplayName(displayName)
+					manager.Register(key, displayName)
+				} else {
+					// For TCP/HTTP, use displayName as both key and display
+					manager.Register(displayName, displayName)
+				}
 			}
 			
 			probers := router.GetActiveProbers()
@@ -199,26 +207,26 @@ func createAllProbers(cfg *config.Config) ([]prober.Prober, error) {
 	return probers, nil
 }
 
-func unique[T comparable](s []T) []T {
-	inResult := make(map[T]bool)
-	var result []T
-	for _, str := range s {
-		if _, ok := inResult[str]; !ok {
-			inResult[str] = true
-			result = append(result, str)
-		}
-	}
-	return result
+// isICMPTarget checks if target is ICMP-related
+func isICMPTarget(target string) bool {
+	return strings.HasPrefix(target, "icmpv4:") || 
+		   strings.HasPrefix(target, "icmpv6:") || 
+		   isPlainHostname(target)
 }
 
-func uniqueStringer[T fmt.Stringer](s []T) []T {
-	inResult := make(map[string]bool)
-	var result []T
-	for _, str := range s {
-		if _, ok := inResult[str.String()]; !ok {
-			inResult[str.String()] = true
-			result = append(result, str)
+// isPlainHostname checks if target is a plain hostname/IP
+func isPlainHostname(target string) bool {
+	return !strings.Contains(target, "://") && !strings.Contains(target, ":")
+}
+
+// extractIPFromDisplayName extracts IP from display names like "google.com(1.2.3.4)" or "1.2.3.4"
+func extractIPFromDisplayName(displayName string) string {
+	// If displayName is like "google.com(1.2.3.4)", extract "1.2.3.4"
+	if start := strings.Index(displayName, "("); start != -1 {
+		if end := strings.Index(displayName[start:], ")"); end != -1 {
+			return displayName[start+1 : start+end]
 		}
 	}
-	return result
+	// If displayName is already an IP, return as-is
+	return displayName
 }
