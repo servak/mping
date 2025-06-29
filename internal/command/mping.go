@@ -171,6 +171,18 @@ func addDefaultProbeType(hostnames []string) []string {
 func splitProber(targets []string, cfg *config.Config) map[*prober.ProberConfig][]string {
 	rules := make(map[*prober.ProberConfig][]string)
 	for _, t := range targets {
+		// Handle tcp:// URLs specially
+		if strings.HasPrefix(t, "tcp://") {
+			target := strings.TrimPrefix(t, "tcp://")
+			for k, c := range cfg.Prober {
+				if k == "tcp" {
+					rules[c] = append(rules[c], target)
+					break
+				}
+			}
+			continue
+		}
+		
 		probeTypeAndTarget := strings.SplitN(t, ":", 2)
 		if len(probeTypeAndTarget) != 2 {
 			continue
@@ -218,6 +230,15 @@ func newProber(cfg *prober.ProberConfig, manager *stats.MetricsManager, targets 
 			manager.Register(t, t)
 		}
 		probe = prober.NewHTTPProber(unique(ts), cfg.HTTP)
+	case prober.TCP:
+		var ts []string
+		for _, h := range targets {
+			t := fmt.Sprintf("%s://%s", cfg.Probe, h)
+			ts = append(ts, t)
+			// Register with host:port as key for display consistency
+			manager.Register(h, h)
+		}
+		probe = prober.NewTCPProber(unique(ts), cfg.TCP)
 	default:
 		err = fmt.Errorf("%s not found, please set implement prober", cfg.Probe)
 	}
