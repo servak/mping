@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,7 +52,7 @@ type (
 	}
 )
 
-func NewICMPProber(t ProbeType, addrs []*net.IPAddr, cfg *ICMPConfig) (*ICMPProber, error) {
+func NewICMPProber(t ProbeType, cfg *ICMPConfig) (*ICMPProber, error) {
 	var (
 		c   *icmp.PacketConn
 		err error
@@ -82,12 +83,66 @@ func NewICMPProber(t ProbeType, addrs []*net.IPAddr, cfg *ICMPConfig) (*ICMPProb
 		version:  t,
 		c:        c,
 		tables:   make(map[runTime]map[string]bool),
-		targets:  addrs,
+		targets:  make([]*net.IPAddr, 0),
 		runID:    os.Getpid() & 0xffff,
 		runCnt:   0,
 		body:     []byte(cfg.Body),
 		exitChan: make(chan bool),
 	}, err
+}
+
+func (p *ICMPProber) Accept(target string) (ProbeTarget, error) {
+	var hostname string
+	
+	// Check if it's legacy format (icmpv4:host or icmpv6:host)  
+	if strings.HasPrefix(target, string(p.version)+":") {
+		hostname = strings.TrimPrefix(target, string(p.version)+":")
+	} else if p.version == ICMPV4 && !strings.Contains(target, "://") && !strings.Contains(target, ":") {
+		// For ICMPv4, accept plain hostnames/IPs (without any protocol prefix)
+		hostname = target
+	} else {
+		return ProbeTarget{}, ErrNotAccepted
+	}
+	
+	// Determine resolver type based on ICMP version
+	resolvType := "ip4"
+	if p.version == ICMPV6 {
+		resolvType = "ip6"
+	}
+	
+	// Resolve hostname to IP address
+	ip, err := net.ResolveIPAddr(resolvType, hostname)
+	if err != nil {
+		return ProbeTarget{}, fmt.Errorf("failed to resolve '%s': %w", hostname, err)
+	}
+	
+	// Check for duplicate IP addresses
+	ipStr := ip.String()
+	for _, existingIP := range p.targets {
+		if existingIP.String() == ipStr {
+			return ProbeTarget{}, fmt.Errorf("duplicate target: %s resolves to already registered IP %s", hostname, ipStr)
+		}
+	}
+	
+	// Generate display name for new target
+	displayName := ip.String()
+	if net.ParseIP(hostname) == nil {
+		displayName = fmt.Sprintf("%s(%s)", hostname, ip.String())
+	}
+	
+	// Store target
+	p.targets = append(p.targets, ip)
+	
+	// Return ProbeTarget with IP as Key (for Event.Target) and formatted displayName
+	return ProbeTarget{
+		Key:         ipStr,
+		DisplayName: displayName,
+	}, nil
+}
+
+
+func (p *ICMPProber) HasTargets() bool {
+	return len(p.targets) > 0
 }
 
 func (p *ICMPProber) addTable(runCnt int, sentTime time.Time) {
@@ -216,7 +271,7 @@ func (p *ICMPProber) probe(r chan *Event) {
 	p.addTable(p.runCnt, n)
 	for _, t := range p.targets {
 		_, err := p.c.WriteTo(b, t)
-		p.sent(r, t.String())
+		p.sent(r, t.String())  // Use IP as event key
 		if err != nil {
 			p.failed(r, p.runCnt, t.String(), err)
 		}

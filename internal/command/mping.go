@@ -3,9 +3,6 @@ package command
 import (
 	"errors"
 	"fmt"
-	"net"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -76,9 +73,27 @@ mping http://google.com`,
 			_timeout := time.Duration(timeout) * time.Millisecond
 
 			res := make(chan *prober.Event)
-			probeTargets := splitProber(addDefaultProbeType(hosts), cfg)
+			
+			// Create all available probers
 			manager := stats.NewMetricsManager()
-			probers := setupProbers(probeTargets, res, manager)
+			allProbers, err := createAllProbers(cfg)
+			if err != nil {
+				return fmt.Errorf("failed to create probers: %w", err)
+			}
+			
+			// Use TargetRouter for cleaner target handling
+			router := prober.NewTargetRouter(allProbers)
+			registrations, err := router.RouteTargets(hosts)
+			if err != nil {
+				return fmt.Errorf("failed to route targets: %w", err)
+			}
+			
+			// Register metrics using ProbeTarget Key and DisplayName
+			for _, probeTarget := range registrations {
+				manager.Register(probeTarget.Key, probeTarget.DisplayName)
+			}
+			
+			probers := router.GetActiveProbers()
 			manager.Subscribe(res)
 			var wg sync.WaitGroup
 			for _, p := range probers {
@@ -116,18 +131,7 @@ mping http://google.com`,
 	return cmd
 }
 
-func setupProbers(probeTargets map[*prober.ProberConfig][]string, res chan *prober.Event, manager *stats.MetricsManager) []prober.Prober {
-	var probers []prober.Prober
-	for cfg, targets := range probeTargets {
-		p, err := newProber(cfg, manager, targets)
-		if err != nil {
-			fmt.Println(err.Error())
-			os.Exit(1)
-		}
-		probers = append(probers, p)
-	}
-	return probers
-}
+
 
 func startCUI(manager *stats.MetricsManager, cui *ui.CUIConfig, interval time.Duration) {
 	r, err := ui.NewCUI(manager, cui, interval)
@@ -151,99 +155,47 @@ func startCUI(manager *stats.MetricsManager, cui *ui.CUIConfig, interval time.Du
 	r.Run()
 }
 
-func addDefaultProbeType(hostnames []string) []string {
-	var res []string
-	for _, h := range hostnames {
-		if strings.Contains(h, ":") {
-			res = append(res, h)
-			continue
-		}
-		addr := net.ParseIP(h)
-		if addr == nil || addr.To4() != nil {
-			res = append(res, fmt.Sprintf("%s:%s", prober.ICMPV4, h))
+
+
+
+
+
+// createAllProbers creates all available probers based on config
+func createAllProbers(cfg *config.Config) ([]prober.Prober, error) {
+	var probers []prober.Prober
+	
+	// Create ICMPv4 prober (skip if permission denied)
+	if icmpv4Cfg, exists := cfg.Prober[string(prober.ICMPV4)]; exists {
+		icmpv4, err := prober.NewICMPProber(prober.ICMPV4, icmpv4Cfg.ICMP)
+		if err != nil {
+			fmt.Printf("Warning: failed to create ICMPv4 prober: %v\n", err)
 		} else {
-			res = append(res, fmt.Sprintf("%s:%s", prober.ICMPV6, h))
+			probers = append(probers, icmpv4)
 		}
 	}
-	return res
+	
+	// Create ICMPv6 prober (skip if permission denied)
+	if icmpv6Cfg, exists := cfg.Prober[string(prober.ICMPV6)]; exists {
+		icmpv6, err := prober.NewICMPProber(prober.ICMPV6, icmpv6Cfg.ICMP)
+		if err != nil {
+			fmt.Printf("Warning: failed to create ICMPv6 prober: %v\n", err)
+		} else {
+			probers = append(probers, icmpv6)
+		}
+	}
+	
+	// Create HTTP prober (handles both HTTP and HTTPS)
+	if httpCfg, exists := cfg.Prober[string(prober.HTTP)]; exists {
+		http := prober.NewHTTPProber(httpCfg.HTTP)
+		probers = append(probers, http)
+	}
+	
+	// Create TCP prober
+	if tcpCfg, exists := cfg.Prober[string(prober.TCP)]; exists {
+		tcp := prober.NewTCPProber(tcpCfg.TCP)
+		probers = append(probers, tcp)
+	}
+	
+	return probers, nil
 }
 
-func splitProber(targets []string, cfg *config.Config) map[*prober.ProberConfig][]string {
-	rules := make(map[*prober.ProberConfig][]string)
-	for _, t := range targets {
-		probeTypeAndTarget := strings.SplitN(t, ":", 2)
-		if len(probeTypeAndTarget) != 2 {
-			continue
-		}
-		for k, c := range cfg.Prober {
-			if probeTypeAndTarget[0] == k {
-				rules[c] = append(rules[c], probeTypeAndTarget[1])
-				break
-			}
-		}
-	}
-	return rules
-}
-
-func newProber(cfg *prober.ProberConfig, manager *stats.MetricsManager, targets []string) (prober.Prober, error) {
-	var (
-		probe prober.Prober
-		err   error
-	)
-	switch cfg.Probe {
-	case prober.ICMPV4, prober.ICMPV6:
-		resolvType := "ip4"
-		if cfg.Probe == prober.ICMPV6 {
-			resolvType = "ip6"
-		}
-		var addrs []*net.IPAddr
-		for _, h := range targets {
-			ip, err := net.ResolveIPAddr(resolvType, h)
-			if err != nil {
-				continue
-			}
-			addrs = append(addrs, ip)
-			name := ip.String()
-			if net.ParseIP(h) == nil {
-				name = fmt.Sprintf("%s(%s)", h, name)
-			}
-			manager.Register(ip.String(), name)
-		}
-		probe, err = prober.NewICMPProber(cfg.Probe, uniqueStringer(addrs), cfg.ICMP)
-	case prober.HTTP, prober.HTTPS:
-		var ts []string
-		for _, h := range targets {
-			t := fmt.Sprintf("%s:%s", cfg.Probe, h)
-			ts = append(ts, t)
-			manager.Register(t, t)
-		}
-		probe = prober.NewHTTPProber(unique(ts), cfg.HTTP)
-	default:
-		err = fmt.Errorf("%s not found, please set implement prober", cfg.Probe)
-	}
-	return probe, err
-}
-
-func unique[T comparable](s []T) []T {
-	inResult := make(map[T]bool)
-	var result []T
-	for _, str := range s {
-		if _, ok := inResult[str]; !ok {
-			inResult[str] = true
-			result = append(result, str)
-		}
-	}
-	return result
-}
-
-func uniqueStringer[T fmt.Stringer](s []T) []T {
-	inResult := make(map[string]bool)
-	var result []T
-	for _, str := range s {
-		if _, ok := inResult[str.String()]; !ok {
-			inResult[str.String()] = true
-			result = append(result, str)
-		}
-	}
-	return result
-}

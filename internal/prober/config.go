@@ -12,6 +12,7 @@ type (
 		Probe ProbeType   `yaml:"probe"`
 		ICMP  *ICMPConfig `yaml:"icmp,omitempty"`
 		HTTP  *HTTPConfig `yaml:"http,omitempty"`
+		TCP   *TCPConfig  `yaml:"tcp,omitempty"`
 	}
 )
 

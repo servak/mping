@@ -62,6 +62,13 @@ func DefaultConfig() *Config {
 					ExpectBody: "",
 				},
 			},
+			string(prober.TCP): {
+				Probe: prober.TCP,
+				TCP: &prober.TCPConfig{
+					SourceInterface: "",
+					Timeout:         "5000ms",
+				},
+			},
 		},
 		UI: &ui.UIConfig{
 			CUI: &ui.CUIConfig{

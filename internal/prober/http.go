@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -40,7 +41,7 @@ type (
 	}
 )
 
-func NewHTTPProber(targets []string, cfg *HTTPConfig) *HTTPProber {
+func NewHTTPProber(cfg *HTTPConfig) *HTTPProber {
 	var rd func(req *http.Request, via []*http.Request) error
 	if cfg.RedirectOFF {
 		rd = func(req *http.Request, via []*http.Request) error {
@@ -58,10 +59,32 @@ func NewHTTPProber(targets []string, cfg *HTTPConfig) *HTTPProber {
 	}
 	return &HTTPProber{
 		client:   client,
-		targets:  targets,
+		targets:  make([]string, 0),
 		config:   cfg,
 		exitChan: make(chan bool),
 	}
+}
+
+func (p *HTTPProber) Accept(target string) (ProbeTarget, error) {
+	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+		return ProbeTarget{}, ErrNotAccepted
+	}
+	
+	// Validate URL format
+	if u, err := url.Parse(target); err == nil && u.Host != "" {
+		p.targets = append(p.targets, target)
+		// For HTTP, Key and DisplayName are the same (full URL)
+		return ProbeTarget{
+			Key:         target,
+			DisplayName: target,
+		}, nil
+	}
+	
+	return ProbeTarget{}, fmt.Errorf("invalid HTTP URL format")
+}
+
+func (p *HTTPProber) HasTargets() bool {
+	return len(p.targets) > 0
 }
 
 func (p *HTTPProber) sent(r chan *Event, t string) {
