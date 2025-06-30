@@ -3,6 +3,13 @@ on:
   push:
     tags:
     - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run in dry-run mode (no publish)'
+        required: false
+        default: 'true'
+        type: boolean
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
@@ -19,7 +26,7 @@ jobs:
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
-          version: latest
-          args: release --clean
+          version: '~> v2'
+          args: release --clean ${{ github.event.inputs.dry_run == 'true' && '--snapshot --skip=publish' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
