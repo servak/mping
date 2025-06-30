@@ -13,6 +13,7 @@ type (
 		ICMP  *ICMPConfig `yaml:"icmp,omitempty"`
 		HTTP  *HTTPConfig `yaml:"http,omitempty"`
 		TCP   *TCPConfig  `yaml:"tcp,omitempty"`
+		DNS   *DNSConfig  `yaml:"dns,omitempty"`
 	}
 )
 

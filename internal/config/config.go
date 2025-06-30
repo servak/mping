@@ -69,6 +69,16 @@ func DefaultConfig() *Config {
 					Timeout:         "5000ms",
 				},
 			},
+			string(prober.DNS): {
+				Probe: prober.DNS,
+				DNS: &prober.DNSConfig{
+					Server:     "8.8.8.8",
+					Port:       53,
+					RecordType: "A",
+					UseTCP:     false,
+					Timeout:    "5000ms",
+				},
+			},
 		},
 		UI: &ui.UIConfig{
 			CUI: &ui.CUIConfig{

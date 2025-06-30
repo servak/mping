@@ -22,7 +22,8 @@ func NewPingBatchCmd() *cobra.Command {
 		Args:  cobra.MinimumNArgs(0),
 		Example: `mping batch 1.1.1.1 8.8.8.8
 mping batch icmpv6:google.com
-mping batch http://google.com`,
+mping batch http://google.com
+mping batch dns://8.8.8.8/google.com`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flags := cmd.Flags()
 			counter, err := flags.GetInt("count")

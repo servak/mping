@@ -5,6 +5,7 @@ go 1.24
 require (
 	github.com/awesome-gocui/gocui v1.1.0
 	github.com/jedib0t/go-pretty/v6 v6.4.6
+	github.com/miekg/dns v1.1.66
 	github.com/spf13/cobra v1.7.0
 	golang.org/x/net v0.41.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -21,8 +22,11 @@ require (
 	github.com/rivo/uniseg v0.4.3 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/testify v1.8.2 // indirect
+	golang.org/x/mod v0.25.0 // indirect
+	golang.org/x/sync v0.15.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/term v0.32.0 // indirect
 	golang.org/x/text v0.26.0 // indirect
+	golang.org/x/tools v0.33.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
 )
