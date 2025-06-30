@@ -22,7 +22,7 @@ mping
 | **ICMP v6** | `icmpv6:hostname` | `icmpv6:google.com` | IPv6 ping support |
 | **HTTP/HTTPS** | `http://url` or `https://url` | `https://google.com` | Web service monitoring |
 | **TCP** | `tcp://host:port` | `tcp://google.com:443` | Port connectivity testing |
-| **DNS** | `dns://server[:port]/domain[/record_type]` | `dns://8.8.8.8/google.com/A` | DNS query monitoring |
+| **DNS** | `dns://[server[:port]]/domain[/record_type]` | `dns://8.8.8.8/google.com/A`, `dns:///google.com` | DNS query monitoring |
 
 ## Demo
 
@@ -66,8 +66,11 @@ mping https://github.com https://google.com http://httpbin.org
 # IPv6 support
 mping icmpv6:google.com icmpv6:2001:4860:4860::8888
 
-# DNS monitoring
+# DNS monitoring with explicit servers
 mping dns://8.8.8.8/google.com/A dns://1.1.1.1/cloudflare.com/AAAA
+
+# DNS monitoring with defaults (uses 8.8.8.8:53, A record)
+mping "dns:///google.com" "dns:///github.com"
 ```
 
 ### Batch mode for automation
@@ -78,6 +81,44 @@ mping batch --count 10 google.com https://api.example.com
 # Use with external host lists
 mping batch -f hosts.txt --count 5
 ```
+
+## DNS Monitoring Details
+
+### DNS Target Format
+```
+dns://[server[:port]]/domain[/record_type]
+```
+
+- **server**: DNS server IP or hostname (optional, defaults to 8.8.8.8)
+- **port**: DNS server port (optional, defaults to 53)
+- **domain**: Domain name to query (required)
+- **record_type**: DNS record type (optional, defaults to A)
+
+### Supported Record Types
+A, AAAA, MX, CNAME, TXT, NS
+
+### DNS Examples
+```bash
+# Basic A record query using default server (8.8.8.8:53)
+mping "dns:///google.com"
+
+# Explicit server and record type
+mping dns://1.1.1.1/google.com/AAAA
+
+# Custom port
+mping dns://dns-server:5353/example.com/MX
+
+# Multiple DNS queries
+mping dns://8.8.8.8/google.com/A dns://1.1.1.1/google.com/AAAA
+```
+
+### Default Configuration
+DNS queries use these defaults (configurable via ~/.mping.yml):
+- Server: 8.8.8.8
+- Port: 53
+- Record Type: A
+- Protocol: UDP
+- Timeout: 5000ms
 
 ## Usage
 
