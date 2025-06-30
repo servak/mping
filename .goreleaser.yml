@@ -64,7 +64,7 @@ nfpms:
       - iproute2
     bindir: /usr/local/bin
     scripts:
-      postinstall: ./scripts/postinstall.sh
+      postinstall: ./packaging/postinstall.sh
     rpm:
       group: Applications/Internet
       summary: Multi-protocol network monitoring tool
