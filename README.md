@@ -22,6 +22,7 @@ mping
 | **ICMP v6** | `icmpv6:hostname` | `icmpv6:google.com` | IPv6 ping support |
 | **HTTP/HTTPS** | `http://url` or `https://url` | `https://google.com` | Web service monitoring |
 | **TCP** | `tcp://host:port` | `tcp://google.com:443` | Port connectivity testing |
+| **DNS** | `dns://server[:port]/domain[/record_type]` | `dns://8.8.8.8/google.com/A` | DNS query monitoring |
 
 ## Demo
 
@@ -64,6 +65,9 @@ mping https://github.com https://google.com http://httpbin.org
 
 # IPv6 support
 mping icmpv6:google.com icmpv6:2001:4860:4860::8888
+
+# DNS monitoring
+mping dns://8.8.8.8/google.com/A dns://1.1.1.1/cloudflare.com/AAAA
 ```
 
 ### Batch mode for automation

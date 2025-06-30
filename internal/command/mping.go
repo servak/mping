@@ -24,7 +24,8 @@ func NewPingCmd() *cobra.Command {
 		Args:          cobra.MinimumNArgs(0),
 		Example: `mping 1.1.1.1 8.8.8.8
 mping icmpv6:google.com
-mping http://google.com`,
+mping http://google.com
+mping dns://8.8.8.8/google.com`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flags := cmd.Flags()
 			interval, err := flags.GetInt("interval")
@@ -194,6 +195,12 @@ func createAllProbers(cfg *config.Config) ([]prober.Prober, error) {
 	if tcpCfg, exists := cfg.Prober[string(prober.TCP)]; exists {
 		tcp := prober.NewTCPProber(tcpCfg.TCP)
 		probers = append(probers, tcp)
+	}
+	
+	// Create DNS prober
+	if dnsCfg, exists := cfg.Prober[string(prober.DNS)]; exists {
+		dns := prober.NewDNSProber(dnsCfg.DNS)
+		probers = append(probers, dns)
 	}
 	
 	return probers, nil
