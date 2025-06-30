@@ -1,11 +1,17 @@
+version: 2
+
 project_name: mping
+
 env:
   - GO111MODULE=on
+
 before:
   hooks:
     - go mod tidy
+
 builds:
-  - main: ./cmd/mping/
+  - id: mping
+    main: ./cmd/mping/
     binary: mping
     ldflags:
       - -s -w
@@ -17,10 +23,13 @@ builds:
       - linux
       - windows
       - darwin
+    goarch:
+      - amd64
+      - arm64
+      - "386"
 
 archives:
-  - format: tar.gz
-    # this name template makes the OS and Arch compatible with the results of uname.
+  - id: mping-archive
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
@@ -28,17 +37,64 @@ archives:
       {{- else if eq .Arch "386" }}i386
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end }}
-    # use zip for windows archives
+    files:
+      - README.md
     format_overrides:
-    - goos: windows
-      format: zip
+      - goos: windows
+        format: zip
+
+# Linux packages
+nfpms:
+  - id: mping-packages
+    package_name: mping
+    vendor: Kakuya Ando
+    homepage: https://github.com/servak/mping
+    maintainer: Kakuya Ando <fservak@gmail.com>
+    description: |
+      Multi-target, multi-protocol network monitoring tool that extends traditional ping functionality.
+      Monitor multiple hosts and services simultaneously with real-time statistics and an interactive terminal UI.
+      Supports ICMP, HTTP/HTTPS, TCP, and DNS monitoring.
+    license: MIT
+    section: net
+    priority: optional
+    formats:
+      - deb
+      - rpm
+    dependencies:
+      - iproute2
+    bindir: /usr/local/bin
+    scripts:
+      postinstall: ./scripts/postinstall.sh
+    rpm:
+      group: Applications/Internet
+      summary: Multi-protocol network monitoring tool
+    deb:
+      fields:
+        Priority: optional
 
 release:
   prerelease: auto
+  name_template: "{{.ProjectName}} v{{.Version}}"
+  header: |
+    ## mping {{.Tag}} Release
+
+    Multi-target, multi-protocol network monitoring tool with DNS support.
 
 changelog:
   sort: asc
+  use: github
   filters:
     exclude:
       - '^docs:'
       - '^test:'
+      - '^ci:'
+      - '^chore:'
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
