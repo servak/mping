@@ -39,7 +39,9 @@ func ipInc(ip net.IP) {
 func file2hostnames(fp *os.File) []string {
 	hosts := []string{}
 	reader := bufio.NewReaderSize(fp, 4096)
-	r := regexp.MustCompile(`[#;/].*`)
+	// Fixed regex: only match # or ; at start of line or after whitespace
+	// This prevents breaking URLs like http://example.com
+	r := regexp.MustCompile(`(?:^|\s)[#;].*`)
 
 	for {
 		lb, _, err := reader.ReadLine()
@@ -60,9 +62,14 @@ func file2hostnames(fp *os.File) []string {
 
 func parseHostnames(args []string, fpath string) []string {
 	hosts := []string{}
-	fp, err := os.Open(fpath)
-	if err == nil {
-		hosts = file2hostnames(fp)
+	
+	// Only attempt to open file if path is not empty
+	if fpath != "" {
+		fp, err := os.Open(fpath)
+		if err == nil {
+			hosts = file2hostnames(fp)
+			fp.Close() // Critical fix: close file to prevent resource leak
+		}
 	}
 
 	hosts = append(hosts, args...)
