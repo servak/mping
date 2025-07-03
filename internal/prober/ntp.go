@@ -279,10 +279,11 @@ func (p *NTPProber) failed(result chan *Event, serverAddr, displayName string, s
 func ntpTimeFromTime(t time.Time) (uint32, uint32) {
 	// NTP epoch is January 1, 1900, Unix epoch is January 1, 1970
 	const ntpEpochOffset = 2208988800 // seconds between 1900 and 1970
+	const ntpFracScale = 1 << 32      // 2^32 for NTP fraction conversion
 	
 	unix := t.Unix()
 	sec := uint32(unix + ntpEpochOffset)
-	frac := uint32(t.Nanosecond() * 4294967296 / 1000000000) // Convert nanoseconds to NTP fraction
+	frac := uint32(int64(t.Nanosecond()) * ntpFracScale / 1000000000) // Convert nanoseconds to NTP fraction
 	
 	return sec, frac
 }
@@ -290,9 +291,10 @@ func ntpTimeFromTime(t time.Time) (uint32, uint32) {
 // ntpTimeToTime converts NTP timestamp to time.Time
 func ntpTimeToTime(sec, frac uint32) time.Time {
 	const ntpEpochOffset = 2208988800 // seconds between 1900 and 1970
+	const ntpFracScale = 1 << 32      // 2^32 for NTP fraction conversion
 	
 	unix := int64(sec) - ntpEpochOffset
-	nsec := int64(frac) * 1000000000 / 4294967296
+	nsec := int64(frac) * 1000000000 / ntpFracScale
 	
 	return time.Unix(unix, nsec)
 }
