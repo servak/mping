@@ -15,8 +15,9 @@ import (
 const DefaultICMPBody = "mping"
 
 type Config struct {
-	Prober map[string]*prober.ProberConfig `yaml:"prober"`
-	UI     *ui.UIConfig                    `yaml:"ui"`
+	Prober  map[string]*prober.ProberConfig `yaml:"prober"`
+	Default string                          `yaml:"default"`
+	UI      *ui.UIConfig                    `yaml:"ui"`
 }
 
 func (c *Config) SetTitle(t string) {
@@ -35,6 +36,7 @@ func (c *Config) SetSourceInterface(sourceInterface string) {
 
 func DefaultConfig() *Config {
 	return &Config{
+		Default: string(prober.ICMPV4),
 		Prober: map[string]*prober.ProberConfig{
 			string(prober.ICMPV4): {
 				Probe: prober.ICMPV4,
@@ -56,17 +58,19 @@ func DefaultConfig() *Config {
 				},
 			},
 			string(prober.HTTPS): {
-				Probe: prober.HTTPS,
+				Probe: prober.HTTP,
 				HTTP: &prober.HTTPConfig{
 					ExpectCode: 200,
 					ExpectBody: "",
+					TLS: &prober.TLSConfig{
+						SkipVerify: true, // Default to skipping SSL verification
+					},
 				},
 			},
 			string(prober.TCP): {
 				Probe: prober.TCP,
 				TCP: &prober.TCPConfig{
 					SourceInterface: "",
-					Timeout:         "5000ms",
 				},
 			},
 			string(prober.DNS): {
@@ -76,7 +80,6 @@ func DefaultConfig() *Config {
 					Port:       53,
 					RecordType: "A",
 					UseTCP:     false,
-					Timeout:    "5000ms",
 				},
 			},
 		},
@@ -110,6 +113,9 @@ func LoadFile(path string) (*Config, error) {
 }
 
 func Marshal(c *Config) string {
-	out, _ := yaml.Marshal(c)
-	return string(out)
+	var out strings.Builder
+	encoder := yaml.NewEncoder(&out)
+	encoder.SetIndent(2)
+	_ = encoder.Encode(c)
+	return out.String()
 }

@@ -14,57 +14,51 @@ const (
 
 type (
 	TCPProber struct {
-		targets  []string
+		targets  map[string]string // key (ip:port) -> displayName (host:port)
 		config   *TCPConfig
+		prefix   string
 		exitChan chan bool
 		wg       sync.WaitGroup
 	}
 
 	TCPConfig struct {
-		SourceInterface string `yaml:"source_interface"`
-		Timeout         string `yaml:"timeout"`
+		SourceInterface string `yaml:"source_interface,omitempty"`
 	}
 )
 
-func NewTCPProber(cfg *TCPConfig) *TCPProber {
+func NewTCPProber(cfg *TCPConfig, prefix string) *TCPProber {
 	return &TCPProber{
-		targets:  make([]string, 0),
+		targets:  make(map[string]string),
 		config:   cfg,
+		prefix:   prefix,
 		exitChan: make(chan bool),
 	}
 }
 
-func (p *TCPProber) Accept(target string) (ProbeTarget, error) {
-	if !strings.HasPrefix(target, "tcp://") {
-		return ProbeTarget{}, ErrNotAccepted
+func (p *TCPProber) Accept(target string) error {
+	// Check if it's new format (tcp://host:port)
+	if !strings.HasPrefix(target, p.prefix+"://") && !strings.HasPrefix(target, p.prefix+":") {
+		return ErrNotAccepted
 	}
-	
+
 	host, port, err := p.parseTarget(target)
 	if err != nil {
-		return ProbeTarget{}, fmt.Errorf("invalid TCP target: %w", err)
+		return fmt.Errorf("invalid TCP target: %w", err)
 	}
-	
+
 	// DNS解決を事前に実行
 	ips, err := net.LookupIP(host)
 	if err != nil {
-		return ProbeTarget{}, fmt.Errorf("failed to resolve '%s': %w", host, err)
+		return fmt.Errorf("failed to resolve '%s': %w", host, err)
 	}
-	
+
 	// 最初のIPを使用
 	ip := ips[0]
 	ipPort := net.JoinHostPort(ip.String(), port)
-	hostPort := net.JoinHostPort(host, port)
-	
-	p.targets = append(p.targets, ipPort) // IPアドレス:ポートの文字列
-	
-	return ProbeTarget{
-		Key:         ipPort,        // "1.2.3.4:80" - for Event.Target
-		DisplayName: hostPort,      // "google.com:80" - for display
-	}, nil
-}
 
-func (p *TCPProber) HasTargets() bool {
-	return len(p.targets) > 0
+	p.targets[ipPort] = target // key -> displayName mapping
+
+	return nil
 }
 
 func (p *TCPProber) Start(result chan *Event, interval, timeout time.Duration) error {
@@ -72,13 +66,16 @@ func (p *TCPProber) Start(result chan *Event, interval, timeout time.Duration) e
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
+		for target := range p.targets {
+			go p.sendProbe(result, target, timeout)
+		}
 		for {
 			select {
 			case <-p.exitChan:
 				ticker.Stop()
 				return
 			case <-ticker.C:
-				for _, target := range p.targets {
+				for target := range p.targets {
 					go p.sendProbe(result, target, timeout)
 				}
 			}
@@ -92,7 +89,6 @@ func (p *TCPProber) Stop() {
 	close(p.exitChan)
 	p.wg.Wait()
 }
-
 
 func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Duration) {
 	// target is already in "ip:port" format from Accept method
@@ -126,15 +122,19 @@ func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Du
 }
 
 func (p *TCPProber) parseTarget(target string) (host, port string, err error) {
-	// Remove tcp:// prefix if present
-	target = strings.TrimPrefix(target, "tcp://")
-	
+	// Remove tcp:// or tcp: prefix
+	if strings.HasPrefix(target, p.prefix+"://") {
+		target = strings.TrimPrefix(target, p.prefix+"://")
+	} else if strings.HasPrefix(target, p.prefix+":") {
+		target = strings.TrimPrefix(target, p.prefix+":")
+	}
+
 	// Parse host:port
 	host, port, err = net.SplitHostPort(target)
 	if err != nil {
 		return "", "", fmt.Errorf("invalid target format: %s", target)
 	}
-	
+
 	return host, port, nil
 }
 
@@ -161,22 +161,26 @@ func (p *TCPProber) getSourceAddr(interfaceName string) (net.Addr, error) {
 }
 
 func (p *TCPProber) sent(result chan *Event, target string, sentTime time.Time) {
+	displayName := p.targets[target] // Get displayName from targets map
 	result <- &Event{
-		Target:   target,
-		Result:   SENT,
-		SentTime: sentTime,
-		Rtt:      0,
-		Message:  "",
+		Key:         target,
+		DisplayName: displayName,
+		Result:      SENT,
+		SentTime:    sentTime,
+		Rtt:         0,
+		Message:     "",
 	}
 }
 
 func (p *TCPProber) success(result chan *Event, target string, sentTime time.Time, rtt time.Duration) {
+	displayName := p.targets[target] // Get displayName from targets map
 	result <- &Event{
-		Target:   target,
-		Result:   SUCCESS,
-		SentTime: sentTime,
-		Rtt:      rtt,
-		Message:  "",
+		Key:         target,
+		DisplayName: displayName,
+		Result:      SUCCESS,
+		SentTime:    sentTime,
+		Rtt:         rtt,
+		Message:     "",
 	}
 }
 
@@ -186,11 +190,13 @@ func (p *TCPProber) failed(result chan *Event, target string, sentTime time.Time
 		reason = TIMEOUT
 	}
 
+	displayName := p.targets[target] // Get displayName from targets map
 	result <- &Event{
-		Target:   target,
-		Result:   reason,
-		SentTime: sentTime,
-		Rtt:      0,
-		Message:  err.Error(),
+		Key:         target,
+		DisplayName: displayName,
+		Result:      reason,
+		SentTime:    sentTime,
+		Rtt:         0,
+		Message:     err.Error(),
 	}
 }

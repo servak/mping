@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -23,16 +24,21 @@ type (
 		client   *http.Client
 		targets  []string
 		config   *HTTPConfig
+		prefix   string // Custom prefix like "my-http", "http", "https", etc.
 		exitChan chan bool
 		wg       sync.WaitGroup
 	}
 
 	HTTPConfig struct {
-		Header              http.Header `yaml:"headers"`
-		ExpectCode          int         `yaml:"expect_code"`
-		ExpectBody          string      `yaml:"expect_body"`
-		SkipSSLVerification bool        `yaml:"skip_ssl_verification"`
-		RedirectOFF         bool        `yaml:"redirect_off"`
+		Header      http.Header `yaml:"headers,omitempty"`
+		ExpectCode  int         `yaml:"expect_code"`
+		ExpectBody  string      `yaml:"expect_body,omitempty"`
+		TLS         *TLSConfig  `yaml:"tls,omitempty"`
+		RedirectOFF bool        `yaml:"redirect_off,omitempty"`
+	}
+
+	TLSConfig struct {
+		SkipVerify bool `yaml:"skip_verify"`
 	}
 
 	customTransport struct {
@@ -41,17 +47,24 @@ type (
 	}
 )
 
-func NewHTTPProber(cfg *HTTPConfig) *HTTPProber {
+func NewHTTPProber(cfg *HTTPConfig, prefix string) *HTTPProber {
 	var rd func(req *http.Request, via []*http.Request) error
 	if cfg.RedirectOFF {
 		rd = func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		}
 	}
+
+	// Determine TLS skip verification setting
+	skipVerify := true
+	if cfg.TLS != nil {
+		skipVerify = cfg.TLS.SkipVerify // Use new TLS config if available
+	}
+
 	client := &http.Client{
 		Transport: &customTransport{
 			transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.SkipSSLVerification},
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: skipVerify},
 			},
 			headers: cfg.Header,
 		},
@@ -61,56 +74,81 @@ func NewHTTPProber(cfg *HTTPConfig) *HTTPProber {
 		client:   client,
 		targets:  make([]string, 0),
 		config:   cfg,
+		prefix:   prefix,
 		exitChan: make(chan bool),
 	}
 }
 
-func (p *HTTPProber) Accept(target string) (ProbeTarget, error) {
-	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-		return ProbeTarget{}, ErrNotAccepted
+func (p *HTTPProber) Accept(target string) error {
+	// Check if it matches our prefix (e.g., "my-http://host", "http://host")
+	if !strings.HasPrefix(target, p.prefix+"://") {
+		return ErrNotAccepted
 	}
-	
+
+	// Extract the actual URL part
+	hostname := strings.TrimPrefix(target, p.prefix+"://")
+
+	// Create the actual HTTP URL for validation
+	var actualURL string
+	if p.config != nil && p.config.TLS != nil {
+		actualURL = "https://" + hostname
+	} else {
+		actualURL = "http://" + hostname
+	}
+
 	// Validate URL format
-	if u, err := url.Parse(target); err == nil && u.Host != "" {
-		p.targets = append(p.targets, target)
-		// For HTTP, Key and DisplayName are the same (full URL)
-		return ProbeTarget{
-			Key:         target,
-			DisplayName: target,
-		}, nil
+	u, err := url.Parse(actualURL)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("invalid HTTP URL format")
 	}
-	
-	return ProbeTarget{}, fmt.Errorf("invalid HTTP URL format")
+	if slices.Contains(p.targets, target) {
+		// Target already exists, no need to add it again
+		return nil
+	}
+	p.targets = append(p.targets, target) // Store original target
+	return nil
+
 }
 
-func (p *HTTPProber) HasTargets() bool {
-	return len(p.targets) > 0
+// convertToActualURL converts custom target to actual HTTP URL
+func (p *HTTPProber) convertToActualURL(target string) string {
+	// Extract hostname from custom target
+	hostname := strings.TrimPrefix(target, p.prefix+"://")
+
+	// Determine protocol based on TLS configuration
+	if p.config != nil && p.config.TLS != nil {
+		return "https://" + hostname
+	}
+	return "http://" + hostname
 }
 
 func (p *HTTPProber) sent(r chan *Event, t string) {
 	r <- &Event{
-		Target: t,
-		Result: SENT,
+		Key:         t,
+		DisplayName: t,
+		Result:      SENT,
 	}
 }
 
 func (p *HTTPProber) timeout(r chan *Event, target string, now time.Time, err error) {
 	r <- &Event{
-		Target:   target,
-		Result:   TIMEOUT,
-		SentTime: now,
-		Rtt:      time.Since(now),
-		Message:  "timeout",
+		Key:         target,
+		DisplayName: target,
+		Result:      TIMEOUT,
+		SentTime:    now,
+		Rtt:         time.Since(now),
+		Message:     "timeout",
 	}
 }
 
 func (p *HTTPProber) failed(r chan *Event, target string, now time.Time, err error) {
 	r <- &Event{
-		Target:   target,
-		Result:   FAILED,
-		SentTime: now,
-		Rtt:      time.Since(now),
-		Message:  err.Error(),
+		Key:         target,
+		DisplayName: target,
+		Result:      FAILED,
+		SentTime:    now,
+		Rtt:         time.Since(now),
+		Message:     err.Error(),
 	}
 }
 
@@ -119,7 +157,10 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 	defer p.wg.Done()
 	now := time.Now()
 	p.sent(r, target)
-	resp, err := p.client.Get(target)
+
+	// Convert target to actual HTTP URL
+	actualURL := p.convertToActualURL(target)
+	resp, err := p.client.Get(actualURL)
 	if err != nil {
 		if err, ok := err.(net.Error); ok && err.Timeout() {
 			p.timeout(r, target, now, err)
@@ -141,10 +182,11 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 		p.failed(r, target, now, errors.New("invalid body"))
 	} else {
 		r <- &Event{
-			Target:   target,
-			Result:   SUCCESS,
-			SentTime: now,
-			Rtt:      time.Since(now),
+			Key:         target,
+			DisplayName: target,
+			Result:      SUCCESS,
+			SentTime:    now,
+			Rtt:         time.Since(now),
 		}
 	}
 }
@@ -155,6 +197,9 @@ func (p *HTTPProber) Start(r chan *Event, interval, timeout time.Duration) error
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
+		for _, target := range p.targets {
+			go p.probe(r, target)
+		}
 		for {
 			select {
 			case <-p.exitChan:

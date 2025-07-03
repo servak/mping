@@ -1,8 +1,10 @@
 package prober
 
 import (
+	"cmp"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,85 +17,87 @@ const (
 	DNS ProbeType = "dns"
 )
 
+type DNSTarget struct {
+	Server         string
+	Port           int
+	Domain         string
+	RecordType     string
+	UseTCP         bool
+	ServerIP       string // Pre-resolved server IP
+	OriginalTarget string // Original target string for display
+}
+
 type (
 	DNSProber struct {
 		targets  []*DNSTarget
 		config   *DNSConfig
+		prefix   string
 		exitChan chan bool
 		wg       sync.WaitGroup
 	}
 
 	DNSConfig struct {
 		Server     string `yaml:"server"`
-		Port       int    `yaml:"port"`
+		Port       int    `yaml:"port,omitempty"`
 		RecordType string `yaml:"record_type"`
-		UseTCP     bool   `yaml:"use_tcp"`
-		Timeout    string `yaml:"timeout"`
-	}
-
-	DNSTarget struct {
-		Server     string
-		Port       int
-		Domain     string
-		RecordType string
-		UseTCP     bool
-		ServerIP   string // Pre-resolved server IP
-		Key        string // For Event.Target matching
+		UseTCP     bool   `yaml:"use_tcp,omitempty"`
 	}
 )
 
-func NewDNSProber(cfg *DNSConfig) *DNSProber {
+func NewDNSProber(cfg *DNSConfig, prefix string) *DNSProber {
 	return &DNSProber{
 		targets:  make([]*DNSTarget, 0),
 		config:   cfg,
+		prefix:   prefix,
 		exitChan: make(chan bool),
 	}
 }
 
-// Accept parses DNS targets in format: dns://server[:port]/domain[/record_type]
-func (p *DNSProber) Accept(target string) (ProbeTarget, error) {
-	if !strings.HasPrefix(target, "dns://") {
-		return ProbeTarget{}, ErrNotAccepted
+// Accept parses DNS targets in format: dns://server[:port]/domain[/record_type] or dns:server[:port]/domain[/record_type]
+func (p *DNSProber) Accept(target string) error {
+	// Check if it's new format (dns://...) or legacy format (dns:...)
+	if !strings.HasPrefix(target, p.prefix+"://") && !strings.HasPrefix(target, p.prefix+":") {
+		return ErrNotAccepted
 	}
 
 	dnsTarget, err := p.parseTarget(target)
 	if err != nil {
-		return ProbeTarget{}, fmt.Errorf("invalid DNS target: %w", err)
+		return fmt.Errorf("invalid DNS target: %w", err)
 	}
 
 	// Validate DNS server by resolving its IP
 	serverIP, err := net.ResolveIPAddr("ip", dnsTarget.Server)
 	if err != nil {
-		return ProbeTarget{}, fmt.Errorf("failed to resolve DNS server '%s': %w", dnsTarget.Server, err)
+		return fmt.Errorf("failed to resolve DNS server '%s': %w", dnsTarget.Server, err)
 	}
-
-	// Create unique key for Event.Target matching
-	key := fmt.Sprintf("%s:%d|%s|%s|%t", serverIP.String(), dnsTarget.Port, dnsTarget.Domain, dnsTarget.RecordType, dnsTarget.UseTCP)
-	displayName := fmt.Sprintf("%s/%s/%s", dnsTarget.Server, dnsTarget.Domain, dnsTarget.RecordType)
 
 	// Store complete DNSTarget with pre-resolved IP
 	dnsTarget.ServerIP = serverIP.String()
-	dnsTarget.Key = key
 	p.targets = append(p.targets, dnsTarget)
 
-	return ProbeTarget{
-		Key:         key,
-		DisplayName: displayName,
-	}, nil
-}
-
-func (p *DNSProber) HasTargets() bool {
-	return len(p.targets) > 0
+	// Unique and sorted targets
+	slices.SortFunc(p.targets, func(a, b *DNSTarget) int {
+		return cmp.Compare(a.OriginalTarget, b.OriginalTarget)
+	})
+	p.targets = slices.CompactFunc(p.targets, func(a, b *DNSTarget) bool {
+		return a.OriginalTarget == b.OriginalTarget
+	})
+	return nil
 }
 
 func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
-	// Remove dns:// prefix
-	target = strings.TrimPrefix(target, "dns://")
-	
+	// Remove dns:// or dns: prefix
+	originalTarget := target
+	if strings.HasPrefix(target, p.prefix+"://") {
+		target = strings.TrimPrefix(target, p.prefix+"://")
+	} else if strings.HasPrefix(target, p.prefix+":") {
+		target = strings.TrimPrefix(target, p.prefix+":")
+	}
+
 	// Split into server and query parts
 	parts := strings.SplitN(target, "/", 2)
 	if len(parts) < 2 {
-		return nil, fmt.Errorf("invalid format, expected: dns://server/domain[/record_type]")
+		return nil, fmt.Errorf("invalid format, expected: %s://server/domain[/record_type] or %s:server/domain[/record_type]", p.prefix, p.prefix)
 	}
 
 	serverPart := parts[0]
@@ -138,11 +142,12 @@ func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
 	}
 
 	return &DNSTarget{
-		Server:     server,
-		Port:       port,
-		Domain:     domain,
-		RecordType: recordType,
-		UseTCP:     p.config.UseTCP,
+		Server:         server,
+		Port:           port,
+		Domain:         domain,
+		RecordType:     recordType,
+		UseTCP:         p.config.UseTCP,
+		OriginalTarget: originalTarget,
 	}, nil
 }
 
@@ -151,6 +156,9 @@ func (p *DNSProber) Start(result chan *Event, interval, timeout time.Duration) e
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
+		for _, target := range p.targets {
+			go p.sendProbe(result, target, timeout)
+		}
 		for {
 			select {
 			case <-p.exitChan:
@@ -175,9 +183,9 @@ func (p *DNSProber) Stop() {
 func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout time.Duration) {
 	p.wg.Add(1)
 	defer p.wg.Done()
-	
+
 	now := time.Now()
-	p.sent(result, target.Key, now)
+	p.sent(result, target, now)
 
 	// Create DNS client
 	c := new(dns.Client)
@@ -190,61 +198,63 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 	m := new(dns.Msg)
 	qtype := dns.StringToType[target.RecordType]
 	if qtype == 0 {
-		p.failed(result, target.Key, now, fmt.Errorf("unsupported record type: %s", target.RecordType))
+		p.failed(result, target, now, fmt.Errorf("unsupported record type: %s", target.RecordType))
 		return
 	}
-	
+
 	m.SetQuestion(dns.Fqdn(target.Domain), qtype)
 
 	// Send DNS query using pre-resolved server IP
 	server := fmt.Sprintf("%s:%d", target.ServerIP, target.Port)
 	r, rtt, err := c.Exchange(m, server)
 	if err != nil {
-		p.failed(result, target.Key, now, err)
+		p.failed(result, target, now, err)
 		return
 	}
 
 	// Check DNS response
 	if r.Rcode != dns.RcodeSuccess {
-		p.failed(result, target.Key, now, fmt.Errorf("DNS error: %s", dns.RcodeToString[r.Rcode]))
+		p.failed(result, target, now, fmt.Errorf("DNS error: %s", dns.RcodeToString[r.Rcode]))
 		return
 	}
 
 	// Success
-	p.success(result, target.Key, now, rtt)
+	p.success(result, target, now, rtt)
 }
 
-func (p *DNSProber) sent(result chan *Event, target string, sentTime time.Time) {
+func (p *DNSProber) sent(result chan *Event, target *DNSTarget, sentTime time.Time) {
 	result <- &Event{
-		Target:   target,
-		Result:   SENT,
-		SentTime: sentTime,
-		Rtt:      0,
-		Message:  "",
+		Key:         target.OriginalTarget,
+		DisplayName: target.OriginalTarget,
+		Result:      SENT,
+		SentTime:    sentTime,
+		Rtt:         0,
+		Message:     "",
 	}
 }
 
-func (p *DNSProber) success(result chan *Event, target string, sentTime time.Time, rtt time.Duration) {
+func (p *DNSProber) success(result chan *Event, target *DNSTarget, sentTime time.Time, rtt time.Duration) {
 	result <- &Event{
-		Target:   target,
-		Result:   SUCCESS,
-		SentTime: sentTime,
-		Rtt:      rtt,
-		Message:  "",
+		Key:         target.OriginalTarget,
+		DisplayName: target.OriginalTarget,
+		Result:      SUCCESS,
+		SentTime:    sentTime,
+		Rtt:         rtt,
+		Message:     "",
 	}
 }
 
-func (p *DNSProber) failed(result chan *Event, target string, sentTime time.Time, err error) {
+func (p *DNSProber) failed(result chan *Event, target *DNSTarget, sentTime time.Time, err error) {
 	reason := FAILED
 	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 		reason = TIMEOUT
 	}
-
 	result <- &Event{
-		Target:   target,
-		Result:   reason,
-		SentTime: sentTime,
-		Rtt:      0,
-		Message:  err.Error(),
+		Key:         target.OriginalTarget,
+		DisplayName: target.OriginalTarget,
+		Result:      reason,
+		SentTime:    sentTime,
+		Rtt:         0,
+		Message:     err.Error(),
 	}
 }

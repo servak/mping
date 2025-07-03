@@ -82,21 +82,36 @@ func (mm *MetricsManager) Sent(host string) {
 	mm.mu.Unlock()
 }
 
-func (mm *MetricsManager) Subscribe(res chan *prober.Event) {
+func (mm *MetricsManager) Subscribe(res <-chan *prober.Event) {
 	go func() {
 		for r := range res {
+			// Auto-register target on first event
+			mm.autoRegister(r.Key, r.DisplayName)
+			
 			switch r.Result {
 			case prober.SENT:
-				mm.Sent(r.Target)
+				mm.Sent(r.Key)
 			case prober.SUCCESS:
-				mm.Success(r.Target, r.Rtt, r.SentTime)
+				mm.Success(r.Key, r.Rtt, r.SentTime)
 			case prober.TIMEOUT:
-				mm.Failed(r.Target, r.SentTime, r.Message)
+				mm.Failed(r.Key, r.SentTime, r.Message)
 			case prober.FAILED:
-				mm.Failed(r.Target, r.SentTime, r.Message)
+				mm.Failed(r.Key, r.SentTime, r.Message)
 			}
 		}
 	}()
+}
+
+// autoRegister automatically registers target if not already registered
+func (mm *MetricsManager) autoRegister(key, displayName string) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	
+	if _, exists := mm.metrics[key]; !exists {
+		mm.metrics[key] = &Metrics{
+			Name: displayName,
+		}
+	}
 }
 
 func (mm *MetricsManager) GetSortedMetricsByKey(k Key) []Metrics {
