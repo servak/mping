@@ -58,17 +58,19 @@ func DefaultConfig() *Config {
 				},
 			},
 			string(prober.HTTPS): {
-				Probe: prober.HTTPS,
+				Probe: prober.HTTP,
 				HTTP: &prober.HTTPConfig{
 					ExpectCode: 200,
 					ExpectBody: "",
+					TLS: &prober.TLSConfig{
+						SkipVerify: true, // Default to skipping SSL verification
+					},
 				},
 			},
 			string(prober.TCP): {
 				Probe: prober.TCP,
 				TCP: &prober.TCPConfig{
 					SourceInterface: "",
-					Timeout:         "5000ms",
 				},
 			},
 			string(prober.DNS): {
@@ -78,7 +80,6 @@ func DefaultConfig() *Config {
 					Port:       53,
 					RecordType: "A",
 					UseTCP:     false,
-					Timeout:    "5000ms",
 				},
 			},
 		},
@@ -112,6 +113,9 @@ func LoadFile(path string) (*Config, error) {
 }
 
 func Marshal(c *Config) string {
-	out, _ := yaml.Marshal(c)
-	return string(out)
+	var out strings.Builder
+	encoder := yaml.NewEncoder(&out)
+	encoder.SetIndent(2)
+	_ = encoder.Encode(c)
+	return out.String()
 }

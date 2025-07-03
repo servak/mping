@@ -37,9 +37,9 @@ type (
 
 	ICMPConfig struct {
 		Body            string `yaml:"body"`
-		TOS             int    `yaml:"tos"`
-		TTL             int    `yaml:"ttl"`
-		SourceInterface string `yaml:"source_interface"`
+		TOS             int    `yaml:"tos,omitempty"`
+		TTL             int    `yaml:"ttl,omitempty"`
+		SourceInterface string `yaml:"source_interface,omitempty"`
 	}
 
 	runTime struct {
@@ -122,7 +122,7 @@ func (p *ICMPProber) Accept(target string) error {
 	ipStr := ip.String()
 	for existingIP := range p.targets {
 		if existingIP.String() == ipStr {
-			return fmt.Errorf("duplicate target: %s resolves to already registered IP %s", hostname, ipStr)
+			return nil // Already exists, no need to add again
 		}
 	}
 

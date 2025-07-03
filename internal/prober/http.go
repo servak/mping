@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -29,12 +30,11 @@ type (
 	}
 
 	HTTPConfig struct {
-		Header              http.Header `yaml:"headers"`
-		ExpectCode          int         `yaml:"expect_code"`
-		ExpectBody          string      `yaml:"expect_body"`
-		TLS                 *TLSConfig  `yaml:"tls,omitempty"`
-		SkipSSLVerification bool        `yaml:"skip_ssl_verification"` // Deprecated: use TLS.SkipVerify
-		RedirectOFF         bool        `yaml:"redirect_off"`
+		Header      http.Header `yaml:"headers,omitempty"`
+		ExpectCode  int         `yaml:"expect_code"`
+		ExpectBody  string      `yaml:"expect_body,omitempty"`
+		TLS         *TLSConfig  `yaml:"tls,omitempty"`
+		RedirectOFF bool        `yaml:"redirect_off,omitempty"`
 	}
 
 	TLSConfig struct {
@@ -56,7 +56,7 @@ func NewHTTPProber(cfg *HTTPConfig, prefix string) *HTTPProber {
 	}
 
 	// Determine TLS skip verification setting
-	skipVerify := cfg.SkipSSLVerification // Default to legacy setting
+	skipVerify := true
 	if cfg.TLS != nil {
 		skipVerify = cfg.TLS.SkipVerify // Use new TLS config if available
 	}
@@ -97,12 +97,17 @@ func (p *HTTPProber) Accept(target string) error {
 	}
 
 	// Validate URL format
-	if u, err := url.Parse(actualURL); err == nil && u.Host != "" {
-		p.targets = append(p.targets, target) // Store original target
+	u, err := url.Parse(actualURL)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("invalid HTTP URL format")
+	}
+	if slices.Contains(p.targets, target) {
+		// Target already exists, no need to add it again
 		return nil
 	}
+	p.targets = append(p.targets, target) // Store original target
+	return nil
 
-	return fmt.Errorf("invalid HTTP URL format")
 }
 
 // convertToActualURL converts custom target to actual HTTP URL

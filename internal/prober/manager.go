@@ -126,7 +126,6 @@ func (pm *probeManager) Stop() {
 	pm.running = false
 }
 
-
 // routeTarget routes a single target to appropriate prober, creating prober if needed
 func (pm *probeManager) routeTarget(target string) error {
 	// Transform target with appropriate prefix
@@ -134,19 +133,19 @@ func (pm *probeManager) routeTarget(target string) error {
 	if proberType == "" {
 		return fmt.Errorf("unable to determine prober type for target: %s", target)
 	}
-	
+
 	// Get or create prober for this type
 	prober, err := pm.getOrCreateProber(proberType)
 	if err != nil {
 		return fmt.Errorf("failed to get prober for %s: %w", proberType, err)
 	}
-	
+
 	// Accept transformed target in prober (prober handles its own prefix)
 	err = prober.Accept(transformedTarget)
 	if err != nil {
 		return fmt.Errorf("prober %s rejected target %s: %w", proberType, transformedTarget, err)
 	}
-	
+
 	return nil
 }
 
@@ -161,7 +160,7 @@ func (pm *probeManager) transformTarget(target string) (string, string) {
 		// If prefix not in config, return empty prober type (will cause error)
 		return target, ""
 	}
-	
+
 	// Check for legacy colon format (icmpv4:target, icmpv6:target) - convert to new format
 	if strings.Contains(target, ":") && !strings.Contains(target, "://") {
 		parts := strings.SplitN(target, ":", 2)
@@ -172,7 +171,7 @@ func (pm *probeManager) transformTarget(target string) (string, string) {
 			return prefix + "://" + hostname, prefix
 		}
 	}
-	
+
 	// Plain hostname/IP - add default prefix
 	if pm.defaultType != "" {
 		if _, exists := pm.config[pm.defaultType]; exists {
@@ -180,11 +179,10 @@ func (pm *probeManager) transformTarget(target string) (string, string) {
 			return pm.defaultType + "://" + target, pm.defaultType
 		}
 	}
-	
+
 	// No suitable prober found
 	return target, ""
 }
-
 
 // getOrCreateProber gets existing prober or creates new one
 func (pm *probeManager) getOrCreateProber(proberType string) (Prober, error) {
@@ -192,17 +190,17 @@ func (pm *probeManager) getOrCreateProber(proberType string) (Prober, error) {
 	if prober, exists := pm.probers[proberType]; exists {
 		return prober, nil
 	}
-	
+
 	// Get config for this prober type
 	config, exists := pm.config[proberType]
 	if !exists {
 		return nil, fmt.Errorf("no configuration found for prober type: %s", proberType)
 	}
-	
+
 	// Create new prober based on config.Probe field (not the proberType name)
 	var prober Prober
 	var err error
-	
+
 	switch config.Probe {
 	case ICMPV4:
 		prober, err = NewICMPProber(ICMPV4, config.ICMP, proberType)
@@ -217,13 +215,12 @@ func (pm *probeManager) getOrCreateProber(proberType string) (Prober, error) {
 	default:
 		return nil, fmt.Errorf("unknown probe type in config: %s", config.Probe)
 	}
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create %s prober: %w", proberType, err)
 	}
-	
+
 	// Store the prober
 	pm.probers[proberType] = prober
 	return prober, nil
 }
-

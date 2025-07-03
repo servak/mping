@@ -22,8 +22,7 @@ type (
 	}
 
 	TCPConfig struct {
-		SourceInterface string `yaml:"source_interface"`
-		Timeout         string `yaml:"timeout"`
+		SourceInterface string `yaml:"source_interface,omitempty"`
 	}
 )
 
@@ -56,9 +55,8 @@ func (p *TCPProber) Accept(target string) error {
 	// 最初のIPを使用
 	ip := ips[0]
 	ipPort := net.JoinHostPort(ip.String(), port)
-	hostPort := net.JoinHostPort(host, port)
 
-	p.targets[ipPort] = hostPort // key -> displayName mapping
+	p.targets[ipPort] = target // key -> displayName mapping
 
 	return nil
 }

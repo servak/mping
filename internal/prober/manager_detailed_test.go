@@ -29,7 +29,7 @@ func TestProbeManagerDetailedScenarios(t *testing.T) {
 
 	t.Run("AddTargets with running manager", func(t *testing.T) {
 		pm := NewProbeManager(config, "http")
-		
+
 		// Add initial targets
 		err := pm.AddTargets("http://example.com")
 		if err != nil {
@@ -38,7 +38,7 @@ func TestProbeManagerDetailedScenarios(t *testing.T) {
 
 		// Simulate running state
 		pm.(*probeManager).running = true
-		
+
 		// Try to add more targets while running
 		err = pm.AddTargets("http://google.com")
 		if err == nil {
@@ -48,13 +48,13 @@ func TestProbeManagerDetailedScenarios(t *testing.T) {
 
 	t.Run("Multiple targets same prober", func(t *testing.T) {
 		pm := NewProbeManager(config, "http")
-		
+
 		targets := []string{
 			"http://example.com",
-			"http://google.com", 
+			"http://google.com",
 			"http://github.com",
 		}
-		
+
 		err := pm.AddTargets(targets...)
 		if err != nil {
 			t.Errorf("Failed to add multiple targets: %v", err)
@@ -63,13 +63,13 @@ func TestProbeManagerDetailedScenarios(t *testing.T) {
 
 	t.Run("Mixed prober types", func(t *testing.T) {
 		pm := NewProbeManager(config, "http")
-		
+
 		targets := []string{
-			"example.com",          // Should use default (http)
-			"http://example.com",   // HTTP prober
-			"my-secure://api.com",  // HTTPS prober with TLS
+			"example.com",         // Should use default (http)
+			"http://example.com",  // HTTP prober
+			"my-secure://api.com", // HTTPS prober with TLS
 		}
-		
+
 		err := pm.AddTargets(targets...)
 		if err != nil {
 			t.Errorf("Failed to add mixed targets: %v", err)
@@ -78,7 +78,7 @@ func TestProbeManagerDetailedScenarios(t *testing.T) {
 
 	t.Run("Invalid default prober", func(t *testing.T) {
 		pm := NewProbeManager(config, "nonexistent")
-		
+
 		err := pm.AddTargets("example.com")
 		if err == nil {
 			t.Error("Expected error with invalid default prober")
@@ -88,7 +88,7 @@ func TestProbeManagerDetailedScenarios(t *testing.T) {
 	t.Run("Empty config", func(t *testing.T) {
 		emptyConfig := map[string]*ProberConfig{}
 		pm := NewProbeManager(emptyConfig, "http")
-		
+
 		err := pm.AddTargets("example.com")
 		if err == nil {
 			t.Error("Expected error with empty config")
@@ -111,7 +111,7 @@ func TestGetOrCreateProber(t *testing.T) {
 		},
 		"tcp": {
 			Probe: TCP,
-			TCP:   &TCPConfig{Timeout: "5000ms"},
+			TCP:   &TCPConfig{},
 		},
 	}
 
@@ -161,7 +161,7 @@ func TestGetOrCreateProber(t *testing.T) {
 				Probe: "invalid-type",
 			},
 		}
-		
+
 		pm := &probeManager{
 			config:  invalidConfig,
 			probers: make(map[string]Prober),
@@ -226,11 +226,11 @@ func TestTransformTargetEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			target, prober := pm.transformTarget(tt.input)
-			
+
 			if target != tt.expectedTarget {
 				t.Errorf("Expected target: %s, got: %s", tt.expectedTarget, target)
 			}
-			
+
 			if prober != tt.expectedProber {
 				t.Errorf("Expected prober: %s, got: %s", tt.expectedProber, prober)
 			}

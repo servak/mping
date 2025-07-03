@@ -32,7 +32,7 @@ func TestICMPProberAccept(t *testing.T) {
 			prefix: "my-ping",
 			target: "my-ping:google.com",
 		},
-		
+
 		// Invalid cases
 		{
 			name:      "wrong prefix",
@@ -60,7 +60,7 @@ func TestICMPProberAccept(t *testing.T) {
 			if tt.target == "" {
 				return
 			}
-			
+
 			// Just test the prefix logic, not actual network resolution
 			config := &ICMPConfig{Body: "test"}
 			prober, err := NewICMPProber(ICMPV4, config, tt.prefix)
@@ -71,7 +71,7 @@ func TestICMPProberAccept(t *testing.T) {
 			defer prober.Stop()
 
 			err = prober.Accept(tt.target)
-			
+
 			if tt.shouldErr {
 				if err == nil {
 					t.Error("Expected error, but got none")
@@ -115,7 +115,7 @@ func TestHTTPProberAccept(t *testing.T) {
 			config: &HTTPConfig{ExpectCode: 200},
 			target: "api-check://api.example.com/health",
 		},
-		
+
 		// Invalid cases
 		{
 			name:      "wrong prefix",
@@ -137,7 +137,7 @@ func TestHTTPProberAccept(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			prober := NewHTTPProber(tt.config, tt.prefix)
 			err := prober.Accept(tt.target)
-			
+
 			if tt.shouldErr {
 				if err == nil {
 					t.Error("Expected error, but got none")
@@ -174,7 +174,7 @@ func TestTCPProberAccept(t *testing.T) {
 			prefix: "tcp",
 			target: "tcp:example.com:80",
 		},
-		
+
 		// Invalid cases
 		{
 			name:      "wrong prefix",
@@ -192,10 +192,10 @@ func TestTCPProberAccept(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config := &TCPConfig{Timeout: "5000ms"}
+			config := &TCPConfig{}
 			prober := NewTCPProber(config, tt.prefix)
 			err := prober.Accept(tt.target)
-			
+
 			if tt.shouldErr {
 				if err == nil {
 					t.Error("Expected error, but got none")
@@ -232,7 +232,7 @@ func TestDNSProberAccept(t *testing.T) {
 			prefix: "dns",
 			target: "dns:8.8.8.8/google.com",
 		},
-		
+
 		// Invalid cases
 		{
 			name:      "wrong prefix",
@@ -257,7 +257,7 @@ func TestDNSProberAccept(t *testing.T) {
 			}
 			prober := NewDNSProber(config, tt.prefix)
 			err := prober.Accept(tt.target)
-			
+
 			if tt.shouldErr {
 				if err == nil {
 					t.Error("Expected error, but got none")

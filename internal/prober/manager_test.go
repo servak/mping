@@ -26,7 +26,7 @@ func TestTransformTarget(t *testing.T) {
 		},
 		"tcp": {
 			Probe: TCP,
-			TCP:   &TCPConfig{Timeout: "5000ms"},
+			TCP:   &TCPConfig{},
 		},
 		"dns": {
 			Probe: DNS,
@@ -183,7 +183,7 @@ func TestProbeManagerIntegration(t *testing.T) {
 		},
 		"my-https": {
 			Probe: HTTP,
-			HTTP:  &HTTPConfig{
+			HTTP: &HTTPConfig{
 				ExpectCode: 200,
 				TLS:        &TLSConfig{SkipVerify: true},
 			},
@@ -216,7 +216,7 @@ func TestProbeManagerIntegration(t *testing.T) {
 			// Create fresh ProbeManager for each test
 			testPM := NewProbeManager(config, "http")
 			err := testPM.AddTargets(tt.targets...)
-			
+
 			if tt.shouldErr {
 				if err == nil {
 					t.Error("Expected error, but got none")
@@ -255,15 +255,6 @@ func TestHTTPProberTLSConfig(t *testing.T) {
 			target:      "my-https://secure.example.com",
 			expectedURL: "https://secure.example.com",
 		},
-		{
-			name: "Legacy skip SSL verification",
-			config: &HTTPConfig{
-				ExpectCode:          200,
-				SkipSSLVerification: true,
-			},
-			target:      "my-web://example.com",
-			expectedURL: "http://example.com", // No TLS config = HTTP
-		},
 	}
 
 	for _, tt := range tests {
@@ -272,7 +263,7 @@ func TestHTTPProberTLSConfig(t *testing.T) {
 			prefix := strings.SplitN(tt.target, "://", 2)[0]
 			prober := NewHTTPProber(tt.config, prefix)
 			actualURL := prober.convertToActualURL(tt.target)
-			
+
 			if actualURL != tt.expectedURL {
 				t.Errorf("Expected URL: %s, got: %s", tt.expectedURL, actualURL)
 			}

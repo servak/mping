@@ -1,8 +1,10 @@
 package prober
 
 import (
+	"cmp"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +17,16 @@ const (
 	DNS ProbeType = "dns"
 )
 
+type DNSTarget struct {
+	Server         string
+	Port           int
+	Domain         string
+	RecordType     string
+	UseTCP         bool
+	ServerIP       string // Pre-resolved server IP
+	OriginalTarget string // Original target string for display
+}
+
 type (
 	DNSProber struct {
 		targets  []*DNSTarget
@@ -26,20 +38,9 @@ type (
 
 	DNSConfig struct {
 		Server     string `yaml:"server"`
-		Port       int    `yaml:"port"`
+		Port       int    `yaml:"port,omitempty"`
 		RecordType string `yaml:"record_type"`
-		UseTCP     bool   `yaml:"use_tcp"`
-		Timeout    string `yaml:"timeout"`
-	}
-
-	DNSTarget struct {
-		Server     string
-		Port       int
-		Domain     string
-		RecordType string
-		UseTCP     bool
-		ServerIP   string // Pre-resolved server IP
-		Key        string // For Event.Target matching
+		UseTCP     bool   `yaml:"use_tcp,omitempty"`
 	}
 )
 
@@ -70,19 +71,23 @@ func (p *DNSProber) Accept(target string) error {
 		return fmt.Errorf("failed to resolve DNS server '%s': %w", dnsTarget.Server, err)
 	}
 
-	// Create unique key for Event.Target matching
-	key := fmt.Sprintf("%s:%d|%s|%s|%t", serverIP.String(), dnsTarget.Port, dnsTarget.Domain, dnsTarget.RecordType, dnsTarget.UseTCP)
-
 	// Store complete DNSTarget with pre-resolved IP
 	dnsTarget.ServerIP = serverIP.String()
-	dnsTarget.Key = key
 	p.targets = append(p.targets, dnsTarget)
 
+	// Unique and sorted targets
+	slices.SortFunc(p.targets, func(a, b *DNSTarget) int {
+		return cmp.Compare(a.OriginalTarget, b.OriginalTarget)
+	})
+	p.targets = slices.CompactFunc(p.targets, func(a, b *DNSTarget) bool {
+		return a.OriginalTarget == b.OriginalTarget
+	})
 	return nil
 }
 
 func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
 	// Remove dns:// or dns: prefix
+	originalTarget := target
 	if strings.HasPrefix(target, p.prefix+"://") {
 		target = strings.TrimPrefix(target, p.prefix+"://")
 	} else if strings.HasPrefix(target, p.prefix+":") {
@@ -137,11 +142,12 @@ func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
 	}
 
 	return &DNSTarget{
-		Server:     server,
-		Port:       port,
-		Domain:     domain,
-		RecordType: recordType,
-		UseTCP:     p.config.UseTCP,
+		Server:         server,
+		Port:           port,
+		Domain:         domain,
+		RecordType:     recordType,
+		UseTCP:         p.config.UseTCP,
+		OriginalTarget: originalTarget,
 	}, nil
 }
 
@@ -217,10 +223,9 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 }
 
 func (p *DNSProber) sent(result chan *Event, target *DNSTarget, sentTime time.Time) {
-	displayName := fmt.Sprintf("%s/%s/%s", target.Server, target.Domain, target.RecordType)
 	result <- &Event{
-		Key:         target.Key,
-		DisplayName: displayName,
+		Key:         target.OriginalTarget,
+		DisplayName: target.OriginalTarget,
 		Result:      SENT,
 		SentTime:    sentTime,
 		Rtt:         0,
@@ -229,10 +234,9 @@ func (p *DNSProber) sent(result chan *Event, target *DNSTarget, sentTime time.Ti
 }
 
 func (p *DNSProber) success(result chan *Event, target *DNSTarget, sentTime time.Time, rtt time.Duration) {
-	displayName := fmt.Sprintf("%s/%s/%s", target.Server, target.Domain, target.RecordType)
 	result <- &Event{
-		Key:         target.Key,
-		DisplayName: displayName,
+		Key:         target.OriginalTarget,
+		DisplayName: target.OriginalTarget,
 		Result:      SUCCESS,
 		SentTime:    sentTime,
 		Rtt:         rtt,
@@ -245,11 +249,9 @@ func (p *DNSProber) failed(result chan *Event, target *DNSTarget, sentTime time.
 	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 		reason = TIMEOUT
 	}
-
-	displayName := fmt.Sprintf("%s/%s/%s", target.Server, target.Domain, target.RecordType)
 	result <- &Event{
-		Key:         target.Key,
-		DisplayName: displayName,
+		Key:         target.OriginalTarget,
+		DisplayName: target.OriginalTarget,
 		Result:      reason,
 		SentTime:    sentTime,
 		Rtt:         0,
