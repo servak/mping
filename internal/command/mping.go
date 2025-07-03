@@ -74,7 +74,7 @@ mping dns://8.8.8.8/google.com`,
 			_timeout := time.Duration(timeout) * time.Millisecond
 
 			// Create ProbeManager and MetricsManager
-			probeManager := prober.NewProbeManager(cfg.Prober)
+			probeManager := prober.NewProbeManager(cfg.Prober, cfg.Default)
 			metricsManager := stats.NewMetricsManager()
 			
 			// Add targets

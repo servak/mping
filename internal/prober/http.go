@@ -23,6 +23,7 @@ type (
 		client   *http.Client
 		targets  []string
 		config   *HTTPConfig
+		prefix   string // Custom prefix like "my-http", "http", "https", etc.
 		exitChan chan bool
 		wg       sync.WaitGroup
 	}
@@ -31,8 +32,13 @@ type (
 		Header              http.Header `yaml:"headers"`
 		ExpectCode          int         `yaml:"expect_code"`
 		ExpectBody          string      `yaml:"expect_body"`
-		SkipSSLVerification bool        `yaml:"skip_ssl_verification"`
+		TLS                 *TLSConfig  `yaml:"tls,omitempty"`
+		SkipSSLVerification bool        `yaml:"skip_ssl_verification"` // Deprecated: use TLS.SkipVerify
 		RedirectOFF         bool        `yaml:"redirect_off"`
+	}
+
+	TLSConfig struct {
+		SkipVerify bool `yaml:"skip_verify"`
 	}
 
 	customTransport struct {
@@ -41,17 +47,24 @@ type (
 	}
 )
 
-func NewHTTPProber(cfg *HTTPConfig) *HTTPProber {
+func NewHTTPProber(cfg *HTTPConfig, prefix string) *HTTPProber {
 	var rd func(req *http.Request, via []*http.Request) error
 	if cfg.RedirectOFF {
 		rd = func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		}
 	}
+
+	// Determine TLS skip verification setting
+	skipVerify := cfg.SkipSSLVerification // Default to legacy setting
+	if cfg.TLS != nil {
+		skipVerify = cfg.TLS.SkipVerify // Use new TLS config if available
+	}
+
 	client := &http.Client{
 		Transport: &customTransport{
 			transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.SkipSSLVerification},
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: skipVerify},
 			},
 			headers: cfg.Header,
 		},
@@ -61,24 +74,48 @@ func NewHTTPProber(cfg *HTTPConfig) *HTTPProber {
 		client:   client,
 		targets:  make([]string, 0),
 		config:   cfg,
+		prefix:   prefix,
 		exitChan: make(chan bool),
 	}
 }
 
 func (p *HTTPProber) Accept(target string) error {
-	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+	// Check if it matches our prefix (e.g., "my-http://host", "http://host")
+	if !strings.HasPrefix(target, p.prefix+"://") {
 		return ErrNotAccepted
 	}
-	
+
+	// Extract the actual URL part
+	hostname := strings.TrimPrefix(target, p.prefix+"://")
+
+	// Create the actual HTTP URL for validation
+	var actualURL string
+	if p.config != nil && p.config.TLS != nil {
+		actualURL = "https://" + hostname
+	} else {
+		actualURL = "http://" + hostname
+	}
+
 	// Validate URL format
-	if u, err := url.Parse(target); err == nil && u.Host != "" {
-		p.targets = append(p.targets, target)
+	if u, err := url.Parse(actualURL); err == nil && u.Host != "" {
+		p.targets = append(p.targets, target) // Store original target
 		return nil
 	}
-	
+
 	return fmt.Errorf("invalid HTTP URL format")
 }
 
+// convertToActualURL converts custom target to actual HTTP URL
+func (p *HTTPProber) convertToActualURL(target string) string {
+	// Extract hostname from custom target
+	hostname := strings.TrimPrefix(target, p.prefix+"://")
+
+	// Determine protocol based on TLS configuration
+	if p.config != nil && p.config.TLS != nil {
+		return "https://" + hostname
+	}
+	return "http://" + hostname
+}
 
 func (p *HTTPProber) sent(r chan *Event, t string) {
 	r <- &Event{
@@ -115,7 +152,10 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 	defer p.wg.Done()
 	now := time.Now()
 	p.sent(r, target)
-	resp, err := p.client.Get(target)
+
+	// Convert target to actual HTTP URL
+	actualURL := p.convertToActualURL(target)
+	resp, err := p.client.Get(actualURL)
 	if err != nil {
 		if err, ok := err.(net.Error); ok && err.Timeout() {
 			p.timeout(r, target, now, err)
@@ -152,6 +192,9 @@ func (p *HTTPProber) Start(r chan *Event, interval, timeout time.Duration) error
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
+		for _, target := range p.targets {
+			go p.probe(r, target)
+		}
 		for {
 			select {
 			case <-p.exitChan:

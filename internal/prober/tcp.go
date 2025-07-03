@@ -14,8 +14,9 @@ const (
 
 type (
 	TCPProber struct {
-		targets  map[string]string  // key (ip:port) -> displayName (host:port)
+		targets  map[string]string // key (ip:port) -> displayName (host:port)
 		config   *TCPConfig
+		prefix   string
 		exitChan chan bool
 		wg       sync.WaitGroup
 	}
@@ -26,46 +27,50 @@ type (
 	}
 )
 
-func NewTCPProber(cfg *TCPConfig) *TCPProber {
+func NewTCPProber(cfg *TCPConfig, prefix string) *TCPProber {
 	return &TCPProber{
 		targets:  make(map[string]string),
 		config:   cfg,
+		prefix:   prefix,
 		exitChan: make(chan bool),
 	}
 }
 
 func (p *TCPProber) Accept(target string) error {
-	if !strings.HasPrefix(target, "tcp://") {
+	// Check if it's new format (tcp://host:port)
+	if !strings.HasPrefix(target, p.prefix+"://") && !strings.HasPrefix(target, p.prefix+":") {
 		return ErrNotAccepted
 	}
-	
+
 	host, port, err := p.parseTarget(target)
 	if err != nil {
 		return fmt.Errorf("invalid TCP target: %w", err)
 	}
-	
+
 	// DNS解決を事前に実行
 	ips, err := net.LookupIP(host)
 	if err != nil {
 		return fmt.Errorf("failed to resolve '%s': %w", host, err)
 	}
-	
+
 	// 最初のIPを使用
 	ip := ips[0]
 	ipPort := net.JoinHostPort(ip.String(), port)
 	hostPort := net.JoinHostPort(host, port)
-	
+
 	p.targets[ipPort] = hostPort // key -> displayName mapping
-	
+
 	return nil
 }
-
 
 func (p *TCPProber) Start(result chan *Event, interval, timeout time.Duration) error {
 	ticker := time.NewTicker(interval)
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
+		for target := range p.targets {
+			go p.sendProbe(result, target, timeout)
+		}
 		for {
 			select {
 			case <-p.exitChan:
@@ -86,7 +91,6 @@ func (p *TCPProber) Stop() {
 	close(p.exitChan)
 	p.wg.Wait()
 }
-
 
 func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Duration) {
 	// target is already in "ip:port" format from Accept method
@@ -120,15 +124,19 @@ func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Du
 }
 
 func (p *TCPProber) parseTarget(target string) (host, port string, err error) {
-	// Remove tcp:// prefix if present
-	target = strings.TrimPrefix(target, "tcp://")
-	
+	// Remove tcp:// or tcp: prefix
+	if strings.HasPrefix(target, p.prefix+"://") {
+		target = strings.TrimPrefix(target, p.prefix+"://")
+	} else if strings.HasPrefix(target, p.prefix+":") {
+		target = strings.TrimPrefix(target, p.prefix+":")
+	}
+
 	// Parse host:port
 	host, port, err = net.SplitHostPort(target)
 	if err != nil {
 		return "", "", fmt.Errorf("invalid target format: %s", target)
 	}
-	
+
 	return host, port, nil
 }
 

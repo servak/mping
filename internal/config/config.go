@@ -15,8 +15,9 @@ import (
 const DefaultICMPBody = "mping"
 
 type Config struct {
-	Prober map[string]*prober.ProberConfig `yaml:"prober"`
-	UI     *ui.UIConfig                    `yaml:"ui"`
+	Prober  map[string]*prober.ProberConfig `yaml:"prober"`
+	Default string                          `yaml:"default"`
+	UI      *ui.UIConfig                    `yaml:"ui"`
 }
 
 func (c *Config) SetTitle(t string) {
@@ -35,6 +36,7 @@ func (c *Config) SetSourceInterface(sourceInterface string) {
 
 func DefaultConfig() *Config {
 	return &Config{
+		Default: string(prober.ICMPV4),
 		Prober: map[string]*prober.ProberConfig{
 			string(prober.ICMPV4): {
 				Probe: prober.ICMPV4,

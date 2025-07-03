@@ -19,6 +19,7 @@ type (
 	DNSProber struct {
 		targets  []*DNSTarget
 		config   *DNSConfig
+		prefix   string
 		exitChan chan bool
 		wg       sync.WaitGroup
 	}
@@ -42,17 +43,19 @@ type (
 	}
 )
 
-func NewDNSProber(cfg *DNSConfig) *DNSProber {
+func NewDNSProber(cfg *DNSConfig, prefix string) *DNSProber {
 	return &DNSProber{
 		targets:  make([]*DNSTarget, 0),
 		config:   cfg,
+		prefix:   prefix,
 		exitChan: make(chan bool),
 	}
 }
 
-// Accept parses DNS targets in format: dns://server[:port]/domain[/record_type]
+// Accept parses DNS targets in format: dns://server[:port]/domain[/record_type] or dns:server[:port]/domain[/record_type]
 func (p *DNSProber) Accept(target string) error {
-	if !strings.HasPrefix(target, "dns://") {
+	// Check if it's new format (dns://...) or legacy format (dns:...)
+	if !strings.HasPrefix(target, p.prefix+"://") && !strings.HasPrefix(target, p.prefix+":") {
 		return ErrNotAccepted
 	}
 
@@ -78,15 +81,18 @@ func (p *DNSProber) Accept(target string) error {
 	return nil
 }
 
-
 func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
-	// Remove dns:// prefix
-	target = strings.TrimPrefix(target, "dns://")
-	
+	// Remove dns:// or dns: prefix
+	if strings.HasPrefix(target, p.prefix+"://") {
+		target = strings.TrimPrefix(target, p.prefix+"://")
+	} else if strings.HasPrefix(target, p.prefix+":") {
+		target = strings.TrimPrefix(target, p.prefix+":")
+	}
+
 	// Split into server and query parts
 	parts := strings.SplitN(target, "/", 2)
 	if len(parts) < 2 {
-		return nil, fmt.Errorf("invalid format, expected: dns://server/domain[/record_type]")
+		return nil, fmt.Errorf("invalid format, expected: %s://server/domain[/record_type] or %s:server/domain[/record_type]", p.prefix, p.prefix)
 	}
 
 	serverPart := parts[0]
@@ -144,6 +150,9 @@ func (p *DNSProber) Start(result chan *Event, interval, timeout time.Duration) e
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
+		for _, target := range p.targets {
+			go p.sendProbe(result, target, timeout)
+		}
 		for {
 			select {
 			case <-p.exitChan:
@@ -168,7 +177,7 @@ func (p *DNSProber) Stop() {
 func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout time.Duration) {
 	p.wg.Add(1)
 	defer p.wg.Done()
-	
+
 	now := time.Now()
 	p.sent(result, target, now)
 
@@ -186,7 +195,7 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 		p.failed(result, target, now, fmt.Errorf("unsupported record type: %s", target.RecordType))
 		return
 	}
-	
+
 	m.SetQuestion(dns.Fqdn(target.Domain), qtype)
 
 	// Send DNS query using pre-resolved server IP
