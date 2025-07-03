@@ -212,6 +212,8 @@ func (pm *probeManager) getOrCreateProber(proberType string) (Prober, error) {
 		prober = NewTCPProber(config.TCP, proberType)
 	case DNS:
 		prober = NewDNSProber(config.DNS, proberType)
+	case NTP:
+		prober = NewNTPProber(config.NTP, proberType)
 	default:
 		return nil, fmt.Errorf("unknown probe type in config: %s", config.Probe)
 	}
