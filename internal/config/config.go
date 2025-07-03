@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -13,6 +14,36 @@ import (
 )
 
 const DefaultICMPBody = "mping"
+
+// ValidationErrors holds multiple validation errors
+type ValidationErrors struct {
+	Errors []error
+}
+
+func (ve *ValidationErrors) Error() string {
+	if len(ve.Errors) == 0 {
+		return "no validation errors"
+	}
+	if len(ve.Errors) == 1 {
+		return ve.Errors[0].Error()
+	}
+
+	var msgs []string
+	for _, err := range ve.Errors {
+		msgs = append(msgs, err.Error())
+	}
+	return fmt.Sprintf("multiple validation errors: %s", strings.Join(msgs, "; "))
+}
+
+func (ve *ValidationErrors) Add(err error) {
+	if err != nil {
+		ve.Errors = append(ve.Errors, err)
+	}
+}
+
+func (ve *ValidationErrors) HasErrors() bool {
+	return len(ve.Errors) > 0
+}
 
 type Config struct {
 	Prober  map[string]*prober.ProberConfig `yaml:"prober"`
@@ -34,6 +65,30 @@ func (c *Config) SetSourceInterface(sourceInterface string) {
 	}
 }
 
+// Validate validates the entire configuration
+func (c *Config) Validate() error {
+	ve := &ValidationErrors{}
+
+	// Validate each prober configuration
+	for name, proberConfig := range c.Prober {
+		if err := proberConfig.Validate(); err != nil {
+			ve.Add(fmt.Errorf("prober '%s': %w", name, err))
+		}
+	}
+
+	// Validate default prober exists
+	if c.Default != "" {
+		if _, exists := c.Prober[c.Default]; !exists {
+			ve.Add(fmt.Errorf("default prober '%s' not found in prober configurations", c.Default))
+		}
+	}
+
+	if ve.HasErrors() {
+		return ve
+	}
+	return nil
+}
+
 func DefaultConfig() *Config {
 	return &Config{
 		Default: string(prober.ICMPV4),
@@ -53,15 +108,15 @@ func DefaultConfig() *Config {
 			string(prober.HTTP): {
 				Probe: prober.HTTP,
 				HTTP: &prober.HTTPConfig{
-					ExpectCode: 200,
-					ExpectBody: "",
+					ExpectCodes: "200-299",
+					ExpectBody:  "",
 				},
 			},
 			string(prober.HTTPS): {
 				Probe: prober.HTTP,
 				HTTP: &prober.HTTPConfig{
-					ExpectCode: 200,
-					ExpectBody: "",
+					ExpectCodes: "200-299",
+					ExpectBody:  "",
 					TLS: &prober.TLSConfig{
 						SkipVerify: true, // Default to skipping SSL verification
 					},
@@ -76,10 +131,11 @@ func DefaultConfig() *Config {
 			string(prober.DNS): {
 				Probe: prober.DNS,
 				DNS: &prober.DNSConfig{
-					Server:     "8.8.8.8",
-					Port:       53,
-					RecordType: "A",
-					UseTCP:     false,
+					Server:           "8.8.8.8",
+					Port:             53,
+					RecordType:       "A",
+					UseTCP:           false,
+					RecursionDesired: true, // Default to recursive queries
 				},
 			},
 		},
@@ -93,8 +149,16 @@ func DefaultConfig() *Config {
 
 func Load(s string) (*Config, error) {
 	cfg := DefaultConfig()
-	err := yaml.Unmarshal([]byte(s), cfg)
-	return cfg, err
+	if err := yaml.Unmarshal([]byte(s), cfg); err != nil {
+		return nil, err
+	}
+
+	// Validate configuration after loading
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }
 
 func LoadFile(path string) (*Config, error) {

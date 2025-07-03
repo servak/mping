@@ -37,12 +37,40 @@ type (
 	}
 
 	DNSConfig struct {
-		Server     string `yaml:"server"`
-		Port       int    `yaml:"port,omitempty"`
-		RecordType string `yaml:"record_type"`
-		UseTCP     bool   `yaml:"use_tcp,omitempty"`
+		Server           string `yaml:"server"`
+		Port             int    `yaml:"port,omitempty"`
+		RecordType       string `yaml:"record_type"`
+		UseTCP           bool   `yaml:"use_tcp,omitempty"`
+		RecursionDesired bool   `yaml:"recursion_desired,omitempty"`
+		ExpectCodes      string `yaml:"expect_codes,omitempty"` // DNS response codes: "0", "0-5", "0,2,3"
 	}
 )
+
+// Validate validates the DNS configuration
+func (cfg *DNSConfig) Validate() error {
+	if cfg.Server == "" {
+		return fmt.Errorf("DNS server is required")
+	}
+
+	if cfg.Port <= 0 || cfg.Port > 65535 {
+		return fmt.Errorf("invalid DNS server port: %d (must be 1-65535)", cfg.Port)
+	}
+
+	// Validate record type
+	validTypes := []string{"A", "AAAA", "CNAME", "MX", "NS", "PTR", "SOA", "SRV", "TXT"}
+	if !slices.Contains(validTypes, strings.ToUpper(cfg.RecordType)) {
+		return fmt.Errorf("invalid DNS record type: %s (supported: %s)", cfg.RecordType, strings.Join(validTypes, ", "))
+	}
+
+	// Validate expect codes pattern if specified
+	if cfg.ExpectCodes != "" {
+		if !IsValidCodePattern(cfg.ExpectCodes) {
+			return fmt.Errorf("invalid expect_codes pattern: %s", cfg.ExpectCodes)
+		}
+	}
+
+	return nil
+}
 
 func NewDNSProber(cfg *DNSConfig, prefix string) *DNSProber {
 	return &DNSProber{
@@ -129,18 +157,6 @@ func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
 	if len(queryParts) > 1 && queryParts[1] != "" {
 		recordType = strings.ToUpper(queryParts[1])
 	}
-
-	// Default values
-	if server == "" {
-		server = "8.8.8.8"
-	}
-	if port == 0 {
-		port = 53
-	}
-	if recordType == "" {
-		recordType = "A"
-	}
-
 	return &DNSTarget{
 		Server:         server,
 		Port:           port,
@@ -151,7 +167,18 @@ func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
 	}, nil
 }
 
+func (p *DNSProber) emitRegistrationEvents(r chan *Event) {
+	for _, v := range p.targets {
+		r <- &Event{
+			Key:         v.OriginalTarget,
+			DisplayName: v.OriginalTarget,
+			Result:      REGISTER,
+		}
+	}
+}
+
 func (p *DNSProber) Start(result chan *Event, interval, timeout time.Duration) error {
+	p.emitRegistrationEvents(result)
 	ticker := time.NewTicker(interval)
 	p.wg.Add(1)
 	go func() {
@@ -203,6 +230,7 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 	}
 
 	m.SetQuestion(dns.Fqdn(target.Domain), qtype)
+	m.RecursionDesired = p.config.RecursionDesired
 
 	// Send DNS query using pre-resolved server IP
 	server := fmt.Sprintf("%s:%d", target.ServerIP, target.Port)
@@ -213,8 +241,8 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 	}
 
 	// Check DNS response
-	if r.Rcode != dns.RcodeSuccess {
-		p.failed(result, target, now, fmt.Errorf("DNS error: %s", dns.RcodeToString[r.Rcode]))
+	if !p.isExpectedResponseCode(r.Rcode) {
+		p.failed(result, target, now, fmt.Errorf("DNS response code: %d (%s)", r.Rcode, dns.RcodeToString[r.Rcode]))
 		return
 	}
 
@@ -257,4 +285,15 @@ func (p *DNSProber) failed(result chan *Event, target *DNSTarget, sentTime time.
 		Rtt:         0,
 		Message:     err.Error(),
 	}
+}
+
+// isExpectedResponseCode checks if the DNS response code matches the expected criteria
+func (p *DNSProber) isExpectedResponseCode(rcode int) bool {
+	// If ExpectCodes is specified, use it; otherwise default to success only (0)
+	if p.config.ExpectCodes != "" {
+		return MatchCode(rcode, p.config.ExpectCodes)
+	}
+
+	// Default: only accept successful responses (NOERROR = 0)
+	return rcode == 0 // dns.RcodeSuccess
 }

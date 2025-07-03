@@ -25,7 +25,7 @@ type (
 		prefix   string // Custom prefix like "my-ping", "icmpv4", etc.
 		c        *icmp.PacketConn
 		body     []byte
-		targets  map[*net.IPAddr]string // IPAddr -> original target string
+		targets  map[string]string // IPAddr string -> DisplayName
 		timeout  time.Duration
 		runCnt   int
 		runID    int
@@ -46,12 +46,19 @@ type (
 		runCnt   int
 		sentTime time.Time
 	}
-
-	rcvdPkt struct {
-		id, seq uint16
-		target  string
-	}
 )
+
+// Validate validates the ICMP configuration
+func (cfg *ICMPConfig) Validate() error {
+	// Basic validation - could be extended with more checks
+	if cfg.TOS < 0 || cfg.TOS > 255 {
+		return fmt.Errorf("invalid TOS value: %d (must be 0-255)", cfg.TOS)
+	}
+	if cfg.TTL < 0 || cfg.TTL > 255 {
+		return fmt.Errorf("invalid TTL value: %d (must be 0-255)", cfg.TTL)
+	}
+	return nil
+}
 
 func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, error) {
 	var (
@@ -85,7 +92,7 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, er
 		prefix:   prefix,
 		c:        c,
 		tables:   make(map[runTime]map[string]bool),
-		targets:  make(map[*net.IPAddr]string),
+		targets:  make(map[string]string),
 		runID:    os.Getpid() & 0xffff,
 		runCnt:   0,
 		body:     []byte(cfg.Body),
@@ -120,14 +127,18 @@ func (p *ICMPProber) Accept(target string) error {
 
 	// Check for duplicate IP addresses
 	ipStr := ip.String()
-	for existingIP := range p.targets {
-		if existingIP.String() == ipStr {
-			return nil // Already exists, no need to add again
-		}
+	if _, exists := p.targets[ipStr]; exists {
+		return nil // Already exists, no need to add again
 	}
 
-	// Store target with original target string
-	p.targets[ip] = target
+	// Generate display name
+	displayName := ipStr
+	if net.ParseIP(hostname) == nil {
+		displayName = fmt.Sprintf("%s(%s)", hostname, ipStr)
+	}
+
+	// Store IP address string with display name
+	p.targets[ipStr] = displayName
 
 	return nil
 }
@@ -135,8 +146,8 @@ func (p *ICMPProber) Accept(target string) error {
 func (p *ICMPProber) addTable(runCnt int, sentTime time.Time) {
 	rt := runTime{runCnt: runCnt, sentTime: sentTime}
 	addrMap := make(map[string]bool, len(p.targets))
-	for ip := range p.targets {
-		addrMap[ip.String()] = false
+	for ipStr := range p.targets {
+		addrMap[ipStr] = false
 	}
 	p.mu.Lock()
 	p.tables[rt] = addrMap
@@ -145,26 +156,8 @@ func (p *ICMPProber) addTable(runCnt int, sentTime time.Time) {
 
 // getTargetInfo returns Key and DisplayName for the given IP address
 func (p *ICMPProber) getTargetInfo(addr string) (string, string) {
-	for ip, originalTarget := range p.targets {
-		if ip.String() == addr {
-			// Generate display name
-			displayName := addr
-			var hostname string
-
-			// Extract hostname from various formats
-			if strings.HasPrefix(originalTarget, p.prefix+"://") {
-				hostname = strings.TrimPrefix(originalTarget, p.prefix+"://")
-			} else if strings.HasPrefix(originalTarget, p.prefix+":") {
-				hostname = strings.TrimPrefix(originalTarget, p.prefix+":")
-			} else {
-				hostname = originalTarget // plain hostname
-			}
-
-			if net.ParseIP(hostname) == nil {
-				displayName = fmt.Sprintf("%s(%s)", hostname, addr)
-			}
-			return addr, displayName
-		}
+	if displayName, exists := p.targets[addr]; exists {
+		return addr, displayName
 	}
 	return addr, addr // fallback
 }
@@ -290,11 +283,16 @@ func (p *ICMPProber) probe(r chan *Event) {
 
 	n := time.Now()
 	p.addTable(p.runCnt, n)
-	for ip := range p.targets {
-		_, err := p.c.WriteTo(b, ip)
-		p.sent(r, ip.String()) // Use IP as event key
+	for ipStr := range p.targets {
+		ip, err := net.ResolveIPAddr("ip", ipStr)
 		if err != nil {
-			p.failed(r, p.runCnt, ip.String(), err)
+			p.failed(r, p.runCnt, ipStr, err)
+			continue
+		}
+		_, err = p.c.WriteTo(b, ip)
+		p.sent(r, ipStr)
+		if err != nil {
+			p.failed(r, p.runCnt, ipStr, err)
 		}
 	}
 }
@@ -317,24 +315,32 @@ func (p *ICMPProber) recvPkts(r chan *Event) {
 			os.Exit(1)
 		}
 		offset := 0
-		var pkt = rcvdPkt{
-			target: ip.String(),
-			id:     binary.BigEndian.Uint16(pktbuf[offset+4 : offset+6]),
-			seq:    binary.BigEndian.Uint16(pktbuf[offset+6 : offset+8]),
-		}
-		if pkt.id != uint16(p.runID) {
+		id := binary.BigEndian.Uint16(pktbuf[offset+4 : offset+6])
+		if id != uint16(p.runID) {
 			continue
 		}
+		seq := binary.BigEndian.Uint16(pktbuf[offset+6 : offset+8])
 		if rm.Code == 0 {
 			switch rm.Type {
 			case ipv4.ICMPTypeEchoReply, ipv6.ICMPTypeEchoReply:
-				p.success(r, int(pkt.seq), pkt.target)
+				p.success(r, int(seq), ip.String())
 			}
 		}
 	}
 }
 
+func (p *ICMPProber) emitRegistrationEvents(r chan *Event) {
+	for k, v := range p.targets {
+		r <- &Event{
+			Key:         k,
+			DisplayName: v,
+			Result:      REGISTER,
+		}
+	}
+}
+
 func (p *ICMPProber) Start(r chan *Event, interval, timeout time.Duration) error {
+	p.emitRegistrationEvents(r)
 	p.timeout = timeout
 	ticker := time.NewTicker(interval)
 	go p.recvPkts(r)

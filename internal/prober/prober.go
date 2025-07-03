@@ -11,7 +11,8 @@ type (
 )
 
 const (
-	SENT reason = iota
+	REGISTER reason = iota
+	SENT
 	SUCCESS
 	TIMEOUT
 	FAILED

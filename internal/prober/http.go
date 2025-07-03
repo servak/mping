@@ -31,7 +31,7 @@ type (
 
 	HTTPConfig struct {
 		Header      http.Header `yaml:"headers,omitempty"`
-		ExpectCode  int         `yaml:"expect_code"`
+		ExpectCodes string      `yaml:"expect_codes"` // Range/list: "200,201,202", "200-299"
 		ExpectBody  string      `yaml:"expect_body,omitempty"`
 		TLS         *TLSConfig  `yaml:"tls,omitempty"`
 		RedirectOFF bool        `yaml:"redirect_off,omitempty"`
@@ -176,8 +176,8 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 		p.failed(r, target, now, err)
 		return
 	}
-	if p.config.ExpectCode != 0 && p.config.ExpectCode != resp.StatusCode {
-		p.failed(r, target, now, fmt.Errorf("status code: %d != %d", p.config.ExpectCode, resp.StatusCode))
+	if !p.isExpectedStatusCode(resp.StatusCode) {
+		p.failed(r, target, now, fmt.Errorf("unexpected status code: %d", resp.StatusCode))
 	} else if p.config.ExpectBody != "" && p.config.ExpectBody != strings.TrimRight(string(body), "\n") {
 		p.failed(r, target, now, errors.New("invalid body"))
 	} else {
@@ -191,7 +191,18 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 	}
 }
 
+func (p *HTTPProber) emitRegistrationEvents(r chan *Event) {
+	for _, v := range p.targets {
+		r <- &Event{
+			Key:         v,
+			DisplayName: v,
+			Result:      REGISTER,
+		}
+	}
+}
+
 func (p *HTTPProber) Start(r chan *Event, interval, timeout time.Duration) error {
+	p.emitRegistrationEvents(r)
 	p.client.Timeout = timeout
 	ticker := time.NewTicker(interval)
 	p.wg.Add(1)
@@ -224,4 +235,25 @@ func (c *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		req.Header[k] = v
 	}
 	return c.transport.RoundTrip(req)
+}
+
+// Validate validates the HTTP configuration
+func (cfg *HTTPConfig) Validate() error {
+	if cfg.ExpectCodes != "" {
+		if !IsValidCodePattern(cfg.ExpectCodes) {
+			return fmt.Errorf("invalid expect_codes pattern: %s", cfg.ExpectCodes)
+		}
+	}
+	return nil
+}
+
+// isExpectedStatusCode checks if the given status code matches the expected criteria
+func (p *HTTPProber) isExpectedStatusCode(statusCode int) bool {
+	// If ExpectCodes is specified, use it; otherwise any status code is accepted
+	if p.config.ExpectCodes != "" {
+		return MatchCode(statusCode, p.config.ExpectCodes)
+	}
+
+	// Default: accept any status code when no expectation is configured
+	return true
 }

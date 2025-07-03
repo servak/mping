@@ -85,10 +85,9 @@ func (mm *MetricsManager) Sent(host string) {
 func (mm *MetricsManager) Subscribe(res <-chan *prober.Event) {
 	go func() {
 		for r := range res {
-			// Auto-register target on first event
-			mm.autoRegister(r.Key, r.DisplayName)
-			
 			switch r.Result {
+			case prober.REGISTER:
+				mm.autoRegister(r.Key, r.DisplayName)
 			case prober.SENT:
 				mm.Sent(r.Key)
 			case prober.SUCCESS:
@@ -106,7 +105,7 @@ func (mm *MetricsManager) Subscribe(res <-chan *prober.Event) {
 func (mm *MetricsManager) autoRegister(key, displayName string) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
-	
+
 	if _, exists := mm.metrics[key]; !exists {
 		mm.metrics[key] = &Metrics{
 			Name: displayName,

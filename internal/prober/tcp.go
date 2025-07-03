@@ -26,6 +26,12 @@ type (
 	}
 )
 
+// Validate validates the TCP configuration
+func (cfg *TCPConfig) Validate() error {
+	// Basic validation - TCP config is simple, no specific validation needed for now
+	return nil
+}
+
 func NewTCPProber(cfg *TCPConfig, prefix string) *TCPProber {
 	return &TCPProber{
 		targets:  make(map[string]string),
@@ -61,7 +67,18 @@ func (p *TCPProber) Accept(target string) error {
 	return nil
 }
 
+func (p *TCPProber) emitRegistrationEvents(r chan *Event) {
+	for k, v := range p.targets {
+		r <- &Event{
+			Key:         k,
+			DisplayName: v,
+			Result:      REGISTER,
+		}
+	}
+}
+
 func (p *TCPProber) Start(result chan *Event, interval, timeout time.Duration) error {
+	p.emitRegistrationEvents(result)
 	ticker := time.NewTicker(interval)
 	p.wg.Add(1)
 	go func() {

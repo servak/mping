@@ -8,12 +8,12 @@ func TestProbeManagerDetailedScenarios(t *testing.T) {
 	config := map[string]*ProberConfig{
 		"http": {
 			Probe: HTTP,
-			HTTP:  &HTTPConfig{ExpectCode: 200},
+			HTTP:  &HTTPConfig{ExpectCodes: "200"},
 		},
 		"my-secure": {
 			Probe: HTTP,
 			HTTP: &HTTPConfig{
-				ExpectCode: 200,
+				ExpectCodes: "200",
 				TLS:        &TLSConfig{SkipVerify: true},
 			},
 		},
@@ -100,12 +100,12 @@ func TestGetOrCreateProber(t *testing.T) {
 	config := map[string]*ProberConfig{
 		"http": {
 			Probe: HTTP,
-			HTTP:  &HTTPConfig{ExpectCode: 200},
+			HTTP:  &HTTPConfig{ExpectCodes: "200"},
 		},
 		"https": {
 			Probe: HTTP,
 			HTTP: &HTTPConfig{
-				ExpectCode: 200,
+				ExpectCodes: "200",
 				TLS:        &TLSConfig{SkipVerify: true},
 			},
 		},
@@ -178,11 +178,11 @@ func TestTransformTargetEdgeCases(t *testing.T) {
 	config := map[string]*ProberConfig{
 		"http": {
 			Probe: HTTP,
-			HTTP:  &HTTPConfig{ExpectCode: 200},
+			HTTP:  &HTTPConfig{ExpectCodes: "200"},
 		},
 		"custom": {
 			Probe: HTTP,
-			HTTP:  &HTTPConfig{ExpectCode: 200},
+			HTTP:  &HTTPConfig{ExpectCodes: "200"},
 		},
 	}
 
