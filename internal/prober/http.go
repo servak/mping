@@ -231,8 +231,7 @@ func (c *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 func (p *HTTPProber) isExpectedStatusCode(statusCode int) bool {
 	// If ExpectCodes is specified, use it; otherwise fall back to ExpectCode
 	if p.config.ExpectCodes != "" {
-		matcher := NewCodeMatcher(p.config.ExpectCodes)
-		return matcher.Match(statusCode)
+		return MatchCode(statusCode, p.config.ExpectCodes)
 	}
 	
 	// Backward compatibility: use ExpectCode (default 0 means any code is ok)

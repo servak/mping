@@ -266,8 +266,7 @@ func (p *DNSProber) failed(result chan *Event, target *DNSTarget, sentTime time.
 func (p *DNSProber) isExpectedResponseCode(rcode int) bool {
 	// If ExpectCodes is specified, use it; otherwise default to success only (0)
 	if p.config.ExpectCodes != "" {
-		matcher := NewCodeMatcher(p.config.ExpectCodes)
-		return matcher.Match(rcode)
+		return MatchCode(rcode, p.config.ExpectCodes)
 	}
 	
 	// Default: only accept successful responses (NOERROR = 0)

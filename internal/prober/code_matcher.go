@@ -5,33 +5,23 @@ import (
 	"strings"
 )
 
-// CodeMatcher provides flexible code matching capabilities
-// Supports single codes, comma-separated lists, and ranges
-type CodeMatcher struct {
-	pattern string
-}
-
-// NewCodeMatcher creates a new code matcher with the given pattern
-func NewCodeMatcher(pattern string) *CodeMatcher {
-	return &CodeMatcher{pattern: strings.TrimSpace(pattern)}
-}
-
-// Match checks if the given code matches the configured pattern
+// MatchCode checks if the given code matches the pattern
 // Supports:
 // - Single code: "200"
 // - Comma-separated list: "200,201,202"
 // - Range: "200-299", "400-499"
 // - Mixed: "200,300-399,404"
-func (m *CodeMatcher) Match(code int) bool {
-	if m.pattern == "" {
+func MatchCode(code int, pattern string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
 		return true // Empty pattern matches any code
 	}
 
 	// Split by commas to handle multiple patterns
-	patterns := strings.Split(m.pattern, ",")
-	for _, pattern := range patterns {
-		pattern = strings.TrimSpace(pattern)
-		if m.matchSinglePattern(code, pattern) {
+	patterns := strings.Split(pattern, ",")
+	for _, p := range patterns {
+		p = strings.TrimSpace(p)
+		if matchSinglePattern(code, p) {
 			return true
 		}
 	}
@@ -39,10 +29,10 @@ func (m *CodeMatcher) Match(code int) bool {
 }
 
 // matchSinglePattern matches a code against a single pattern (no commas)
-func (m *CodeMatcher) matchSinglePattern(code int, pattern string) bool {
+func matchSinglePattern(code int, pattern string) bool {
 	// Handle range pattern: "200-299"
 	if strings.Contains(pattern, "-") {
-		return m.matchRange(code, pattern)
+		return matchRange(code, pattern)
 	}
 
 	// Handle single code: "200"
@@ -54,7 +44,7 @@ func (m *CodeMatcher) matchSinglePattern(code int, pattern string) bool {
 }
 
 // matchRange matches a code against a range pattern like "200-299"
-func (m *CodeMatcher) matchRange(code int, pattern string) bool {
+func matchRange(code int, pattern string) bool {
 	parts := strings.Split(pattern, "-")
 	if len(parts) != 2 {
 		return false
@@ -73,16 +63,17 @@ func (m *CodeMatcher) matchRange(code int, pattern string) bool {
 	return code >= start && code <= end
 }
 
-// IsValid checks if the pattern is valid
-func (m *CodeMatcher) IsValid() bool {
-	if m.pattern == "" {
+// IsValidCodePattern checks if the pattern is valid
+func IsValidCodePattern(pattern string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
 		return true
 	}
 
-	patterns := strings.Split(m.pattern, ",")
-	for _, pattern := range patterns {
-		pattern = strings.TrimSpace(pattern)
-		if !m.isValidSinglePattern(pattern) {
+	patterns := strings.Split(pattern, ",")
+	for _, p := range patterns {
+		p = strings.TrimSpace(p)
+		if !isValidSinglePattern(p) {
 			return false
 		}
 	}
@@ -90,7 +81,7 @@ func (m *CodeMatcher) IsValid() bool {
 }
 
 // isValidSinglePattern validates a single pattern
-func (m *CodeMatcher) isValidSinglePattern(pattern string) bool {
+func isValidSinglePattern(pattern string) bool {
 	if pattern == "" {
 		return false
 	}
@@ -109,15 +100,4 @@ func (m *CodeMatcher) isValidSinglePattern(pattern string) bool {
 	// Single code pattern
 	_, err := strconv.Atoi(pattern)
 	return err == nil
-}
-
-// Examples returns example patterns for documentation
-func (m *CodeMatcher) Examples() []string {
-	return []string{
-		"200",           // Single code
-		"200,201,202",   // Multiple codes
-		"200-299",       // Range
-		"200,300-399",   // Mixed
-		"0-99,200-299",  // Multiple ranges
-	}
 }

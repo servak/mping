@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func TestCodeMatcher(t *testing.T) {
+func TestMatchCode(t *testing.T) {
 	tests := []struct {
 		name     string
 		pattern  string
@@ -184,8 +184,7 @@ func TestCodeMatcher(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			matcher := NewCodeMatcher(tt.pattern)
-			result := matcher.Match(tt.code)
+			result := MatchCode(tt.code, tt.pattern)
 			
 			if result != tt.expected {
 				t.Errorf("Pattern %q with code %d: expected %v, got %v", 
@@ -195,7 +194,7 @@ func TestCodeMatcher(t *testing.T) {
 	}
 }
 
-func TestCodeMatcherValidation(t *testing.T) {
+func TestIsValidCodePattern(t *testing.T) {
 	tests := []struct {
 		name     string
 		pattern  string
@@ -220,8 +219,7 @@ func TestCodeMatcherValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			matcher := NewCodeMatcher(tt.pattern)
-			result := matcher.IsValid()
+			result := IsValidCodePattern(tt.pattern)
 			
 			if result != tt.expected {
 				t.Errorf("Pattern %q validation: expected %v, got %v", 
@@ -231,20 +229,3 @@ func TestCodeMatcherValidation(t *testing.T) {
 	}
 }
 
-func TestCodeMatcherExamples(t *testing.T) {
-	matcher := NewCodeMatcher("")
-	examples := matcher.Examples()
-	
-	// Verify we have some examples
-	if len(examples) == 0 {
-		t.Error("Expected some examples, got none")
-	}
-	
-	// Verify each example is valid
-	for _, example := range examples {
-		testMatcher := NewCodeMatcher(example)
-		if !testMatcher.IsValid() {
-			t.Errorf("Example pattern %q should be valid", example)
-		}
-	}
-}
