@@ -42,6 +42,7 @@ type (
 		RecordType       string `yaml:"record_type"`
 		UseTCP           bool   `yaml:"use_tcp,omitempty"`
 		RecursionDesired bool   `yaml:"recursion_desired,omitempty"`
+		ExpectCodes      string `yaml:"expect_codes,omitempty"` // DNS response codes: "0", "0-5", "0,2,3"
 	}
 )
 
@@ -215,8 +216,8 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 	}
 
 	// Check DNS response
-	if r.Rcode != dns.RcodeSuccess {
-		p.failed(result, target, now, fmt.Errorf("DNS error: %s", dns.RcodeToString[r.Rcode]))
+	if !p.isExpectedResponseCode(r.Rcode) {
+		p.failed(result, target, now, fmt.Errorf("DNS response code: %d (%s)", r.Rcode, dns.RcodeToString[r.Rcode]))
 		return
 	}
 
@@ -259,4 +260,16 @@ func (p *DNSProber) failed(result chan *Event, target *DNSTarget, sentTime time.
 		Rtt:         0,
 		Message:     err.Error(),
 	}
+}
+
+// isExpectedResponseCode checks if the DNS response code matches the expected criteria
+func (p *DNSProber) isExpectedResponseCode(rcode int) bool {
+	// If ExpectCodes is specified, use it; otherwise default to success only (0)
+	if p.config.ExpectCodes != "" {
+		matcher := NewCodeMatcher(p.config.ExpectCodes)
+		return matcher.Match(rcode)
+	}
+	
+	// Default: only accept successful responses (NOERROR = 0)
+	return rcode == 0 // dns.RcodeSuccess
 }

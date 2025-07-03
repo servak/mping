@@ -39,57 +39,57 @@ func TestHTTPStatusCodeMatching(t *testing.T) {
 
 		// Range matching tests
 		{
-			name: "2XX range - 200",
+			name: "200-299 range - 200",
 			config: &HTTPConfig{
-				ExpectCodes: "2XX",
+				ExpectCodes: "200-299",
 			},
 			statusCode: 200,
 			expected:   true,
 		},
 		{
-			name: "2XX range - 201",
+			name: "200-299 range - 250",
 			config: &HTTPConfig{
-				ExpectCodes: "2XX",
+				ExpectCodes: "200-299",
 			},
-			statusCode: 201,
+			statusCode: 250,
 			expected:   true,
 		},
 		{
-			name: "2XX range - 299",
+			name: "200-299 range - 299",
 			config: &HTTPConfig{
-				ExpectCodes: "2XX",
+				ExpectCodes: "200-299",
 			},
 			statusCode: 299,
 			expected:   true,
 		},
 		{
-			name: "2XX range - 300 failure",
+			name: "200-299 range - 300 failure",
 			config: &HTTPConfig{
-				ExpectCodes: "2XX",
+				ExpectCodes: "200-299",
 			},
 			statusCode: 300,
 			expected:   false,
 		},
 		{
-			name: "3XX range - 301",
+			name: "300-399 range - 301",
 			config: &HTTPConfig{
-				ExpectCodes: "3XX",
+				ExpectCodes: "300-399",
 			},
 			statusCode: 301,
 			expected:   true,
 		},
 		{
-			name: "4XX range - 404",
+			name: "400-499 range - 404",
 			config: &HTTPConfig{
-				ExpectCodes: "4XX",
+				ExpectCodes: "400-499",
 			},
 			statusCode: 404,
 			expected:   true,
 		},
 		{
-			name: "5XX range - 500",
+			name: "500-599 range - 500",
 			config: &HTTPConfig{
-				ExpectCodes: "5XX",
+				ExpectCodes: "500-599",
 			},
 			statusCode: 500,
 			expected:   true,
@@ -149,12 +149,12 @@ func TestHTTPStatusCodeMatching(t *testing.T) {
 
 		// Edge cases
 		{
-			name: "invalid range - 6XX",
+			name: "mixed patterns",
 			config: &HTTPConfig{
-				ExpectCodes: "6XX",
+				ExpectCodes: "200,300-399",
 			},
-			statusCode: 600,
-			expected:   false,
+			statusCode: 350,
+			expected:   true,
 		},
 		{
 			name: "invalid format",
@@ -188,51 +188,3 @@ func TestHTTPStatusCodeMatching(t *testing.T) {
 	}
 }
 
-func TestHTTPStatusCodePatternMatching(t *testing.T) {
-	prober := NewHTTPProber(&HTTPConfig{}, "test")
-	
-	tests := []struct {
-		name       string
-		pattern    string
-		statusCode int
-		expected   bool
-	}{
-		// Range patterns
-		{"1XX - 100", "1XX", 100, true},
-		{"1XX - 199", "1XX", 199, true},
-		{"1XX - 200", "1XX", 200, false},
-		{"2XX - 200", "2XX", 200, true},
-		{"2XX - 299", "2XX", 299, true},
-		{"2XX - 300", "2XX", 300, false},
-		{"3XX - 301", "3XX", 301, true},
-		{"4XX - 404", "4XX", 404, true},
-		{"5XX - 500", "5XX", 500, true},
-		
-		// Comma-separated lists
-		{"200,201 - 200", "200,201", 200, true},
-		{"200,201 - 201", "200,201", 201, true},
-		{"200,201 - 202", "200,201", 202, false},
-		{"200, 301, 302 - 301", "200, 301, 302", 301, true},
-		
-		// Single codes
-		{"200 - 200", "200", 200, true},
-		{"200 - 404", "200", 404, false},
-		
-		// Edge cases
-		{"empty pattern", "", 200, false},
-		{"invalid pattern", "invalid", 200, false},
-		{"mixed invalid", "200,invalid,301", 301, true},
-		{"mixed invalid", "200,invalid,301", 999, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := prober.matchStatusCodePattern(tt.statusCode, tt.pattern)
-			
-			if result != tt.expected {
-				t.Errorf("Pattern %q with status %d: expected %v, got %v", 
-					tt.pattern, tt.statusCode, tt.expected, result)
-			}
-		})
-	}
-}

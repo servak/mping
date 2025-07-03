@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -232,7 +231,8 @@ func (c *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 func (p *HTTPProber) isExpectedStatusCode(statusCode int) bool {
 	// If ExpectCodes is specified, use it; otherwise fall back to ExpectCode
 	if p.config.ExpectCodes != "" {
-		return p.matchStatusCodePattern(statusCode, p.config.ExpectCodes)
+		matcher := NewCodeMatcher(p.config.ExpectCodes)
+		return matcher.Match(statusCode)
 	}
 	
 	// Backward compatibility: use ExpectCode (default 0 means any code is ok)
@@ -240,46 +240,4 @@ func (p *HTTPProber) isExpectedStatusCode(statusCode int) bool {
 		return true // No specific code expected
 	}
 	return statusCode == p.config.ExpectCode
-}
-
-// matchStatusCodePattern matches status code against pattern
-func (p *HTTPProber) matchStatusCodePattern(statusCode int, pattern string) bool {
-	pattern = strings.TrimSpace(pattern)
-	
-	// Handle range patterns like "2XX", "3XX", etc.
-	if strings.HasSuffix(pattern, "XX") && len(pattern) == 3 {
-		rangePrefix := pattern[:1]
-		switch rangePrefix {
-		case "1":
-			return statusCode >= 100 && statusCode < 200
-		case "2":
-			return statusCode >= 200 && statusCode < 300
-		case "3":
-			return statusCode >= 300 && statusCode < 400
-		case "4":
-			return statusCode >= 400 && statusCode < 500
-		case "5":
-			return statusCode >= 500 && statusCode < 600
-		}
-		return false
-	}
-	
-	// Handle comma-separated list: "200,201,202"
-	if strings.Contains(pattern, ",") {
-		codes := strings.Split(pattern, ",")
-		for _, codeStr := range codes {
-			codeStr = strings.TrimSpace(codeStr)
-			if code, err := strconv.Atoi(codeStr); err == nil && code == statusCode {
-				return true
-			}
-		}
-		return false
-	}
-	
-	// Handle single code as string: "200"
-	if code, err := strconv.Atoi(pattern); err == nil {
-		return code == statusCode
-	}
-	
-	return false
 }
