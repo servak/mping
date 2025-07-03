@@ -37,10 +37,11 @@ type (
 	}
 
 	DNSConfig struct {
-		Server     string `yaml:"server"`
-		Port       int    `yaml:"port,omitempty"`
-		RecordType string `yaml:"record_type"`
-		UseTCP     bool   `yaml:"use_tcp,omitempty"`
+		Server           string `yaml:"server"`
+		Port             int    `yaml:"port,omitempty"`
+		RecordType       string `yaml:"record_type"`
+		UseTCP           bool   `yaml:"use_tcp,omitempty"`
+		RecursionDesired bool   `yaml:"recursion_desired,omitempty"`
 	}
 )
 
@@ -203,6 +204,7 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 	}
 
 	m.SetQuestion(dns.Fqdn(target.Domain), qtype)
+	m.RecursionDesired = p.config.RecursionDesired
 
 	// Send DNS query using pre-resolved server IP
 	server := fmt.Sprintf("%s:%d", target.ServerIP, target.Port)

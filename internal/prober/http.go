@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,7 +32,8 @@ type (
 
 	HTTPConfig struct {
 		Header      http.Header `yaml:"headers,omitempty"`
-		ExpectCode  int         `yaml:"expect_code"`
+		ExpectCode  int         `yaml:"expect_code,omitempty"`     // Single code (backward compatibility)
+		ExpectCodes string      `yaml:"expect_codes,omitempty"`   // Range/list: "2XX", "200,201,202"
 		ExpectBody  string      `yaml:"expect_body,omitempty"`
 		TLS         *TLSConfig  `yaml:"tls,omitempty"`
 		RedirectOFF bool        `yaml:"redirect_off,omitempty"`
@@ -176,8 +178,8 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 		p.failed(r, target, now, err)
 		return
 	}
-	if p.config.ExpectCode != 0 && p.config.ExpectCode != resp.StatusCode {
-		p.failed(r, target, now, fmt.Errorf("status code: %d != %d", p.config.ExpectCode, resp.StatusCode))
+	if !p.isExpectedStatusCode(resp.StatusCode) {
+		p.failed(r, target, now, fmt.Errorf("unexpected status code: %d", resp.StatusCode))
 	} else if p.config.ExpectBody != "" && p.config.ExpectBody != strings.TrimRight(string(body), "\n") {
 		p.failed(r, target, now, errors.New("invalid body"))
 	} else {
@@ -224,4 +226,60 @@ func (c *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		req.Header[k] = v
 	}
 	return c.transport.RoundTrip(req)
+}
+
+// isExpectedStatusCode checks if the given status code matches the expected criteria
+func (p *HTTPProber) isExpectedStatusCode(statusCode int) bool {
+	// If ExpectCodes is specified, use it; otherwise fall back to ExpectCode
+	if p.config.ExpectCodes != "" {
+		return p.matchStatusCodePattern(statusCode, p.config.ExpectCodes)
+	}
+	
+	// Backward compatibility: use ExpectCode (default 0 means any code is ok)
+	if p.config.ExpectCode == 0 {
+		return true // No specific code expected
+	}
+	return statusCode == p.config.ExpectCode
+}
+
+// matchStatusCodePattern matches status code against pattern
+func (p *HTTPProber) matchStatusCodePattern(statusCode int, pattern string) bool {
+	pattern = strings.TrimSpace(pattern)
+	
+	// Handle range patterns like "2XX", "3XX", etc.
+	if strings.HasSuffix(pattern, "XX") && len(pattern) == 3 {
+		rangePrefix := pattern[:1]
+		switch rangePrefix {
+		case "1":
+			return statusCode >= 100 && statusCode < 200
+		case "2":
+			return statusCode >= 200 && statusCode < 300
+		case "3":
+			return statusCode >= 300 && statusCode < 400
+		case "4":
+			return statusCode >= 400 && statusCode < 500
+		case "5":
+			return statusCode >= 500 && statusCode < 600
+		}
+		return false
+	}
+	
+	// Handle comma-separated list: "200,201,202"
+	if strings.Contains(pattern, ",") {
+		codes := strings.Split(pattern, ",")
+		for _, codeStr := range codes {
+			codeStr = strings.TrimSpace(codeStr)
+			if code, err := strconv.Atoi(codeStr); err == nil && code == statusCode {
+				return true
+			}
+		}
+		return false
+	}
+	
+	// Handle single code as string: "200"
+	if code, err := strconv.Atoi(pattern); err == nil {
+		return code == statusCode
+	}
+	
+	return false
 }

@@ -76,10 +76,11 @@ func DefaultConfig() *Config {
 			string(prober.DNS): {
 				Probe: prober.DNS,
 				DNS: &prober.DNSConfig{
-					Server:     "8.8.8.8",
-					Port:       53,
-					RecordType: "A",
-					UseTCP:     false,
+					Server:           "8.8.8.8",
+					Port:             53,
+					RecordType:       "A",
+					UseTCP:           false,
+					RecursionDesired: true, // Default to recursive queries
 				},
 			},
 		},
