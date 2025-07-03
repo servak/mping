@@ -14,6 +14,7 @@ type (
 		HTTP  *HTTPConfig `yaml:"http,omitempty"`
 		TCP   *TCPConfig  `yaml:"tcp,omitempty"`
 		DNS   *DNSConfig  `yaml:"dns,omitempty"`
+		NTP   *NTPConfig  `yaml:"ntp,omitempty"`
 	}
 )
 
@@ -40,6 +41,11 @@ func (pc *ProberConfig) Validate() error {
 			return fmt.Errorf("DNS config required for probe type %s", pc.Probe)
 		}
 		return pc.DNS.Validate()
+	case NTP:
+		if pc.NTP == nil {
+			return fmt.Errorf("NTP config required for probe type %s", pc.Probe)
+		}
+		return pc.NTP.Validate()
 	default:
 		return fmt.Errorf("unknown probe type: %s", pc.Probe)
 	}

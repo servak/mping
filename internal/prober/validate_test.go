@@ -451,6 +451,38 @@ func TestProberConfigValidate(t *testing.T) {
 			wantErr: true,
 			errMsg:  "DNS server is required",
 		},
+		{
+			name: "valid NTP config",
+			config: &ProberConfig{
+				Probe: NTP,
+				NTP: &NTPConfig{
+					Server: "pool.ntp.org",
+					Port:   123,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "NTP config missing",
+			config: &ProberConfig{
+				Probe: NTP,
+				NTP:   nil,
+			},
+			wantErr: true,
+			errMsg:  "NTP config required",
+		},
+		{
+			name: "invalid NTP config",
+			config: &ProberConfig{
+				Probe: NTP,
+				NTP: &NTPConfig{
+					Server: "", // Empty server
+					Port:   123,
+				},
+			},
+			wantErr: true,
+			errMsg:  "NTP server is required",
+		},
 	}
 
 	for _, tt := range tests {

@@ -139,6 +139,13 @@ func DefaultConfig() *Config {
 					ExpectCodes:      "0",  // Default to accepting only successful responses
 				},
 			},
+			string(prober.NTP): {
+				Probe: prober.NTP,
+				NTP: &prober.NTPConfig{
+					Server: "pool.ntp.org",
+					Port:   123,
+				},
+			},
 		},
 		UI: &ui.UIConfig{
 			CUI: &ui.CUIConfig{
