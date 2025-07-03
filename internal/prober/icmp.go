@@ -25,7 +25,7 @@ type (
 		prefix   string // Custom prefix like "my-ping", "icmpv4", etc.
 		c        *icmp.PacketConn
 		body     []byte
-		targets  map[*net.IPAddr]string // IPAddr -> original target string
+		targets  map[string]string // IPAddr string -> DisplayName
 		timeout  time.Duration
 		runCnt   int
 		runID    int
@@ -85,7 +85,7 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, er
 		prefix:   prefix,
 		c:        c,
 		tables:   make(map[runTime]map[string]bool),
-		targets:  make(map[*net.IPAddr]string),
+		targets:  make(map[string]string),
 		runID:    os.Getpid() & 0xffff,
 		runCnt:   0,
 		body:     []byte(cfg.Body),
@@ -120,14 +120,18 @@ func (p *ICMPProber) Accept(target string) error {
 
 	// Check for duplicate IP addresses
 	ipStr := ip.String()
-	for existingIP := range p.targets {
-		if existingIP.String() == ipStr {
-			return nil // Already exists, no need to add again
-		}
+	if _, exists := p.targets[ipStr]; exists {
+		return nil // Already exists, no need to add again
 	}
 
-	// Store target with original target string
-	p.targets[ip] = target
+	// Generate display name
+	displayName := ipStr
+	if net.ParseIP(hostname) == nil {
+		displayName = fmt.Sprintf("%s(%s)", hostname, ipStr)
+	}
+
+	// Store IP address string with display name
+	p.targets[ipStr] = displayName
 
 	return nil
 }
@@ -135,8 +139,8 @@ func (p *ICMPProber) Accept(target string) error {
 func (p *ICMPProber) addTable(runCnt int, sentTime time.Time) {
 	rt := runTime{runCnt: runCnt, sentTime: sentTime}
 	addrMap := make(map[string]bool, len(p.targets))
-	for ip := range p.targets {
-		addrMap[ip.String()] = false
+	for ipStr := range p.targets {
+		addrMap[ipStr] = false
 	}
 	p.mu.Lock()
 	p.tables[rt] = addrMap
@@ -145,26 +149,8 @@ func (p *ICMPProber) addTable(runCnt int, sentTime time.Time) {
 
 // getTargetInfo returns Key and DisplayName for the given IP address
 func (p *ICMPProber) getTargetInfo(addr string) (string, string) {
-	for ip, originalTarget := range p.targets {
-		if ip.String() == addr {
-			// Generate display name
-			displayName := addr
-			var hostname string
-
-			// Extract hostname from various formats
-			if strings.HasPrefix(originalTarget, p.prefix+"://") {
-				hostname = strings.TrimPrefix(originalTarget, p.prefix+"://")
-			} else if strings.HasPrefix(originalTarget, p.prefix+":") {
-				hostname = strings.TrimPrefix(originalTarget, p.prefix+":")
-			} else {
-				hostname = originalTarget // plain hostname
-			}
-
-			if net.ParseIP(hostname) == nil {
-				displayName = fmt.Sprintf("%s(%s)", hostname, addr)
-			}
-			return addr, displayName
-		}
+	if displayName, exists := p.targets[addr]; exists {
+		return addr, displayName
 	}
 	return addr, addr // fallback
 }
@@ -290,11 +276,16 @@ func (p *ICMPProber) probe(r chan *Event) {
 
 	n := time.Now()
 	p.addTable(p.runCnt, n)
-	for ip := range p.targets {
-		_, err := p.c.WriteTo(b, ip)
-		p.sent(r, ip.String()) // Use IP as event key
+	for ipStr := range p.targets {
+		ip, err := net.ResolveIPAddr("ip", ipStr)
 		if err != nil {
-			p.failed(r, p.runCnt, ip.String(), err)
+			p.failed(r, p.runCnt, ipStr, err)
+			continue
+		}
+		_, err = p.c.WriteTo(b, ip)
+		p.sent(r, ipStr)
+		if err != nil {
+			p.failed(r, p.runCnt, ipStr, err)
 		}
 	}
 }
