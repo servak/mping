@@ -24,7 +24,7 @@ type (
 		version  ProbeType
 		c        *icmp.PacketConn
 		body     []byte
-		targets  []*net.IPAddr
+		targets  map[*net.IPAddr]string  // IPAddr -> original target string
 		timeout  time.Duration
 		runCnt   int
 		runID    int
@@ -83,7 +83,7 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig) (*ICMPProber, error) {
 		version:  t,
 		c:        c,
 		tables:   make(map[runTime]map[string]bool),
-		targets:  make([]*net.IPAddr, 0),
+		targets:  make(map[*net.IPAddr]string),
 		runID:    os.Getpid() & 0xffff,
 		runCnt:   0,
 		body:     []byte(cfg.Body),
@@ -91,7 +91,7 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig) (*ICMPProber, error) {
 	}, err
 }
 
-func (p *ICMPProber) Accept(target string) (ProbeTarget, error) {
+func (p *ICMPProber) Accept(target string) error {
 	var hostname string
 	
 	// Check if it's legacy format (icmpv4:host or icmpv6:host)  
@@ -101,7 +101,7 @@ func (p *ICMPProber) Accept(target string) (ProbeTarget, error) {
 		// For ICMPv4, accept plain hostnames/IPs (without any protocol prefix)
 		hostname = target
 	} else {
-		return ProbeTarget{}, ErrNotAccepted
+		return ErrNotAccepted
 	}
 	
 	// Determine resolver type based on ICMP version
@@ -113,53 +113,58 @@ func (p *ICMPProber) Accept(target string) (ProbeTarget, error) {
 	// Resolve hostname to IP address
 	ip, err := net.ResolveIPAddr(resolvType, hostname)
 	if err != nil {
-		return ProbeTarget{}, fmt.Errorf("failed to resolve '%s': %w", hostname, err)
+		return fmt.Errorf("failed to resolve '%s': %w", hostname, err)
 	}
 	
 	// Check for duplicate IP addresses
 	ipStr := ip.String()
-	for _, existingIP := range p.targets {
+	for existingIP := range p.targets {
 		if existingIP.String() == ipStr {
-			return ProbeTarget{}, fmt.Errorf("duplicate target: %s resolves to already registered IP %s", hostname, ipStr)
+			return fmt.Errorf("duplicate target: %s resolves to already registered IP %s", hostname, ipStr)
 		}
 	}
 	
-	// Generate display name for new target
-	displayName := ip.String()
-	if net.ParseIP(hostname) == nil {
-		displayName = fmt.Sprintf("%s(%s)", hostname, ip.String())
-	}
+	// Store target with original target string
+	p.targets[ip] = target
 	
-	// Store target
-	p.targets = append(p.targets, ip)
-	
-	// Return ProbeTarget with IP as Key (for Event.Target) and formatted displayName
-	return ProbeTarget{
-		Key:         ipStr,
-		DisplayName: displayName,
-	}, nil
+	return nil
 }
 
 
-func (p *ICMPProber) HasTargets() bool {
-	return len(p.targets) > 0
-}
 
 func (p *ICMPProber) addTable(runCnt int, sentTime time.Time) {
 	rt := runTime{runCnt: runCnt, sentTime: sentTime}
 	addrMap := make(map[string]bool, len(p.targets))
-	for _, t := range p.targets {
-		addrMap[t.String()] = false
+	for ip := range p.targets {
+		addrMap[ip.String()] = false
 	}
 	p.mu.Lock()
 	p.tables[rt] = addrMap
 	p.mu.Unlock()
 }
 
+// getTargetInfo returns Key and DisplayName for the given IP address
+func (p *ICMPProber) getTargetInfo(addr string) (string, string) {
+	for ip, originalTarget := range p.targets {
+		if ip.String() == addr {
+			// Generate display name
+			displayName := addr
+			hostname := strings.TrimPrefix(originalTarget, string(p.version)+":")
+			if net.ParseIP(hostname) == nil {
+				displayName = fmt.Sprintf("%s(%s)", hostname, addr)
+			}
+			return addr, displayName
+		}
+	}
+	return addr, addr // fallback
+}
+
 func (p *ICMPProber) sent(r chan *Event, addr string) {
+	key, displayName := p.getTargetInfo(addr)
 	r <- &Event{
-		Target: addr,
-		Result: SENT,
+		Key:         key,
+		DisplayName: displayName,
+		Result:      SENT,
 	}
 }
 
@@ -178,11 +183,13 @@ func (p *ICMPProber) success(r chan *Event, runCnt int, addr string) {
 		}
 		table[addr] = true
 		elapse := time.Since(k.sentTime)
+		key, displayName := p.getTargetInfo(addr)
 		r <- &Event{
-			Target:   addr,
-			Result:   SUCCESS,
-			SentTime: k.sentTime,
-			Rtt:      elapse,
+			Key:         key,
+			DisplayName: displayName,
+			Result:      SUCCESS,
+			SentTime:    k.sentTime,
+			Rtt:         elapse,
 		}
 		return
 	}
@@ -198,12 +205,14 @@ func (p *ICMPProber) failed(r chan *Event, runCnt int, addr string, err error) {
 		if _, ok := table[addr]; ok {
 			table[addr] = true
 		}
+		key, displayName := p.getTargetInfo(addr)
 		r <- &Event{
-			Target:   addr,
-			Result:   FAILED,
-			SentTime: k.sentTime,
-			Rtt:      0,
-			Message:  err.Error(),
+			Key:         key,
+			DisplayName: displayName,
+			Result:      FAILED,
+			SentTime:    k.sentTime,
+			Rtt:         0,
+			Message:     err.Error(),
 		}
 		return
 	}
@@ -220,12 +229,14 @@ func (p *ICMPProber) checkTimeout(r chan *Event) {
 		}
 		for t, res := range table {
 			if !res {
+				key, displayName := p.getTargetInfo(t)
 				r <- &Event{
-					Target:   t,
-					Result:   TIMEOUT,
-					SentTime: rt.sentTime,
-					Rtt:      p.timeout,
-					Message:  "timeout",
+					Key:         key,
+					DisplayName: displayName,
+					Result:      TIMEOUT,
+					SentTime:    rt.sentTime,
+					Rtt:         p.timeout,
+					Message:     "timeout",
 				}
 			}
 		}
@@ -269,11 +280,11 @@ func (p *ICMPProber) probe(r chan *Event) {
 
 	n := time.Now()
 	p.addTable(p.runCnt, n)
-	for _, t := range p.targets {
-		_, err := p.c.WriteTo(b, t)
-		p.sent(r, t.String())  // Use IP as event key
+	for ip := range p.targets {
+		_, err := p.c.WriteTo(b, ip)
+		p.sent(r, ip.String())  // Use IP as event key
 		if err != nil {
-			p.failed(r, p.runCnt, t.String(), err)
+			p.failed(r, p.runCnt, ip.String(), err)
 		}
 	}
 }

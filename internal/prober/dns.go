@@ -51,40 +51,33 @@ func NewDNSProber(cfg *DNSConfig) *DNSProber {
 }
 
 // Accept parses DNS targets in format: dns://server[:port]/domain[/record_type]
-func (p *DNSProber) Accept(target string) (ProbeTarget, error) {
+func (p *DNSProber) Accept(target string) error {
 	if !strings.HasPrefix(target, "dns://") {
-		return ProbeTarget{}, ErrNotAccepted
+		return ErrNotAccepted
 	}
 
 	dnsTarget, err := p.parseTarget(target)
 	if err != nil {
-		return ProbeTarget{}, fmt.Errorf("invalid DNS target: %w", err)
+		return fmt.Errorf("invalid DNS target: %w", err)
 	}
 
 	// Validate DNS server by resolving its IP
 	serverIP, err := net.ResolveIPAddr("ip", dnsTarget.Server)
 	if err != nil {
-		return ProbeTarget{}, fmt.Errorf("failed to resolve DNS server '%s': %w", dnsTarget.Server, err)
+		return fmt.Errorf("failed to resolve DNS server '%s': %w", dnsTarget.Server, err)
 	}
 
 	// Create unique key for Event.Target matching
 	key := fmt.Sprintf("%s:%d|%s|%s|%t", serverIP.String(), dnsTarget.Port, dnsTarget.Domain, dnsTarget.RecordType, dnsTarget.UseTCP)
-	displayName := fmt.Sprintf("%s/%s/%s", dnsTarget.Server, dnsTarget.Domain, dnsTarget.RecordType)
 
 	// Store complete DNSTarget with pre-resolved IP
 	dnsTarget.ServerIP = serverIP.String()
 	dnsTarget.Key = key
 	p.targets = append(p.targets, dnsTarget)
 
-	return ProbeTarget{
-		Key:         key,
-		DisplayName: displayName,
-	}, nil
+	return nil
 }
 
-func (p *DNSProber) HasTargets() bool {
-	return len(p.targets) > 0
-}
 
 func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
 	// Remove dns:// prefix
@@ -177,7 +170,7 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 	defer p.wg.Done()
 	
 	now := time.Now()
-	p.sent(result, target.Key, now)
+	p.sent(result, target, now)
 
 	// Create DNS client
 	c := new(dns.Client)
@@ -190,7 +183,7 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 	m := new(dns.Msg)
 	qtype := dns.StringToType[target.RecordType]
 	if qtype == 0 {
-		p.failed(result, target.Key, now, fmt.Errorf("unsupported record type: %s", target.RecordType))
+		p.failed(result, target, now, fmt.Errorf("unsupported record type: %s", target.RecordType))
 		return
 	}
 	
@@ -200,51 +193,57 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 	server := fmt.Sprintf("%s:%d", target.ServerIP, target.Port)
 	r, rtt, err := c.Exchange(m, server)
 	if err != nil {
-		p.failed(result, target.Key, now, err)
+		p.failed(result, target, now, err)
 		return
 	}
 
 	// Check DNS response
 	if r.Rcode != dns.RcodeSuccess {
-		p.failed(result, target.Key, now, fmt.Errorf("DNS error: %s", dns.RcodeToString[r.Rcode]))
+		p.failed(result, target, now, fmt.Errorf("DNS error: %s", dns.RcodeToString[r.Rcode]))
 		return
 	}
 
 	// Success
-	p.success(result, target.Key, now, rtt)
+	p.success(result, target, now, rtt)
 }
 
-func (p *DNSProber) sent(result chan *Event, target string, sentTime time.Time) {
+func (p *DNSProber) sent(result chan *Event, target *DNSTarget, sentTime time.Time) {
+	displayName := fmt.Sprintf("%s/%s/%s", target.Server, target.Domain, target.RecordType)
 	result <- &Event{
-		Target:   target,
-		Result:   SENT,
-		SentTime: sentTime,
-		Rtt:      0,
-		Message:  "",
+		Key:         target.Key,
+		DisplayName: displayName,
+		Result:      SENT,
+		SentTime:    sentTime,
+		Rtt:         0,
+		Message:     "",
 	}
 }
 
-func (p *DNSProber) success(result chan *Event, target string, sentTime time.Time, rtt time.Duration) {
+func (p *DNSProber) success(result chan *Event, target *DNSTarget, sentTime time.Time, rtt time.Duration) {
+	displayName := fmt.Sprintf("%s/%s/%s", target.Server, target.Domain, target.RecordType)
 	result <- &Event{
-		Target:   target,
-		Result:   SUCCESS,
-		SentTime: sentTime,
-		Rtt:      rtt,
-		Message:  "",
+		Key:         target.Key,
+		DisplayName: displayName,
+		Result:      SUCCESS,
+		SentTime:    sentTime,
+		Rtt:         rtt,
+		Message:     "",
 	}
 }
 
-func (p *DNSProber) failed(result chan *Event, target string, sentTime time.Time, err error) {
+func (p *DNSProber) failed(result chan *Event, target *DNSTarget, sentTime time.Time, err error) {
 	reason := FAILED
 	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 		reason = TIMEOUT
 	}
 
+	displayName := fmt.Sprintf("%s/%s/%s", target.Server, target.Domain, target.RecordType)
 	result <- &Event{
-		Target:   target,
-		Result:   reason,
-		SentTime: sentTime,
-		Rtt:      0,
-		Message:  err.Error(),
+		Key:         target.Key,
+		DisplayName: displayName,
+		Result:      reason,
+		SentTime:    sentTime,
+		Rtt:         0,
+		Message:     err.Error(),
 	}
 }

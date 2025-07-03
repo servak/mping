@@ -1,9 +1,9 @@
 package command
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -73,48 +73,37 @@ mping dns://8.8.8.8/google.com`,
 			_interval := time.Duration(interval) * time.Millisecond
 			_timeout := time.Duration(timeout) * time.Millisecond
 
-			res := make(chan *prober.Event)
+			// Create ProbeManager and MetricsManager
+			probeManager := prober.NewProbeManager(cfg.Prober)
+			metricsManager := stats.NewMetricsManager()
 			
-			// Create all available probers
-			manager := stats.NewMetricsManager()
-			allProbers, err := createAllProbers(cfg)
+			// Add targets
+			err = probeManager.AddTargets(hosts...)
 			if err != nil {
-				return fmt.Errorf("failed to create probers: %w", err)
+				return fmt.Errorf("failed to add targets: %w", err)
 			}
 			
-			// Use TargetRouter for cleaner target handling
-			router := prober.NewTargetRouter(allProbers)
-			registrations, err := router.RouteTargets(hosts)
-			if err != nil {
-				return fmt.Errorf("failed to route targets: %w", err)
-			}
+			// Subscribe to events for metrics collection
+			metricsManager.Subscribe(probeManager.Events())
 			
-			// Register metrics using ProbeTarget Key and DisplayName
-			for _, probeTarget := range registrations {
-				manager.Register(probeTarget.Key, probeTarget.DisplayName)
-			}
+			// Start probing in background
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 			
-			probers := router.GetActiveProbers()
-			manager.Subscribe(res)
-			var wg sync.WaitGroup
-			for _, p := range probers {
-				wg.Add(1)
-				go func(p prober.Prober) {
-					p.Start(res, _interval, _timeout)
-					wg.Done()
-				}(p)
-			}
 			go func() {
-				startCUI(manager, cfg.UI.CUI, _interval)
-				for _, p := range probers {
-					p.Stop()
+				if err := probeManager.Run(ctx, _interval, _timeout); err != nil {
+					fmt.Printf("ProbeManager error: %v\n", err)
 				}
 			}()
-
-			cmd.Print("Waiting for the results of the probe. Please stand by.")
-			wg.Wait()
-			cmd.Print("\r")
-			t := ui.TableRender(manager, stats.Success)
+			
+			// Start TUI
+			startCUI(metricsManager, cfg.UI.CUI, _interval)
+			
+			// Stop probing when TUI exits
+			probeManager.Stop()
+			
+			// Final results
+			t := ui.TableRender(metricsManager, stats.Success)
 			t.SetStyle(table.StyleLight)
 			cmd.Println(t.Render())
 			return nil
@@ -161,48 +150,4 @@ func startCUI(manager *stats.MetricsManager, cui *ui.CUIConfig, interval time.Du
 
 
 
-// createAllProbers creates all available probers based on config
-func createAllProbers(cfg *config.Config) ([]prober.Prober, error) {
-	var probers []prober.Prober
-	
-	// Create ICMPv4 prober (skip if permission denied)
-	if icmpv4Cfg, exists := cfg.Prober[string(prober.ICMPV4)]; exists {
-		icmpv4, err := prober.NewICMPProber(prober.ICMPV4, icmpv4Cfg.ICMP)
-		if err != nil {
-			fmt.Printf("Warning: failed to create ICMPv4 prober: %v\n", err)
-		} else {
-			probers = append(probers, icmpv4)
-		}
-	}
-	
-	// Create ICMPv6 prober (skip if permission denied)
-	if icmpv6Cfg, exists := cfg.Prober[string(prober.ICMPV6)]; exists {
-		icmpv6, err := prober.NewICMPProber(prober.ICMPV6, icmpv6Cfg.ICMP)
-		if err != nil {
-			fmt.Printf("Warning: failed to create ICMPv6 prober: %v\n", err)
-		} else {
-			probers = append(probers, icmpv6)
-		}
-	}
-	
-	// Create HTTP prober (handles both HTTP and HTTPS)
-	if httpCfg, exists := cfg.Prober[string(prober.HTTP)]; exists {
-		http := prober.NewHTTPProber(httpCfg.HTTP)
-		probers = append(probers, http)
-	}
-	
-	// Create TCP prober
-	if tcpCfg, exists := cfg.Prober[string(prober.TCP)]; exists {
-		tcp := prober.NewTCPProber(tcpCfg.TCP)
-		probers = append(probers, tcp)
-	}
-	
-	// Create DNS prober
-	if dnsCfg, exists := cfg.Prober[string(prober.DNS)]; exists {
-		dns := prober.NewDNSProber(dnsCfg.DNS)
-		probers = append(probers, dns)
-	}
-	
-	return probers, nil
-}
 

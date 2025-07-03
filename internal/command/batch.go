@@ -1,9 +1,9 @@
 package command
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -65,49 +65,41 @@ mping batch dns://8.8.8.8/google.com`,
 			_interval := time.Duration(interval) * time.Millisecond
 			_timeout := time.Duration(timeout) * time.Millisecond
 
-			res := make(chan *prober.Event)
+			// Create ProbeManager and MetricsManager
+			probeManager := prober.NewProbeManager(cfg.Prober)
+			metricsManager := stats.NewMetricsManager()
 			
-			// Create all available probers
-			manager := stats.NewMetricsManager()
-			allProbers, err := createAllProbers(cfg)
+			// Add targets
+			err = probeManager.AddTargets(hosts...)
 			if err != nil {
-				return fmt.Errorf("failed to create probers: %w", err)
+				return fmt.Errorf("failed to add targets: %w", err)
 			}
 			
-			// Use TargetRouter for cleaner target handling
-			router := prober.NewTargetRouter(allProbers)
-			registrations, err := router.RouteTargets(hosts)
-			if err != nil {
-				return fmt.Errorf("failed to route targets: %w", err)
-			}
+			// Subscribe to events for metrics collection
+			metricsManager.Subscribe(probeManager.Events())
 			
-			// Register metrics using ProbeTarget Key and DisplayName
-			for _, probeTarget := range registrations {
-				manager.Register(probeTarget.Key, probeTarget.DisplayName)
-			}
+			// Start probing with timeout context
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(counter)*_interval)
+			defer cancel()
 			
-			probers := router.GetActiveProbers()
-			manager.Subscribe(res)
-			var wg sync.WaitGroup
-			for _, p := range probers {
-				wg.Add(1)
-				go func(p prober.Prober) {
-					p.Start(res, _interval, _timeout)
-					wg.Done()
-				}(p)
-			}
 			cmd.Print("probe")
+			go func() {
+				if err := probeManager.Run(ctx, _interval, _timeout); err != nil {
+					fmt.Printf("ProbeManager error: %v\n", err)
+				}
+			}()
+			
+			// Wait for specified duration
 			for counter > 0 {
 				counter--
 				cmd.Print(".")
 				time.Sleep(_interval)
 			}
-			for _, p := range probers {
-				p.Stop()
-			}
-			wg.Wait()
+			
+			// Stop probing
+			probeManager.Stop()
 			cmd.Print("\r")
-			t := ui.TableRender(manager, stats.Success)
+			t := ui.TableRender(metricsManager, stats.Success)
 			t.SetStyle(table.StyleLight)
 			cmd.Println(t.Render())
 			return nil

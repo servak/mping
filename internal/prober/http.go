@@ -65,52 +65,48 @@ func NewHTTPProber(cfg *HTTPConfig) *HTTPProber {
 	}
 }
 
-func (p *HTTPProber) Accept(target string) (ProbeTarget, error) {
+func (p *HTTPProber) Accept(target string) error {
 	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-		return ProbeTarget{}, ErrNotAccepted
+		return ErrNotAccepted
 	}
 	
 	// Validate URL format
 	if u, err := url.Parse(target); err == nil && u.Host != "" {
 		p.targets = append(p.targets, target)
-		// For HTTP, Key and DisplayName are the same (full URL)
-		return ProbeTarget{
-			Key:         target,
-			DisplayName: target,
-		}, nil
+		return nil
 	}
 	
-	return ProbeTarget{}, fmt.Errorf("invalid HTTP URL format")
+	return fmt.Errorf("invalid HTTP URL format")
 }
 
-func (p *HTTPProber) HasTargets() bool {
-	return len(p.targets) > 0
-}
 
 func (p *HTTPProber) sent(r chan *Event, t string) {
 	r <- &Event{
-		Target: t,
-		Result: SENT,
+		Key:         t,
+		DisplayName: t,
+		Result:      SENT,
 	}
 }
 
 func (p *HTTPProber) timeout(r chan *Event, target string, now time.Time, err error) {
 	r <- &Event{
-		Target:   target,
-		Result:   TIMEOUT,
-		SentTime: now,
-		Rtt:      time.Since(now),
-		Message:  "timeout",
+		Key:         target,
+		DisplayName: target,
+		Result:      TIMEOUT,
+		SentTime:    now,
+		Rtt:         time.Since(now),
+		Message:     "timeout",
 	}
 }
 
 func (p *HTTPProber) failed(r chan *Event, target string, now time.Time, err error) {
 	r <- &Event{
-		Target:   target,
-		Result:   FAILED,
-		SentTime: now,
-		Rtt:      time.Since(now),
-		Message:  err.Error(),
+		Key:         target,
+		DisplayName: target,
+		Result:      FAILED,
+		SentTime:    now,
+		Rtt:         time.Since(now),
+		Message:     err.Error(),
 	}
 }
 
@@ -141,10 +137,11 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 		p.failed(r, target, now, errors.New("invalid body"))
 	} else {
 		r <- &Event{
-			Target:   target,
-			Result:   SUCCESS,
-			SentTime: now,
-			Rtt:      time.Since(now),
+			Key:         target,
+			DisplayName: target,
+			Result:      SUCCESS,
+			SentTime:    now,
+			Rtt:         time.Since(now),
 		}
 	}
 }

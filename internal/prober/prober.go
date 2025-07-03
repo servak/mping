@@ -23,21 +23,16 @@ const (
 var ErrNotAccepted = errors.New("target not accepted by this prober")
 
 type Event struct {
-	Target   string
-	Result   reason
-	SentTime time.Time
-	Rtt      time.Duration
-	Message  string
-}
-
-type ProbeTarget struct {
 	Key         string
 	DisplayName string
+	Result      reason
+	SentTime    time.Time
+	Rtt         time.Duration
+	Message     string
 }
 
 type Prober interface {
-	Accept(target string) (ProbeTarget, error)
-	HasTargets() bool
+	Accept(target string) error
 	Start(chan *Event, time.Duration, time.Duration) error
 	Stop()
 }
