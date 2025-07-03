@@ -6,6 +6,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -142,8 +143,9 @@ func DefaultConfig() *Config {
 			string(prober.NTP): {
 				Probe: prober.NTP,
 				NTP: &prober.NTPConfig{
-					Server: "pool.ntp.org",
-					Port:   123,
+					Server:    "pool.ntp.org",
+					Port:      123,
+					MaxOffset: 5 * time.Second, // Alert if time drift > 5 seconds
 				},
 			},
 		},

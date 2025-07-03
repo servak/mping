@@ -8,7 +8,7 @@ mping
 ## Features
 
 - 🎯 **Multi-target monitoring**: Monitor dozens of hosts simultaneously
-- 🌐 **Multi-protocol support**: ICMP, HTTP/HTTPS, and TCP connectivity testing
+- 🌐 **Multi-protocol support**: ICMP, HTTP/HTTPS, TCP, DNS, and NTP monitoring
 - 📊 **Real-time statistics**: Live success rates, response times, and packet loss
 - 🖥️ **Interactive TUI**: Clean terminal interface with sortable results
 - ⚡ **High performance**: Concurrent probing with configurable intervals
@@ -23,6 +23,7 @@ mping
 | **HTTP/HTTPS** | `http://url` or `https://url` | `https://google.com` | Web service monitoring |
 | **TCP** | `tcp://host:port` | `tcp://google.com:443` | Port connectivity testing |
 | **DNS** | `dns://[server[:port]]/domain[/record_type]` | `dns://8.8.8.8/google.com/A`, `dns:///google.com` | DNS query monitoring |
+| **NTP** | `ntp://[server[:port]]` | `ntp://pool.ntp.org`, `ntp://time.google.com:123` | Network Time Protocol monitoring |
 
 ## Demo
 
@@ -74,6 +75,12 @@ mping dns://8.8.8.8/google.com/A dns://1.1.1.1/cloudflare.com/AAAA
 
 # DNS monitoring with defaults (uses 8.8.8.8:53, A record)
 mping "dns:///google.com" "dns:///github.com"
+
+# NTP time synchronization monitoring
+mping ntp://pool.ntp.org ntp://time.google.com:123
+
+# Mixed protocol monitoring
+mping google.com https://google.com ntp://time.google.com
 ```
 
 ### Batch mode for automation
@@ -124,7 +131,6 @@ DNS queries use these defaults (configurable via ~/.mping.yml):
 - Port: 53
 - Record Type: A
 - Protocol: UDP
-- Timeout: 5000ms
 
 ## Usage
 
@@ -138,7 +144,8 @@ mping 1.1.1.1 8.8.8.8
 mping 192.168.1.0/24
 mping icmpv6://google.com
 mping http://google.com
-mping tcp://google.com:443 https://google.com 8.8.8.8
+mping ntp://pool.ntp.org
+mping tcp://google.com:443 https://google.com ntp://time.google.com 8.8.8.8
 
 Available Commands:
   batch       Disables TUI and performs probing for a set number of iterations
@@ -223,6 +230,14 @@ prober:
       use_tcp: false             # Use TCP instead of UDP
       recursion_desired: true    # Enable recursive queries
       expect_codes: ""           # Expected DNS response codes (optional)
+  
+  # NTP configuration
+  ntp:
+    probe: ntp
+    ntp:
+      server: "pool.ntp.org"     # NTP server IP or hostname (required)
+      port: 123                  # NTP server port (1-65535, default: 123)
+      max_offset: "5s"           # Maximum time offset before alert (e.g., "100ms", "5s")
 
 # UI configuration
 ui:
@@ -293,11 +308,19 @@ prober:
     icmp:
       body: "internal-check"
       source_interface: "eth1"
+  
+  # Custom strict NTP checker
+  ntp-strict:
+    probe: ntp
+    ntp:
+      server: "time.google.com"
+      port: 123
+      max_offset: "100ms"
 ```
 
 Use custom probers with the prefix format:
 ```bash
-mping api-check://api.example.com internal-ping://192.168.1.1
+mping api-check://api.example.com internal-ping://192.168.1.1 ntp-strict://pool.ntp.org
 ```
 
 ### Configuration Validation
