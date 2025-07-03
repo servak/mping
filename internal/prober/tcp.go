@@ -61,7 +61,18 @@ func (p *TCPProber) Accept(target string) error {
 	return nil
 }
 
+func (p *TCPProber) emitRegistrationEvents(r chan *Event) {
+	for k, v := range p.targets {
+		r <- &Event{
+			Key:         k,
+			DisplayName: v,
+			Result:      REGISTER,
+		}
+	}
+}
+
 func (p *TCPProber) Start(result chan *Event, interval, timeout time.Duration) error {
+	p.emitRegistrationEvents(result)
 	ticker := time.NewTicker(interval)
 	p.wg.Add(1)
 	go func() {

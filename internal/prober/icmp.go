@@ -46,11 +46,6 @@ type (
 		runCnt   int
 		sentTime time.Time
 	}
-
-	rcvdPkt struct {
-		id, seq uint16
-		target  string
-	}
 )
 
 func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, error) {
@@ -308,24 +303,32 @@ func (p *ICMPProber) recvPkts(r chan *Event) {
 			os.Exit(1)
 		}
 		offset := 0
-		var pkt = rcvdPkt{
-			target: ip.String(),
-			id:     binary.BigEndian.Uint16(pktbuf[offset+4 : offset+6]),
-			seq:    binary.BigEndian.Uint16(pktbuf[offset+6 : offset+8]),
-		}
-		if pkt.id != uint16(p.runID) {
+		id := binary.BigEndian.Uint16(pktbuf[offset+4 : offset+6])
+		if id != uint16(p.runID) {
 			continue
 		}
+		seq := binary.BigEndian.Uint16(pktbuf[offset+6 : offset+8])
 		if rm.Code == 0 {
 			switch rm.Type {
 			case ipv4.ICMPTypeEchoReply, ipv6.ICMPTypeEchoReply:
-				p.success(r, int(pkt.seq), pkt.target)
+				p.success(r, int(seq), ip.String())
 			}
 		}
 	}
 }
 
+func (p *ICMPProber) emitRegistrationEvents(r chan *Event) {
+	for k, v := range p.targets {
+		r <- &Event{
+			Key:         k,
+			DisplayName: v,
+			Result:      REGISTER,
+		}
+	}
+}
+
 func (p *ICMPProber) Start(r chan *Event, interval, timeout time.Duration) error {
+	p.emitRegistrationEvents(r)
 	p.timeout = timeout
 	ticker := time.NewTicker(interval)
 	go p.recvPkts(r)

@@ -153,7 +153,18 @@ func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
 	}, nil
 }
 
+func (p *DNSProber) emitRegistrationEvents(r chan *Event) {
+	for _, v := range p.targets {
+		r <- &Event{
+			Key:         v.OriginalTarget,
+			DisplayName: v.OriginalTarget,
+			Result:      REGISTER,
+		}
+	}
+}
+
 func (p *DNSProber) Start(result chan *Event, interval, timeout time.Duration) error {
+	p.emitRegistrationEvents(result)
 	ticker := time.NewTicker(interval)
 	p.wg.Add(1)
 	go func() {
@@ -268,7 +279,7 @@ func (p *DNSProber) isExpectedResponseCode(rcode int) bool {
 	if p.config.ExpectCodes != "" {
 		return MatchCode(rcode, p.config.ExpectCodes)
 	}
-	
+
 	// Default: only accept successful responses (NOERROR = 0)
 	return rcode == 0 // dns.RcodeSuccess
 }

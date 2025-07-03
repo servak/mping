@@ -31,8 +31,8 @@ type (
 
 	HTTPConfig struct {
 		Header      http.Header `yaml:"headers,omitempty"`
-		ExpectCode  int         `yaml:"expect_code,omitempty"`     // Single code (backward compatibility)
-		ExpectCodes string      `yaml:"expect_codes,omitempty"`   // Range/list: "2XX", "200,201,202"
+		ExpectCode  int         `yaml:"expect_code,omitempty"`  // Single code (backward compatibility)
+		ExpectCodes string      `yaml:"expect_codes,omitempty"` // Range/list: "2XX", "200,201,202"
 		ExpectBody  string      `yaml:"expect_body,omitempty"`
 		TLS         *TLSConfig  `yaml:"tls,omitempty"`
 		RedirectOFF bool        `yaml:"redirect_off,omitempty"`
@@ -192,7 +192,18 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 	}
 }
 
+func (p *HTTPProber) emitRegistrationEvents(r chan *Event) {
+	for _, v := range p.targets {
+		r <- &Event{
+			Key:         v,
+			DisplayName: v,
+			Result:      REGISTER,
+		}
+	}
+}
+
 func (p *HTTPProber) Start(r chan *Event, interval, timeout time.Duration) error {
+	p.emitRegistrationEvents(r)
 	p.client.Timeout = timeout
 	ticker := time.NewTicker(interval)
 	p.wg.Add(1)
@@ -233,7 +244,7 @@ func (p *HTTPProber) isExpectedStatusCode(statusCode int) bool {
 	if p.config.ExpectCodes != "" {
 		return MatchCode(statusCode, p.config.ExpectCodes)
 	}
-	
+
 	// Backward compatibility: use ExpectCode (default 0 means any code is ok)
 	if p.config.ExpectCode == 0 {
 		return true // No specific code expected
