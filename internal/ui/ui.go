@@ -1,7 +1,8 @@
 package ui
 
+// UI は UI コンポーネントのインターフェース
 type UI interface {
-	Run()
+	Run() error
 	Update()
 	Close()
 }

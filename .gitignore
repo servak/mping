@@ -1,5 +1,5 @@
 /mping
-
 dist/
-
-dist/
+Makefile
+/mping*
+example-config.yml
