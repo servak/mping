@@ -42,7 +42,7 @@ type (
 		RecordType       string `yaml:"record_type"`
 		UseTCP           bool   `yaml:"use_tcp,omitempty"`
 		RecursionDesired bool   `yaml:"recursion_desired,omitempty"`
-		ExpectCodes      string `yaml:"expect_codes,omitempty"` // DNS response codes: "0", "0-5", "0,2,3"
+		ExpectCodes      string `yaml:"expect_codes"` // DNS response codes: "0", "0-5", "0,2,3"
 	}
 )
 
@@ -295,5 +295,5 @@ func (p *DNSProber) isExpectedResponseCode(rcode int) bool {
 	}
 
 	// Default: only accept successful responses (NOERROR = 0)
-	return rcode == 0 // dns.RcodeSuccess
+	return rcode == dns.RcodeSuccess
 }

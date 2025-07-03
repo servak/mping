@@ -136,6 +136,7 @@ func DefaultConfig() *Config {
 					RecordType:       "A",
 					UseTCP:           false,
 					RecursionDesired: true, // Default to recursive queries
+					ExpectCodes:      "0",  // Default to accepting only successful responses
 				},
 			},
 		},
