@@ -26,6 +26,12 @@ type (
 	}
 )
 
+// Validate validates the TCP configuration
+func (cfg *TCPConfig) Validate() error {
+	// Basic validation - TCP config is simple, no specific validation needed for now
+	return nil
+}
+
 func NewTCPProber(cfg *TCPConfig, prefix string) *TCPProber {
 	return &TCPProber{
 		targets:  make(map[string]string),

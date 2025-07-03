@@ -48,6 +48,18 @@ type (
 	}
 )
 
+// Validate validates the ICMP configuration
+func (cfg *ICMPConfig) Validate() error {
+	// Basic validation - could be extended with more checks
+	if cfg.TOS < 0 || cfg.TOS > 255 {
+		return fmt.Errorf("invalid TOS value: %d (must be 0-255)", cfg.TOS)
+	}
+	if cfg.TTL < 0 || cfg.TTL > 255 {
+		return fmt.Errorf("invalid TTL value: %d (must be 0-255)", cfg.TTL)
+	}
+	return nil
+}
+
 func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, error) {
 	var (
 		c   *icmp.PacketConn

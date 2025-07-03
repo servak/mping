@@ -18,11 +18,11 @@ func TestTransformTarget(t *testing.T) {
 		},
 		"http": {
 			Probe: HTTP,
-			HTTP:  &HTTPConfig{ExpectCode: 200},
+			HTTP:  &HTTPConfig{ExpectCodes: "200"},
 		},
 		"https": {
 			Probe: HTTPS,
-			HTTP:  &HTTPConfig{ExpectCode: 200},
+			HTTP:  &HTTPConfig{ExpectCodes: "200"},
 		},
 		"tcp": {
 			Probe: TCP,
@@ -175,16 +175,16 @@ func TestProbeManagerIntegration(t *testing.T) {
 	config := map[string]*ProberConfig{
 		"http": {
 			Probe: HTTP,
-			HTTP:  &HTTPConfig{ExpectCode: 200},
+			HTTP:  &HTTPConfig{ExpectCodes: "200"},
 		},
 		"my-http": {
 			Probe: HTTP,
-			HTTP:  &HTTPConfig{ExpectCode: 200, ExpectBody: "custom"},
+			HTTP:  &HTTPConfig{ExpectCodes: "200", ExpectBody: "custom"},
 		},
 		"my-https": {
 			Probe: HTTP,
 			HTTP: &HTTPConfig{
-				ExpectCode: 200,
+				ExpectCodes: "200",
 				TLS:        &TLSConfig{SkipVerify: true},
 			},
 		},
@@ -241,7 +241,7 @@ func TestHTTPProberTLSConfig(t *testing.T) {
 		{
 			name: "HTTP without TLS",
 			config: &HTTPConfig{
-				ExpectCode: 200,
+				ExpectCodes: "200",
 			},
 			target:      "my-http://example.com",
 			expectedURL: "http://example.com",
@@ -249,7 +249,7 @@ func TestHTTPProberTLSConfig(t *testing.T) {
 		{
 			name: "HTTPS with TLS config",
 			config: &HTTPConfig{
-				ExpectCode: 200,
+				ExpectCodes: "200",
 				TLS:        &TLSConfig{SkipVerify: true},
 			},
 			target:      "my-https://secure.example.com",

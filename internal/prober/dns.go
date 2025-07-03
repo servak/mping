@@ -46,6 +46,32 @@ type (
 	}
 )
 
+// Validate validates the DNS configuration
+func (cfg *DNSConfig) Validate() error {
+	if cfg.Server == "" {
+		return fmt.Errorf("DNS server is required")
+	}
+
+	if cfg.Port <= 0 || cfg.Port > 65535 {
+		return fmt.Errorf("invalid DNS server port: %d (must be 1-65535)", cfg.Port)
+	}
+
+	// Validate record type
+	validTypes := []string{"A", "AAAA", "CNAME", "MX", "NS", "PTR", "SOA", "SRV", "TXT"}
+	if !slices.Contains(validTypes, strings.ToUpper(cfg.RecordType)) {
+		return fmt.Errorf("invalid DNS record type: %s (supported: %s)", cfg.RecordType, strings.Join(validTypes, ", "))
+	}
+
+	// Validate expect codes pattern if specified
+	if cfg.ExpectCodes != "" {
+		if !IsValidCodePattern(cfg.ExpectCodes) {
+			return fmt.Errorf("invalid expect_codes pattern: %s", cfg.ExpectCodes)
+		}
+	}
+
+	return nil
+}
+
 func NewDNSProber(cfg *DNSConfig, prefix string) *DNSProber {
 	return &DNSProber{
 		targets:  make([]*DNSTarget, 0),
@@ -131,18 +157,6 @@ func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
 	if len(queryParts) > 1 && queryParts[1] != "" {
 		recordType = strings.ToUpper(queryParts[1])
 	}
-
-	// Default values
-	if server == "" {
-		server = "8.8.8.8"
-	}
-	if port == 0 {
-		port = 53
-	}
-	if recordType == "" {
-		recordType = "A"
-	}
-
 	return &DNSTarget{
 		Server:         server,
 		Port:           port,

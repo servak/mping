@@ -31,8 +31,7 @@ type (
 
 	HTTPConfig struct {
 		Header      http.Header `yaml:"headers,omitempty"`
-		ExpectCode  int         `yaml:"expect_code,omitempty"`  // Single code (backward compatibility)
-		ExpectCodes string      `yaml:"expect_codes,omitempty"` // Range/list: "2XX", "200,201,202"
+		ExpectCodes string      `yaml:"expect_codes"` // Range/list: "200,201,202", "200-299"
 		ExpectBody  string      `yaml:"expect_body,omitempty"`
 		TLS         *TLSConfig  `yaml:"tls,omitempty"`
 		RedirectOFF bool        `yaml:"redirect_off,omitempty"`
@@ -238,16 +237,23 @@ func (c *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return c.transport.RoundTrip(req)
 }
 
+// Validate validates the HTTP configuration
+func (cfg *HTTPConfig) Validate() error {
+	if cfg.ExpectCodes != "" {
+		if !IsValidCodePattern(cfg.ExpectCodes) {
+			return fmt.Errorf("invalid expect_codes pattern: %s", cfg.ExpectCodes)
+		}
+	}
+	return nil
+}
+
 // isExpectedStatusCode checks if the given status code matches the expected criteria
 func (p *HTTPProber) isExpectedStatusCode(statusCode int) bool {
-	// If ExpectCodes is specified, use it; otherwise fall back to ExpectCode
+	// If ExpectCodes is specified, use it; otherwise any status code is accepted
 	if p.config.ExpectCodes != "" {
 		return MatchCode(statusCode, p.config.ExpectCodes)
 	}
 
-	// Backward compatibility: use ExpectCode (default 0 means any code is ok)
-	if p.config.ExpectCode == 0 {
-		return true // No specific code expected
-	}
-	return statusCode == p.config.ExpectCode
+	// Default: accept any status code when no expectation is configured
+	return true
 }

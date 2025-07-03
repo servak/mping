@@ -15,7 +15,7 @@ func TestHTTPStatusCodeMatching(t *testing.T) {
 		{
 			name: "exact match - success",
 			config: &HTTPConfig{
-				ExpectCode: 200,
+				ExpectCodes: "200",
 			},
 			statusCode: 200,
 			expected:   true,
@@ -23,7 +23,7 @@ func TestHTTPStatusCodeMatching(t *testing.T) {
 		{
 			name: "exact match - failure",
 			config: &HTTPConfig{
-				ExpectCode: 200,
+				ExpectCodes: "200",
 			},
 			statusCode: 404,
 			expected:   false,
@@ -31,7 +31,7 @@ func TestHTTPStatusCodeMatching(t *testing.T) {
 		{
 			name: "no expectation - any code accepted",
 			config: &HTTPConfig{
-				ExpectCode: 0,
+				ExpectCodes: "",
 			},
 			statusCode: 500,
 			expected:   true,
@@ -167,8 +167,7 @@ func TestHTTPStatusCodeMatching(t *testing.T) {
 		{
 			name: "empty expect_codes with expect_code fallback",
 			config: &HTTPConfig{
-				ExpectCode:  200,
-				ExpectCodes: "",
+				ExpectCodes: "200",
 			},
 			statusCode: 200,
 			expected:   true,

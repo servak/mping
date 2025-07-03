@@ -97,14 +97,14 @@ func TestHTTPProberAccept(t *testing.T) {
 		{
 			name:   "http with matching prefix",
 			prefix: "my-http",
-			config: &HTTPConfig{ExpectCode: 200},
+			config: &HTTPConfig{ExpectCodes: "200"},
 			target: "my-http://example.com",
 		},
 		{
 			name:   "https with TLS config",
 			prefix: "my-https",
 			config: &HTTPConfig{
-				ExpectCode: 200,
+				ExpectCodes: "200",
 				TLS:        &TLSConfig{SkipVerify: true},
 			},
 			target: "my-https://secure.example.com",
@@ -112,7 +112,7 @@ func TestHTTPProberAccept(t *testing.T) {
 		{
 			name:   "custom prefix",
 			prefix: "api-check",
-			config: &HTTPConfig{ExpectCode: 200},
+			config: &HTTPConfig{ExpectCodes: "200"},
 			target: "api-check://api.example.com/health",
 		},
 
@@ -120,14 +120,14 @@ func TestHTTPProberAccept(t *testing.T) {
 		{
 			name:      "wrong prefix",
 			prefix:    "my-http",
-			config:    &HTTPConfig{ExpectCode: 200},
+			config:    &HTTPConfig{ExpectCodes: "200"},
 			target:    "other://example.com",
 			shouldErr: true,
 		},
 		{
 			name:      "invalid URL format",
 			prefix:    "my-http",
-			config:    &HTTPConfig{ExpectCode: 200},
+			config:    &HTTPConfig{ExpectCodes: "200"},
 			target:    "my-http://",
 			shouldErr: true,
 		},
