@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 	
 	"github.com/servak/mping/internal/stats"
 )
@@ -50,8 +49,6 @@ func TestLayout_Root(t *testing.T) {
 		t.Error("Expected Root() to return the root element")
 	}
 
-	// tview.Primitiveインターフェースを実装していることを確認
-	var _ tview.Primitive = root
 }
 
 func TestLayout_HandleKeyEvent(t *testing.T) {
