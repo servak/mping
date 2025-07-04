@@ -57,7 +57,7 @@ func TestRenderer_RenderHeader(t *testing.T) {
 			enableColors: true,
 			headerColor:  "blue",
 			expectedParts: []string{
-				"[blue]Sort: Succ[-]",
+				"[blue]Sort: Succ ^[-]",
 				"[blue]Interval: 1000ms[-]",
 				"[blue]mping[-]",
 			},
@@ -66,7 +66,7 @@ func TestRenderer_RenderHeader(t *testing.T) {
 			name:         "with colors disabled",
 			enableColors: false,
 			expectedParts: []string{
-				"Sort: Succ",
+				"Sort: Succ ^",
 				"Interval: 1000ms",
 				"mping",
 			},
@@ -80,7 +80,7 @@ func TestRenderer_RenderHeader(t *testing.T) {
 			enableColors: true,
 			headerColor:  "",
 			expectedParts: []string{
-				"Sort: Succ",
+				"Sort: Succ ^",
 				"Interval: 1000ms",
 				"mping",
 			},
@@ -131,6 +131,7 @@ func TestRenderer_RenderFooter(t *testing.T) {
 				"[gray]h:help[-]",
 				"[gray]q:quit[-]",
 				"[gray]s:sort[-]",
+				"[gray]r:reverse[-]",
 				"[gray]R:reset[-]",
 				"[gray]j/k/g/G/u/d:move[-]",
 			},
@@ -142,6 +143,7 @@ func TestRenderer_RenderFooter(t *testing.T) {
 				"h:help",
 				"q:quit",
 				"s:sort",
+				"r:reverse",
 				"R:reset",
 				"j/k/g/G/u/d:move",
 			},
@@ -206,7 +208,7 @@ func TestRenderer_RenderMain(t *testing.T) {
 				"example.com",
 				"HOST", // テーブルヘッダー
 				"SENT",
-				"SUCC",
+				"SUCC ↑", // ソート矢印付き
 				"FAIL",
 			},
 		},
@@ -224,10 +226,10 @@ func TestRenderer_RenderMain(t *testing.T) {
 			},
 			expected: []string{
 				"test.com",
-				"HOST",
-				"SENT",
-				"SUCC",
-				"FAIL",
+				"Host",
+				"Sent", 
+				"Succ ↑", // ソート矢印付き
+				"Fail",
 			},
 		},
 	}
@@ -251,8 +253,14 @@ func TestRenderer_RenderMain(t *testing.T) {
 				}
 			}
 
-			// テーブルヘッダーの確認
-			expectedHeaders := []string{"Host", "Sent", "Success", "Fail", "Loss%"}
+			// テーブルヘッダーの確認（ソート矢印付きヘッダー）
+			// Borderによってヘッダーの大文字小文字が変わる
+			var expectedHeaders []string
+			if tt.border {
+				expectedHeaders = []string{"HOST", "SENT", "SUCC ↑", "FAIL", "LOSS"}
+			} else {
+				expectedHeaders = []string{"Host", "Sent", "Succ ↑", "Fail", "Loss"}
+			}
 			for _, header := range expectedHeaders {
 				if !strings.Contains(result, header) {
 					t.Errorf("Expected main content to contain header '%s', got: %s", header, result)

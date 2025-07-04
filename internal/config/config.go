@@ -143,6 +143,7 @@ func DefaultConfig() *Config {
 			string(prober.NTP): {
 				Probe: prober.NTP,
 				NTP: &prober.NTPConfig{
+					Server:    "pool.ntp.org",
 					Port:      123,
 					MaxOffset: 5 * time.Second, // Alert if time drift > 5 seconds
 				},
