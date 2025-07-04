@@ -10,14 +10,14 @@ import (
 	"github.com/servak/mping/internal/stats"
 )
 
-// UI は UI コンポーネントのインターフェース
+// UI is an interface for UI components
 type UI interface {
 	Run() error
 	Update()
 	Close()
 }
 
-// Config は UI 設定を管理
+// Config manages UI settings
 type Config struct {
 	Title        string `yaml:"-"`
 	Border       bool   `yaml:"border"`
@@ -32,12 +32,7 @@ type Config struct {
 	} `yaml:"colors"`
 }
 
-// UIConfig は UI 全体の設定を管理
-type UIConfig struct {
-	CUI *Config `yaml:"cui"`
-}
-
-// App は tview アプリケーションのメインコントローラー
+// App is the main controller for tview application
 type App struct {
 	app      *tview.Application
 	pages    *tview.Pages
@@ -51,7 +46,7 @@ type App struct {
 	cancel   context.CancelFunc
 }
 
-// NewApp は新しい App インスタンスを作成
+// NewApp creates a new App instance
 func NewApp(mm *stats.MetricsManager, cfg *Config, interval time.Duration) *App {
 	if cfg == nil {
 		cfg = DefaultConfig()
@@ -65,7 +60,7 @@ func NewApp(mm *stats.MetricsManager, cfg *Config, interval time.Duration) *App 
 	renderer := NewRenderer(mm, cfg, interval)
 	layout := NewLayout(renderer)
 
-	// メインページとヘルプモーダルを追加
+	// Add main page and help modal
 	pages.AddPage("main", layout.Root(), true, true)
 	pages.AddPage("help", createHelpModal(), true, false)
 
@@ -83,7 +78,7 @@ func NewApp(mm *stats.MetricsManager, cfg *Config, interval time.Duration) *App 
 	}
 }
 
-// Run はアプリケーションを開始
+// Run starts the application
 func (a *App) Run() error {
 	a.setupKeyBindings()
 	a.renderer.SetSortKey(a.sortKey)
@@ -91,23 +86,23 @@ func (a *App) Run() error {
 	return a.app.Run()
 }
 
-// Update は表示内容を更新
+// Update refreshes the display content
 func (a *App) Update() {
 	a.app.QueueUpdateDraw(func() {
 		a.layout.Update()
 	})
 }
 
-// Close はアプリケーションを終了
+// Close terminates the application
 func (a *App) Close() {
 	a.cancel()
 	a.app.Stop()
 }
 
-// setupKeyBindings はキーバインディングを設定
+// setupKeyBindings configures key bindings
 func (a *App) setupKeyBindings() {
 	a.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		// ヘルプモーダルが表示されている場合
+		// When help modal is visible
 		if a.isHelpVisible() {
 			switch event.Rune() {
 			case 'h':
@@ -122,7 +117,7 @@ func (a *App) setupKeyBindings() {
 			return event
 		}
 
-		// メイン画面のキーバインディング
+		// Main screen key bindings
 		switch event.Rune() {
 		case 'q':
 			a.Close()
@@ -136,17 +131,20 @@ func (a *App) setupKeyBindings() {
 		case 'S':
 			a.prevSort()
 			return nil
+		case 'r':
+			a.reverseSort()
+			return nil
 		case 'R':
 			a.resetMetrics()
 			return nil
 		}
 
-		// スクロール操作はレイアウトに委譲
+		// Delegate scroll operations to layout
 		return a.layout.HandleKeyEvent(event)
 	})
 }
 
-// ソート関連のメソッド
+// Sort-related methods
 func (a *App) nextSort() {
 	keys := stats.Keys()
 	if int(a.sortKey+1) < len(keys) {
@@ -167,11 +165,15 @@ func (a *App) prevSort() {
 	a.renderer.SetSortKey(a.sortKey)
 }
 
+func (a *App) reverseSort() {
+	a.renderer.ReverseSort()
+}
+
 func (a *App) resetMetrics() {
 	a.mm.ResetAllMetrics()
 }
 
-// ヘルプモーダル関連のメソッド
+// Help modal related methods
 func (a *App) showHelp() {
 	a.pages.ShowPage("help")
 	a.app.SetFocus(a.pages)
@@ -187,7 +189,7 @@ func (a *App) isHelpVisible() bool {
 	return a.pages.HasPage("help") && frontPageName == "help"
 }
 
-// createHelpModal はヘルプモーダルを作成
+// createHelpModal creates help modal
 func createHelpModal() *tview.Modal {
 	helpText := `mping - Multi-target Ping Tool      
 
@@ -200,6 +202,7 @@ NAVIGATION:
   d, Page Down Page down              
   s            Next sort key          
   S            Previous sort key      
+  r            Reverse sort order     
   R            Reset all metrics      
   h            Show/hide this help    
   q, Ctrl+C    Quit application       
@@ -210,55 +213,19 @@ Press 'h' or Esc to close           `
 		SetText(helpText).
 		AddButtons([]string{"Close"}).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-			// ボタンが押されたときの処理は親で処理
+			// Button press handling is done by parent
 		})
 }
 
-// GetCUIConfig は CUI 設定を返す（デフォルト値付き）
-func (uc *UIConfig) GetCUIConfig() *Config {
-	// デフォルト値をマージ
-	cfg := DefaultConfig()
-	if uc == nil || uc.CUI == nil {
-		return cfg
-	}
-	if uc.CUI.Title != "" {
-		cfg.Title = uc.CUI.Title
-	}
-	cfg.Border = uc.CUI.Border
-	cfg.EnableColors = uc.CUI.EnableColors
-
-	// カラー設定をマージ
-	if uc.CUI.Colors.Header != "" {
-		cfg.Colors.Header = uc.CUI.Colors.Header
-	}
-	if uc.CUI.Colors.Footer != "" {
-		cfg.Colors.Footer = uc.CUI.Colors.Footer
-	}
-	if uc.CUI.Colors.Success != "" {
-		cfg.Colors.Success = uc.CUI.Colors.Success
-	}
-	if uc.CUI.Colors.Warning != "" {
-		cfg.Colors.Warning = uc.CUI.Colors.Warning
-	}
-	if uc.CUI.Colors.Error != "" {
-		cfg.Colors.Error = uc.CUI.Colors.Error
-	}
-	if uc.CUI.Colors.ModalBorder != "" {
-		cfg.Colors.ModalBorder = uc.CUI.Colors.ModalBorder
-	}
-
-	return cfg
-}
-
-// DefaultConfig はデフォルトの設定を返す
+// DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	cfg := &Config{
 		Title:        "mping",
 		Border:       true,
-		EnableColors: true, // デフォルトで色を有効化
+		EnableColors: true, // Enable colors by default
 	}
 
-	// tviewで使える色名を使用
+	// Use color names available in tview
 	cfg.Colors.Header = "dodgerblue"
 	cfg.Colors.Footer = "gray"
 	cfg.Colors.Success = "green"
@@ -267,35 +234,4 @@ func DefaultConfig() *Config {
 	cfg.Colors.ModalBorder = "white"
 
 	return cfg
-}
-
-// 互換性のための型と関数
-
-// CUI は旧来の CUI インターフェースとの互換性のためのラッパー
-type CUI struct {
-	app *App
-}
-
-// CUIConfig は旧来の設定との互換性のための型
-type CUIConfig = Config
-
-// NewCUI は新しい CUI インスタンスを作成（互換性のため）
-func NewCUI(mm *stats.MetricsManager, cfg *CUIConfig, interval time.Duration) (*CUI, error) {
-	app := NewApp(mm, cfg, interval)
-	return &CUI{app: app}, nil
-}
-
-// Run はアプリケーションを実行
-func (c *CUI) Run() error {
-	return c.app.Run()
-}
-
-// Update は表示を更新
-func (c *CUI) Update() {
-	c.app.Update()
-}
-
-// Close はアプリケーションを終了
-func (c *CUI) Close() {
-	c.app.Close()
 }

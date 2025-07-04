@@ -49,11 +49,11 @@ func (ve *ValidationErrors) HasErrors() bool {
 type Config struct {
 	Prober  map[string]*prober.ProberConfig `yaml:"prober"`
 	Default string                          `yaml:"default"`
-	UI      *ui.UIConfig                    `yaml:"ui"`
+	UI      *ui.Config                      `yaml:"ui"`
 }
 
 func (c *Config) SetTitle(t string) {
-	c.UI.CUI.Title = t
+	c.UI.Title = t
 }
 
 func (c *Config) SetSourceInterface(sourceInterface string) {
@@ -148,9 +148,7 @@ func DefaultConfig() *Config {
 				},
 			},
 		},
-		UI: &ui.UIConfig{
-			CUI: ui.DefaultConfig(),
-		},
+		UI: ui.DefaultConfig(),
 	}
 }
 

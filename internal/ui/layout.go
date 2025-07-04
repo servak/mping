@@ -5,7 +5,7 @@ import (
 	"github.com/rivo/tview"
 )
 
-// Layout はメイン画面のレイアウトを管理
+// Layout manages the main screen layout
 type Layout struct {
 	root     *tview.Flex
 	header   *tview.TextView
@@ -14,7 +14,7 @@ type Layout struct {
 	renderer *Renderer
 }
 
-// NewLayout は新しい Layout を作成
+// NewLayout creates a new Layout
 func NewLayout(renderer *Renderer) *Layout {
 	layout := &Layout{
 		renderer: renderer,
@@ -27,25 +27,25 @@ func NewLayout(renderer *Renderer) *Layout {
 	return layout
 }
 
-// setupViews は各ビューを初期化
+// setupViews initializes each view
 func (l *Layout) setupViews() {
-	// ヘッダー
+	// Header
 	l.header = tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter)
 	
-	// メインビュー（テーブル表示エリア）
+	// Main view (table display area)
 	l.mainView = tview.NewTextView().
 		SetDynamicColors(true).
 		SetScrollable(true)
 	
-	// フッター
+	// Footer
 	l.footer = tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter)
 }
 
-// setupLayout はレイアウトを構成
+// setupLayout configures the layout
 func (l *Layout) setupLayout() {
 	l.root = tview.NewFlex().
 		SetDirection(tview.FlexRow).
@@ -54,19 +54,19 @@ func (l *Layout) setupLayout() {
 		AddItem(l.footer, 1, 0, false)
 }
 
-// Root はレイアウトのルート要素を返す
+// Root returns the root element of the layout
 func (l *Layout) Root() tview.Primitive {
 	return l.root
 }
 
-// Update は表示内容を更新
+// Update refreshes the display content
 func (l *Layout) Update() {
 	l.header.SetText(l.renderer.RenderHeader())
 	l.mainView.SetText(l.renderer.RenderMain())
 	l.footer.SetText(l.renderer.RenderFooter())
 }
 
-// HandleKeyEvent はキーイベントを処理
+// HandleKeyEvent handles key events
 func (l *Layout) HandleKeyEvent(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Rune() {
 	case 'j':
@@ -91,7 +91,7 @@ func (l *Layout) HandleKeyEvent(event *tcell.EventKey) *tcell.EventKey {
 	return event
 }
 
-// スクロール操作メソッド
+// Scroll operation methods
 func (l *Layout) scrollDown() {
 	row, col := l.mainView.GetScrollOffset()
 	l.mainView.ScrollTo(row+1, col)

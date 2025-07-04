@@ -97,7 +97,7 @@ mping dns://8.8.8.8/google.com`,
 			}()
 			
 			// Start TUI
-			startCUI(metricsManager, cfg.UI.CUI, _interval)
+			startCUI(metricsManager, cfg.UI, _interval)
 			
 			// Stop probing when TUI exits
 			probeManager.Stop()
@@ -123,12 +123,8 @@ mping dns://8.8.8.8/google.com`,
 
 
 
-func startCUI(manager *stats.MetricsManager, cui *ui.CUIConfig, interval time.Duration) {
-	r, err := ui.NewCUI(manager, cui, interval)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+func startCUI(manager *stats.MetricsManager, cfg *ui.Config, interval time.Duration) {
+	app := ui.NewApp(manager, cfg, interval)
 
 	refreshTime := time.Millisecond * 250 // Minimum refresh time that can be set
 	if refreshTime < (interval / 2) {
@@ -138,11 +134,11 @@ func startCUI(manager *stats.MetricsManager, cui *ui.CUIConfig, interval time.Du
 	go func() {
 		for {
 			time.Sleep(refreshTime)
-			r.Update()
+			app.Update()
 		}
 	}()
 
-	r.Run()
+	app.Run()
 }
 
 

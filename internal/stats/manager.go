@@ -113,7 +113,7 @@ func (mm *MetricsManager) autoRegister(key, displayName string) {
 	}
 }
 
-func (mm *MetricsManager) GetSortedMetricsByKey(k Key) []Metrics {
+func (mm *MetricsManager) SortBy(k Key, ascending bool) []Metrics {
 	mm.mu.Lock()
 	var res []Metrics
 	for _, m := range mm.metrics {
@@ -128,31 +128,40 @@ func (mm *MetricsManager) GetSortedMetricsByKey(k Key) []Metrics {
 	sort.SliceStable(res, func(i, j int) bool {
 		mi := res[i]
 		mj := res[j]
+		var result bool
 		switch k {
 		case Host:
-			return res[i].Name < res[j].Name
+			result = res[i].Name < res[j].Name
 		case Sent:
-			return mi.Total > mj.Total
+			result = mi.Total > mj.Total
 		case Success:
-			return mi.Successful > mj.Successful
+			result = mi.Successful > mj.Successful
 		case Loss:
-			return mi.Loss > mj.Loss
+			result = mi.Loss > mj.Loss
 		case Fail:
-			return mi.Failed > mj.Failed
+			result = mi.Failed > mj.Failed
 		case Last:
-			return rejectLess(mi.LastRTT, mj.LastRTT)
+			result = rejectLess(mi.LastRTT, mj.LastRTT)
 		case Avg:
-			return rejectLess(mi.AverageRTT, mj.AverageRTT)
+			result = rejectLess(mi.AverageRTT, mj.AverageRTT)
 		case Best:
-			return rejectLess(mi.MinimumRTT, mj.MinimumRTT)
+			result = rejectLess(mi.MinimumRTT, mj.MinimumRTT)
 		case Worst:
-			return rejectLess(mi.MaximumRTT, mj.MaximumRTT)
+			result = rejectLess(mi.MaximumRTT, mj.MaximumRTT)
 		case LastSuccTime:
-			return mi.LastSuccTime.After(mj.LastSuccTime)
+			result = mi.LastSuccTime.After(mj.LastSuccTime)
 		case LastFailTime:
-			return mi.LastFailTime.After(mj.LastFailTime)
+			result = mi.LastFailTime.After(mj.LastFailTime)
+		default:
+			return false
 		}
-		return false
+		
+		// ascending=falseの場合は結果を反転
+		if ascending {
+			return result
+		} else {
+			return !result
+		}
 	})
 	return res
 }
