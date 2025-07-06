@@ -74,23 +74,6 @@ func (r *Renderer) RenderHeader() string {
 	return strings.Join(parts, "    ")
 }
 
-// RenderMain generates main content (table)
-func (r *Renderer) RenderMain() string {
-	t := r.renderTable()
-	if r.config.Border {
-		t.SetStyle(table.StyleLight)
-	} else {
-		t.SetStyle(table.Style{
-			Box: table.StyleBoxLight,
-			Options: table.Options{
-				DrawBorder:      false,
-				SeparateColumns: false,
-			},
-		})
-	}
-	return t.Render()
-}
-
 // RenderFooter generates footer text
 func (r *Renderer) RenderFooter() string {
 	if r.config.EnableColors && r.config.Colors.Footer != "" {
@@ -166,12 +149,6 @@ func (r *Renderer) getTableData() *TableData {
 // GetTviewTable returns a tview.Table for interactive use
 func (r *Renderer) GetTviewTable() *tview.Table {
 	return r.getTableData().ToTviewTable()
-}
-
-// renderTable generates the table (moved from table.go)
-func (r *Renderer) renderTable() table.Writer {
-	tableData := r.getTableData()
-	return tableData.ToGoPrettyTable()
 }
 
 // TableRender is a table generation function for external use

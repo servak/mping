@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/servak/mping/internal/stats"
 )
 
@@ -211,7 +212,7 @@ func TestRenderer_RenderMain(t *testing.T) {
 				"example.com",
 				"HOST", // テーブルヘッダー
 				"SENT",
-				"SUCC ↑", // ソート矢印付き
+				"SUCC", // TableRender()では矢印なし
 				"FAIL",
 			},
 		},
@@ -231,7 +232,7 @@ func TestRenderer_RenderMain(t *testing.T) {
 				"test.com",
 				"Host",
 				"Sent",
-				"Succ ↑", // ソート矢印付き
+				"Succ", // TableRender()では矢印なし
 				"Fail",
 			},
 		},
@@ -247,8 +248,20 @@ func TestRenderer_RenderMain(t *testing.T) {
 			for _, metric := range tt.metrics {
 				mm.Register(metric.Name, metric.Name)
 			}
-			renderer := NewRenderer(mm, cfg, time.Second, time.Second)
-			result := renderer.RenderMain()
+			// TUIで使うのはtview.Tableなので、最終出力用のTableRender()を使用
+			tableWriter := TableRender(mm, stats.Success)
+			if tt.border {
+				tableWriter.SetStyle(table.StyleLight)
+			} else {
+				tableWriter.SetStyle(table.Style{
+					Box: table.StyleBoxLight,
+					Options: table.Options{
+						DrawBorder:      false,
+						SeparateColumns: false,
+					},
+				})
+			}
+			result := tableWriter.Render()
 
 			for _, expected := range tt.expected {
 				if !strings.Contains(result, expected) {
@@ -256,13 +269,13 @@ func TestRenderer_RenderMain(t *testing.T) {
 				}
 			}
 
-			// テーブルヘッダーの確認（ソート矢印付きヘッダー）
-			// Borderによってヘッダーの大文字小文字が変わる
+			// テーブルヘッダーの基本確認
+			// 注意: TableRender()はソート矢印を表示しないため、基本的なヘッダーのみチェック
 			var expectedHeaders []string
 			if tt.border {
-				expectedHeaders = []string{"HOST", "SENT", "SUCC ↑", "FAIL", "LOSS"}
+				expectedHeaders = []string{"HOST", "SENT", "SUCC", "FAIL", "LOSS"}
 			} else {
-				expectedHeaders = []string{"Host", "Sent", "Succ ↑", "Fail", "Loss"}
+				expectedHeaders = []string{"Host", "Sent", "Succ", "Fail", "Loss"}
 			}
 			for _, header := range expectedHeaders {
 				if !strings.Contains(result, header) {

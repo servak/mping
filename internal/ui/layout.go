@@ -14,13 +14,11 @@ type Layout struct {
 	root           *tview.Flex
 	pages          *tview.Pages
 	header         *tview.TextView
-	mainView       *tview.TextView
 	tableView      *tview.Table
 	footer         *tview.TextView
 	filterInput    *tview.InputField
 	renderer       *Renderer
 	showFilter     bool
-	useTableView   bool
 	focusCallback  func()
 	selectedHost   string // Track selected host by name instead of row number
 }
@@ -28,8 +26,7 @@ type Layout struct {
 // NewLayout creates a new Layout
 func NewLayout(renderer *Renderer) *Layout {
 	layout := &Layout{
-		renderer:     renderer,
-		useTableView: true, // Experiment: use tview.Table by default
+		renderer: renderer,
 	}
 	
 	layout.setupViews()
@@ -49,12 +46,7 @@ func (l *Layout) setupViews() {
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter)
 	
-	// Main view (legacy text-based table display)
-	l.mainView = tview.NewTextView().
-		SetDynamicColors(true).
-		SetScrollable(true)
-	
-	// Table view (new interactive table)
+	// Interactive table view
 	l.tableView = tview.NewTable().
 		SetSelectable(true, false).
 		SetSelectedFunc(l.handleRowSelection)
@@ -76,16 +68,9 @@ func (l *Layout) setupViews() {
 func (l *Layout) setupLayout() {
 	l.root = tview.NewFlex().
 		SetDirection(tview.FlexRow).
-		AddItem(l.header, 1, 0, false)
-	
-	// Use either table view or text view
-	if l.useTableView {
-		l.root.AddItem(l.tableView, 0, 1, true)
-	} else {
-		l.root.AddItem(l.mainView, 0, 1, true)
-	}
-	
-	l.root.AddItem(l.footer, 1, 0, false)
+		AddItem(l.header, 1, 0, false).
+		AddItem(l.tableView, 0, 1, true).
+		AddItem(l.footer, 1, 0, false)
 }
 
 // Root returns the root element of the layout
@@ -98,45 +83,40 @@ func (l *Layout) Update() {
 	l.header.SetText(l.renderer.RenderHeader())
 	l.footer.SetText(l.renderer.RenderFooter())
 	
-	if l.useTableView {
-		// Save current selection before update
-		currentRow, _ := l.tableView.GetSelection()
-		if currentRow > 0 && l.selectedHost == "" { // First time or no selection yet
-			tableData := l.renderer.getTableData()
-			if metric, ok := tableData.GetMetricAtRow(currentRow - 1); ok {
-				l.selectedHost = metric.Name
-			}
+	// Save current selection before update
+	currentRow, _ := l.tableView.GetSelection()
+	if currentRow > 0 && l.selectedHost == "" { // First time or no selection yet
+		tableData := l.renderer.getTableData()
+		if metric, ok := tableData.GetMetricAtRow(currentRow - 1); ok {
+			l.selectedHost = metric.Name
 		}
-		
-		// Update tview.Table content while preserving the original table instance
-		newTable := l.renderer.GetTviewTable()
-		l.tableView.Clear()
-		
-		// Copy all table settings from the new table to preserve styling
-		l.tableView.SetBorders(false).
-			SetSeparator(' ').
-			SetSelectedStyle(tcell.StyleDefault.
-				Background(tcell.ColorDarkGreen).
-				Foreground(tcell.ColorWhite))
-		
-		// Copy content from new table to existing table
-		rows := newTable.GetRowCount()
-		cols := newTable.GetColumnCount()
-		
-		for row := 0; row < rows; row++ {
-			for col := 0; col < cols; col++ {
-				cell := newTable.GetCell(row, col)
-				l.tableView.SetCell(row, col, cell)
-			}
+	}
+	
+	// Update tview.Table content while preserving the original table instance
+	newTable := l.renderer.GetTviewTable()
+	l.tableView.Clear()
+	
+	// Copy all table settings from the new table to preserve styling
+	l.tableView.SetBorders(false).
+		SetSeparator(' ').
+		SetSelectedStyle(tcell.StyleDefault.
+			Background(tcell.ColorDarkGreen).
+			Foreground(tcell.ColorWhite))
+	
+	// Copy content from new table to existing table
+	rows := newTable.GetRowCount()
+	cols := newTable.GetColumnCount()
+	
+	for row := 0; row < rows; row++ {
+		for col := 0; col < cols; col++ {
+			cell := newTable.GetCell(row, col)
+			l.tableView.SetCell(row, col, cell)
 		}
-		
-		// Restore selection based on host name
-		if l.selectedHost != "" {
-			l.restoreSelectionByHost()
-		}
-	} else {
-		// Update legacy text view
-		l.mainView.SetText(l.renderer.RenderMain())
+	}
+	
+	// Restore selection based on host name
+	if l.selectedHost != "" {
+		l.restoreSelectionByHost()
 	}
 }
 
@@ -193,10 +173,6 @@ func (l *Layout) restoreSelectionByHost() {
 
 // updateSelectedHost updates the selectedHost based on current selection
 func (l *Layout) updateSelectedHost() {
-	if !l.useTableView {
-		return
-	}
-	
 	currentRow, _ := l.tableView.GetSelection()
 	if currentRow > 0 {
 		tableData := l.renderer.getTableData()
@@ -206,93 +182,57 @@ func (l *Layout) updateSelectedHost() {
 	}
 }
 
-// Scroll operation methods
+// Scroll operation methods for tview.Table
 func (l *Layout) scrollDown() {
-	if l.useTableView {
-		row, _ := l.tableView.GetSelection()
-		l.tableView.Select(row+1, 0)
-		l.updateSelectedHost()
-	} else {
-		row, col := l.mainView.GetScrollOffset()
-		l.mainView.ScrollTo(row+1, col)
-	}
+	row, _ := l.tableView.GetSelection()
+	l.tableView.Select(row+1, 0)
+	l.updateSelectedHost()
 }
 
 func (l *Layout) scrollUp() {
-	if l.useTableView {
-		row, _ := l.tableView.GetSelection()
-		if row > 1 { // Don't go above first data row (row 0 is header)
-			l.tableView.Select(row-1, 0)
-			l.updateSelectedHost()
-		}
-	} else {
-		row, col := l.mainView.GetScrollOffset()
-		if row > 0 {
-			l.mainView.ScrollTo(row-1, col)
-		}
+	row, _ := l.tableView.GetSelection()
+	if row > 1 { // Don't go above first data row (row 0 is header)
+		l.tableView.Select(row-1, 0)
+		l.updateSelectedHost()
 	}
 }
 
 func (l *Layout) scrollToTop() {
-	if l.useTableView {
-		l.tableView.Select(1, 0) // Select first data row (row 0 is header)
-		l.updateSelectedHost()
-	} else {
-		l.mainView.ScrollToBeginning()
-	}
+	l.tableView.Select(1, 0) // Select first data row (row 0 is header)
+	l.updateSelectedHost()
 }
 
 func (l *Layout) scrollToBottom() {
-	if l.useTableView {
-		rowCount := l.tableView.GetRowCount()
-		if rowCount > 1 {
-			l.tableView.Select(rowCount-1, 0)
-			l.updateSelectedHost()
-		}
-	} else {
-		l.mainView.ScrollToEnd()
+	rowCount := l.tableView.GetRowCount()
+	if rowCount > 1 {
+		l.tableView.Select(rowCount-1, 0)
+		l.updateSelectedHost()
 	}
 }
 
 func (l *Layout) pageDown() {
-	if l.useTableView {
-		row, _ := l.tableView.GetSelection()
-		_, _, _, height := l.tableView.GetRect()
-		pageSize := height / 2 // Reasonable page size
-		newRow := row + pageSize
-		rowCount := l.tableView.GetRowCount()
-		if newRow >= rowCount {
-			newRow = rowCount - 1
-		}
-		l.tableView.Select(newRow, 0)
-		l.updateSelectedHost()
-	} else {
-		_, _, _, height := l.mainView.GetRect()
-		row, col := l.mainView.GetScrollOffset()
-		l.mainView.ScrollTo(row+height, col)
+	row, _ := l.tableView.GetSelection()
+	_, _, _, height := l.tableView.GetRect()
+	pageSize := height / 2 // Reasonable page size
+	newRow := row + pageSize
+	rowCount := l.tableView.GetRowCount()
+	if newRow >= rowCount {
+		newRow = rowCount - 1
 	}
+	l.tableView.Select(newRow, 0)
+	l.updateSelectedHost()
 }
 
 func (l *Layout) pageUp() {
-	if l.useTableView {
-		row, _ := l.tableView.GetSelection()
-		_, _, _, height := l.tableView.GetRect()
-		pageSize := height / 2 // Reasonable page size
-		newRow := row - pageSize
-		if newRow < 1 { // Don't go above first data row
-			newRow = 1
-		}
-		l.tableView.Select(newRow, 0)
-		l.updateSelectedHost()
-	} else {
-		_, _, _, height := l.mainView.GetRect()
-		row, col := l.mainView.GetScrollOffset()
-		if row >= height {
-			l.mainView.ScrollTo(row-height, col)
-		} else {
-			l.mainView.ScrollToBeginning()
-		}
+	row, _ := l.tableView.GetSelection()
+	_, _, _, height := l.tableView.GetRect()
+	pageSize := height / 2 // Reasonable page size
+	newRow := row - pageSize
+	if newRow < 1 { // Don't go above first data row
+		newRow = 1
 	}
+	l.tableView.Select(newRow, 0)
+	l.updateSelectedHost()
 }
 
 // Filter input handling methods
@@ -306,15 +246,9 @@ func (l *Layout) showFilterInput() {
 	
 	// Rebuild layout with filter input
 	l.root.Clear()
-	l.root.AddItem(l.header, 1, 0, false)
-	
-	if l.useTableView {
-		l.root.AddItem(l.tableView, 0, 1, false)
-	} else {
-		l.root.AddItem(l.mainView, 0, 1, false)
-	}
-	
-	l.root.AddItem(l.filterInput, 1, 0, true).
+	l.root.AddItem(l.header, 1, 0, false).
+		AddItem(l.tableView, 0, 1, false).
+		AddItem(l.filterInput, 1, 0, true).
 		AddItem(l.footer, 1, 0, false)
 }
 
@@ -327,15 +261,9 @@ func (l *Layout) hideFilterInput() {
 	
 	// Rebuild layout without filter input
 	l.root.Clear()
-	l.root.AddItem(l.header, 1, 0, false)
-	
-	if l.useTableView {
-		l.root.AddItem(l.tableView, 0, 1, true)
-	} else {
-		l.root.AddItem(l.mainView, 0, 1, true)
-	}
-	
-	l.root.AddItem(l.footer, 1, 0, false)
+	l.root.AddItem(l.header, 1, 0, false).
+		AddItem(l.tableView, 0, 1, true).
+		AddItem(l.footer, 1, 0, false)
 }
 
 func (l *Layout) handleFilterDone(key tcell.Key) {
@@ -375,8 +303,8 @@ func (l *Layout) SetFocusCallback(callback func()) {
 
 // handleRowSelection handles table row selection
 func (l *Layout) handleRowSelection(row, col int) {
-	if row == 0 || !l.useTableView {
-		return // Skip header row or if not using table view
+	if row == 0 {
+		return // Skip header row
 	}
 	
 	// Get table data

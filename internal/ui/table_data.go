@@ -10,11 +10,11 @@ import (
 	"github.com/servak/mping/internal/stats"
 )
 
-// TableData represents table data in an abstract format
+// TableData represents table data optimized for tview.Table with go-pretty fallback
 type TableData struct {
 	Headers []string
 	Rows    [][]string
-	Metrics []stats.Metrics // Keep reference for row selection
+	Metrics []stats.Metrics // Keep reference for interactive row selection
 }
 
 // NewTableData creates TableData from metrics
@@ -64,7 +64,7 @@ func NewTableData(metrics []stats.Metrics, sortKey stats.Key, ascending bool) *T
 	}
 }
 
-// ToGoPrettyTable converts to go-pretty table format
+// ToGoPrettyTable converts to go-pretty table format for final output only
 func (td *TableData) ToGoPrettyTable() table.Writer {
 	t := table.NewWriter()
 
@@ -87,7 +87,7 @@ func (td *TableData) ToGoPrettyTable() table.Writer {
 	return t
 }
 
-// ToTviewTable converts to tview table format
+// ToTviewTable converts to interactive tview.Table format (primary UI)
 func (td *TableData) ToTviewTable() *tview.Table {
 	t := tview.NewTable().
 		SetFixed(1, 0).

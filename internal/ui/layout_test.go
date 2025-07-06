@@ -28,8 +28,8 @@ func TestNewLayout(t *testing.T) {
 		t.Error("Expected header to be initialized")
 	}
 
-	if layout.mainView == nil {
-		t.Error("Expected mainView to be initialized")
+	if layout.tableView == nil {
+		t.Error("Expected tableView to be initialized")
 	}
 
 	if layout.footer == nil {
@@ -136,16 +136,16 @@ func TestLayout_Update(t *testing.T) {
 	renderer := NewRenderer(mm, cfg, time.Second, time.Second)
 	layout := NewLayout(renderer)
 
-	// Updateの前後でテキストが設定されることを確認
-	// 注意: tview.TextViewの内容は直接アクセスできないため、
+	// Updateの前後でテーブルが更新されることを確認
+	// 注意: tview.Tableの内容は直接アクセスできないため、
 	// 呼び出しが成功することのみをテスト
 	layout.Update()
 
 	// エラーが発生しないことを確認（パニックしない）
-	// 実際のテキスト内容の検証は困難なため、基本的な動作確認のみ
+	// 実際のテーブル内容の検証は困難なため、基本的な動作確認のみ
 }
 
-// テスト用のヘルパー関数：スクロール操作の基本的なテスト
+// テスト用のヘルパー関数：tview.Table用スクロール操作の基本的なテスト
 func TestLayout_ScrollOperations(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	cfg := DefaultConfig()
@@ -219,8 +219,8 @@ func TestLayout_ViewSetup(t *testing.T) {
 		t.Error("Header view should be initialized")
 	}
 
-	if layout.mainView == nil {
-		t.Error("Main view should be initialized")
+	if layout.tableView == nil {
+		t.Error("Table view should be initialized")
 	}
 
 	if layout.footer == nil {
@@ -232,8 +232,8 @@ func TestLayout_ViewSetup(t *testing.T) {
 		t.Error("Root layout should be initialized")
 	}
 
-	// Flexレイアウトであることを確認
-	if layout.root == nil {
-		t.Error("Root should be initialized")
+	// Pagesレイアウトであることを確認
+	if layout.pages == nil {
+		t.Error("Pages should be initialized")
 	}
 }
