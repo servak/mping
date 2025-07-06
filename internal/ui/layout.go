@@ -7,11 +7,14 @@ import (
 
 // Layout manages the main screen layout
 type Layout struct {
-	root     *tview.Flex
-	header   *tview.TextView
-	mainView *tview.TextView
-	footer   *tview.TextView
-	renderer *Renderer
+	root           *tview.Flex
+	header         *tview.TextView
+	mainView       *tview.TextView
+	footer         *tview.TextView
+	filterInput    *tview.InputField
+	renderer       *Renderer
+	showFilter     bool
+	focusCallback  func()
 }
 
 // NewLayout creates a new Layout
@@ -22,7 +25,6 @@ func NewLayout(renderer *Renderer) *Layout {
 	
 	layout.setupViews()
 	layout.setupLayout()
-	layout.Update()
 	
 	return layout
 }
@@ -43,6 +45,13 @@ func (l *Layout) setupViews() {
 	l.footer = tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter)
+	
+	// Filter input field
+	l.filterInput = tview.NewInputField().
+		SetLabel("Filter: ").
+		SetLabelColor(tcell.ColorWhite).
+		SetFieldBackgroundColor(tcell.ColorBlack).
+		SetDoneFunc(l.handleFilterDone)
 }
 
 // setupLayout configures the layout
@@ -69,6 +78,9 @@ func (l *Layout) Update() {
 // HandleKeyEvent handles key events
 func (l *Layout) HandleKeyEvent(event *tcell.EventKey) *tcell.EventKey {
 	switch event.Rune() {
+	case '/':
+		l.showFilterInput()
+		return nil
 	case 'j':
 		l.scrollDown()
 		return nil
@@ -126,4 +138,70 @@ func (l *Layout) pageUp() {
 	} else {
 		l.mainView.ScrollToBeginning()
 	}
+}
+
+// Filter input handling methods
+func (l *Layout) showFilterInput() {
+	if l.showFilter {
+		return
+	}
+	
+	l.showFilter = true
+	l.filterInput.SetText(l.renderer.GetFilter())
+	
+	// Rebuild layout with filter input
+	l.root.Clear()
+	l.root.AddItem(l.header, 1, 0, false).
+		AddItem(l.mainView, 0, 1, false).
+		AddItem(l.filterInput, 1, 0, true).
+		AddItem(l.footer, 1, 0, false)
+}
+
+func (l *Layout) hideFilterInput() {
+	if !l.showFilter {
+		return
+	}
+	
+	l.showFilter = false
+	
+	// Rebuild layout without filter input
+	l.root.Clear()
+	l.root.AddItem(l.header, 1, 0, false).
+		AddItem(l.mainView, 0, 1, true).
+		AddItem(l.footer, 1, 0, false)
+}
+
+func (l *Layout) handleFilterDone(key tcell.Key) {
+	switch key {
+	case tcell.KeyEnter:
+		// Apply filter
+		filterText := l.filterInput.GetText()
+		l.renderer.SetFilter(filterText)
+		l.hideFilterInput()
+		l.Update()
+		if l.focusCallback != nil {
+			l.focusCallback()
+		}
+	case tcell.KeyEscape:
+		// Cancel filter input
+		l.hideFilterInput()
+		if l.focusCallback != nil {
+			l.focusCallback()
+		}
+	}
+}
+
+// GetFilterInput returns the filter input field for app focus management
+func (l *Layout) GetFilterInput() *tview.InputField {
+	return l.filterInput
+}
+
+// IsFilterShown returns whether filter input is currently shown
+func (l *Layout) IsFilterShown() bool {
+	return l.showFilter
+}
+
+// SetFocusCallback sets callback function to restore focus to main view
+func (l *Layout) SetFocusCallback(callback func()) {
+	l.focusCallback = callback
 }

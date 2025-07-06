@@ -128,12 +128,10 @@ func startTUI(manager *stats.MetricsManager, cfg *ui.Config, interval, timeout t
 	if refreshTime < (interval / 2) {
 		refreshTime = interval / 2
 	}
-	time.Sleep(refreshTime) // Wait for probe results before showing UI to avoid empty table display
-
 	go func() {
 		for {
-			time.Sleep(refreshTime)
 			app.Update()
+			time.Sleep(refreshTime)
 		}
 	}()
 	app.Run()

@@ -338,3 +338,104 @@ func TestTableRender(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderer_FilterMethods(t *testing.T) {
+	mm := stats.NewMetricsManager()
+	cfg := DefaultConfig()
+	renderer := NewRenderer(mm, cfg, time.Second, time.Second)
+
+	// Test initial filter state
+	if renderer.GetFilter() != "" {
+		t.Error("Expected initial filter to be empty")
+	}
+
+	// Test setting filter
+	renderer.SetFilter("test")
+	if renderer.GetFilter() != "test" {
+		t.Errorf("Expected filter to be 'test', got '%s'", renderer.GetFilter())
+	}
+
+	// Test clearing filter
+	renderer.ClearFilter()
+	if renderer.GetFilter() != "" {
+		t.Error("Expected filter to be cleared")
+	}
+}
+
+func TestRenderer_getFilteredMetrics(t *testing.T) {
+	mm := stats.NewMetricsManager()
+	cfg := DefaultConfig()
+	renderer := NewRenderer(mm, cfg, time.Second, time.Second)
+
+	// Register test metrics
+	mm.Register("google.com", "google.com")
+	mm.Register("yahoo.com", "yahoo.com") 
+	mm.Register("example.com", "example.com")
+
+	// Test no filter - should return all metrics
+	metrics := renderer.getFilteredMetrics()
+	if len(metrics) != 3 {
+		t.Errorf("Expected 3 metrics without filter, got %d", len(metrics))
+	}
+
+	// Test filter that matches some metrics
+	renderer.SetFilter("goo")
+	metrics = renderer.getFilteredMetrics()
+	if len(metrics) != 1 {
+		t.Errorf("Expected 1 metric with 'goo' filter, got %d", len(metrics))
+	}
+	if metrics[0].Name != "google.com" {
+		t.Errorf("Expected 'google.com', got '%s'", metrics[0].Name)
+	}
+
+	// Test filter that matches multiple metrics
+	renderer.SetFilter("com")
+	metrics = renderer.getFilteredMetrics()
+	if len(metrics) != 3 {
+		t.Errorf("Expected 3 metrics with 'com' filter, got %d", len(metrics))
+	}
+
+	// Test filter that matches no metrics
+	renderer.SetFilter("nonexistent")
+	metrics = renderer.getFilteredMetrics()
+	if len(metrics) != 0 {
+		t.Errorf("Expected 0 metrics with 'nonexistent' filter, got %d", len(metrics))
+	}
+
+	// Test case-insensitive filtering
+	renderer.SetFilter("GOOGLE")
+	metrics = renderer.getFilteredMetrics()
+	if len(metrics) != 1 {
+		t.Errorf("Expected 1 metric with case-insensitive filter, got %d", len(metrics))
+	}
+}
+
+func TestRenderer_RenderHeaderWithFilter(t *testing.T) {
+	mm := stats.NewMetricsManager()
+	cfg := DefaultConfig()
+	renderer := NewRenderer(mm, cfg, time.Second, time.Second)
+
+	// Test header without filter
+	header := renderer.RenderHeader()
+	if strings.Contains(header, "Filter:") {
+		t.Error("Header should not contain filter info when no filter is set")
+	}
+
+	// Test header with filter
+	renderer.SetFilter("test")
+	header = renderer.RenderHeader()
+	if !strings.Contains(header, "Filter: test") {
+		t.Error("Header should contain filter info when filter is set")
+	}
+}
+
+func TestRenderer_RenderFooterWithFilter(t *testing.T) {
+	mm := stats.NewMetricsManager()
+	cfg := DefaultConfig()
+	renderer := NewRenderer(mm, cfg, time.Second, time.Second)
+
+	footer := renderer.RenderFooter()
+	if !strings.Contains(footer, "/:filter") {
+		t.Error("Footer should contain filter help text")
+	}
+}

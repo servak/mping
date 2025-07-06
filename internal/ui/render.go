@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -12,12 +13,13 @@ import (
 
 // Renderer handles content generation
 type Renderer struct {
-	mm        *stats.MetricsManager
-	config    *Config
-	interval  time.Duration
-	timeout   time.Duration
-	sortKey   stats.Key
-	ascending bool
+	mm         *stats.MetricsManager
+	config     *Config
+	interval   time.Duration
+	timeout    time.Duration
+	sortKey    stats.Key
+	ascending  bool
+	filterText string
 }
 
 // NewRenderer creates a new Renderer instance
@@ -26,12 +28,13 @@ func NewRenderer(mm *stats.MetricsManager, cfg *Config, interval, timeout time.D
 	text.OverrideRuneWidthEastAsianWidth(false)
 
 	return &Renderer{
-		mm:        mm,
-		config:    cfg,
-		interval:  interval,
-		timeout:   timeout,
-		sortKey:   stats.Success,
-		ascending: true,
+		mm:         mm,
+		config:     cfg,
+		interval:   interval,
+		timeout:    timeout,
+		sortKey:    stats.Success,
+		ascending:  true,
+		filterText: "",
 	}
 }
 
@@ -45,15 +48,31 @@ func (r *Renderer) SetSortKey(key stats.Key) {
 // RenderHeader generates header text
 func (r *Renderer) RenderHeader() string {
 	sortDisplay := r.sortKey.String()
+	
+	var parts []string
 	if r.config.EnableColors && r.config.Colors.Header != "" {
-		sortText := fmt.Sprintf("[%s]Sort: %s[-]", r.config.Colors.Header, sortDisplay)
-		intervalText := fmt.Sprintf("[%s]Interval: %dms[-]", r.config.Colors.Header, r.interval.Milliseconds())
-		timeoutText := fmt.Sprintf("[%s]Timeout: %dms[-]", r.config.Colors.Header, r.timeout.Milliseconds())
-		titleText := fmt.Sprintf("[%s]%s[-]", r.config.Colors.Header, r.config.Title)
-		return fmt.Sprintf("%s    %s    %s    %s", sortText, intervalText, timeoutText, titleText)
+		parts = append(parts, fmt.Sprintf("[%s]Sort: %s[-]", r.config.Colors.Header, sortDisplay))
+		parts = append(parts, fmt.Sprintf("[%s]Interval: %dms[-]", r.config.Colors.Header, r.interval.Milliseconds()))
+		parts = append(parts, fmt.Sprintf("[%s]Timeout: %dms[-]", r.config.Colors.Header, r.timeout.Milliseconds()))
+		
+		if r.filterText != "" {
+			parts = append(parts, fmt.Sprintf("[%s]Filter: %s[-]", r.config.Colors.Warning, r.filterText))
+		}
+		
+		parts = append(parts, fmt.Sprintf("[%s]%s[-]", r.config.Colors.Header, r.config.Title))
 	} else {
-		return fmt.Sprintf("Sort: %s    Interval: %dms    Timeout: %dms    %s", sortDisplay, r.interval.Milliseconds(), r.timeout.Milliseconds(), r.config.Title)
+		parts = append(parts, fmt.Sprintf("Sort: %s", sortDisplay))
+		parts = append(parts, fmt.Sprintf("Interval: %dms", r.interval.Milliseconds()))
+		parts = append(parts, fmt.Sprintf("Timeout: %dms", r.timeout.Milliseconds()))
+		
+		if r.filterText != "" {
+			parts = append(parts, fmt.Sprintf("Filter: %s", r.filterText))
+		}
+		
+		parts = append(parts, r.config.Title)
 	}
+	
+	return strings.Join(parts, "    ")
 }
 
 // RenderMain generates main content (table)
@@ -81,16 +100,49 @@ func (r *Renderer) RenderFooter() string {
 		sortText := fmt.Sprintf("[%s]s:sort[-]", r.config.Colors.Footer)
 		reverseText := fmt.Sprintf("[%s]r:reverse[-]", r.config.Colors.Footer)
 		resetText := fmt.Sprintf("[%s]R:reset[-]", r.config.Colors.Footer)
+		filterText := fmt.Sprintf("[%s]/:filter[-]", r.config.Colors.Footer)
 		moveText := fmt.Sprintf("[%s]j/k/g/G/u/d:move[-]", r.config.Colors.Footer)
-		return fmt.Sprintf("%s  %s  %s  %s  %s  %s", helpText, quitText, sortText, reverseText, resetText, moveText)
+		return fmt.Sprintf("%s  %s  %s  %s  %s  %s  %s", helpText, quitText, sortText, reverseText, resetText, filterText, moveText)
 	} else {
-		return "h:help  q:quit  s:sort  r:reverse  R:reset  j/k/g/G/u/d:move"
+		return "h:help  q:quit  s:sort  r:reverse  R:reset  /:filter  j/k/g/G/u/d:move"
 	}
 }
 
 // ReverseSort toggles between ascending/descending for current sort key
 func (r *Renderer) ReverseSort() {
 	r.ascending = !r.ascending
+}
+
+// SetFilter sets the filter text
+func (r *Renderer) SetFilter(filter string) {
+	r.filterText = filter
+}
+
+// GetFilter returns the current filter text
+func (r *Renderer) GetFilter() string {
+	return r.filterText
+}
+
+// ClearFilter clears the filter text
+func (r *Renderer) ClearFilter() {
+	r.filterText = ""
+}
+
+// getFilteredMetrics returns filtered metrics based on filter text
+func (r *Renderer) getFilteredMetrics() []stats.Metrics {
+	metrics := r.mm.SortBy(r.sortKey, r.ascending)
+	if r.filterText == "" {
+		return metrics
+	}
+	
+	filtered := []stats.Metrics{}
+	filterLower := strings.ToLower(r.filterText)
+	for _, m := range metrics {
+		if strings.Contains(strings.ToLower(m.Name), filterLower) {
+			filtered = append(filtered, m)
+		}
+	}
+	return filtered
 }
 
 // headerWithArrow generates header with sort direction arrow
@@ -128,7 +180,7 @@ func (r *Renderer) renderTable() table.Writer {
 	t.AppendHeader(table.Row(headers))
 	df := DurationFormater
 	tf := TimeFormater
-	for _, m := range r.mm.SortBy(r.sortKey, r.ascending) {
+	for _, m := range r.getFilteredMetrics() {
 		t.AppendRow(table.Row{
 			m.Name,
 			m.Total,

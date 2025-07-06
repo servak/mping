@@ -65,7 +65,7 @@ func NewApp(mm *stats.MetricsManager, cfg *Config, interval, timeout time.Durati
 	pages.AddPage("main", layout.Root(), true, true)
 	pages.AddPage("help", createHelpModal(), true, false)
 
-	return &App{
+	uiApp := &App{
 		app:      app,
 		pages:    pages,
 		layout:   layout,
@@ -78,6 +78,13 @@ func NewApp(mm *stats.MetricsManager, cfg *Config, interval, timeout time.Durati
 		ctx:      ctx,
 		cancel:   cancel,
 	}
+
+	// Set focus callback for filter input
+	layout.SetFocusCallback(func() {
+		uiApp.app.SetFocus(layout.Root())
+	})
+
+	return uiApp
 }
 
 // Run starts the application
@@ -119,7 +126,21 @@ func (a *App) setupKeyBindings() {
 			return event
 		}
 
+		// When filter input is visible, let it handle its own keys
+		if a.layout.IsFilterShown() {
+			return event
+		}
+
 		// Main screen key bindings
+		switch event.Key() {
+		case tcell.KeyEscape:
+			// Clear filter if one is active (k9s-like behavior)
+			if a.renderer.GetFilter() != "" {
+				a.clearFilter()
+				return nil
+			}
+		}
+
 		switch event.Rune() {
 		case 'q':
 			a.Close()
@@ -138,6 +159,9 @@ func (a *App) setupKeyBindings() {
 			return nil
 		case 'R':
 			a.resetMetrics()
+			return nil
+		case '/':
+			a.showFilter()
 			return nil
 		}
 
@@ -175,6 +199,16 @@ func (a *App) resetMetrics() {
 	a.mm.ResetAllMetrics()
 }
 
+// Filter-related methods
+func (a *App) showFilter() {
+	a.layout.showFilterInput()
+	a.app.SetFocus(a.layout.GetFilterInput())
+}
+
+func (a *App) clearFilter() {
+	a.renderer.ClearFilter()
+}
+
 // Help modal related methods
 func (a *App) showHelp() {
 	a.pages.ShowPage("help")
@@ -206,8 +240,14 @@ NAVIGATION:
   S            Previous sort key      
   r            Reverse sort order     
   R            Reset all metrics      
+  /            Filter hosts           
   h            Show/hide this help    
   q, Ctrl+C    Quit application       
+
+FILTER:                              
+  /            Start filter input     
+  Enter        Apply filter           
+  Esc          Cancel/Clear filter    
 
 Press 'h' or Esc to close           `
 
