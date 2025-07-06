@@ -7,6 +7,7 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/rivo/tview"
 
 	"github.com/servak/mping/internal/stats"
 )
@@ -158,45 +159,21 @@ func (r *Renderer) headerWithArrow(key stats.Key) string {
 	return header
 }
 
+// getTableData generates TableData from current metrics
+func (r *Renderer) getTableData() *TableData {
+	metrics := r.getFilteredMetrics()
+	return NewTableData(metrics, r.sortKey, r.ascending)
+}
+
+// GetTviewTable returns a tview.Table for interactive use
+func (r *Renderer) GetTviewTable() *tview.Table {
+	return r.getTableData().ToTviewTable()
+}
+
 // renderTable generates the table (moved from table.go)
 func (r *Renderer) renderTable() table.Writer {
-	t := table.NewWriter()
-
-	// Generate dynamic headers with sort direction arrows
-	headers := []interface{}{
-		r.headerWithArrow(stats.Host),
-		r.headerWithArrow(stats.Sent),
-		r.headerWithArrow(stats.Success),
-		r.headerWithArrow(stats.Fail),
-		r.headerWithArrow(stats.Loss),
-		r.headerWithArrow(stats.Last),
-		r.headerWithArrow(stats.Avg),
-		r.headerWithArrow(stats.Best),
-		r.headerWithArrow(stats.Worst),
-		r.headerWithArrow(stats.LastSuccTime),
-		r.headerWithArrow(stats.LastFailTime),
-		"FAIL Reason", // Last column is not sortable
-	}
-	t.AppendHeader(table.Row(headers))
-	df := DurationFormater
-	tf := TimeFormater
-	for _, m := range r.getFilteredMetrics() {
-		t.AppendRow(table.Row{
-			m.Name,
-			m.Total,
-			m.Successful,
-			m.Failed,
-			fmt.Sprintf("%5.1f%%", m.Loss),
-			df(m.LastRTT),
-			df(m.AverageRTT),
-			df(m.MinimumRTT),
-			df(m.MaximumRTT),
-			tf(m.LastSuccTime),
-			tf(m.LastFailTime),
-			m.LastFailDetail,
-		})
-	}
-	return t
+	tableData := r.getTableData()
+	return tableData.ToGoPrettyTable()
 }
 
 // TableRender is a table generation function for external use

@@ -45,8 +45,8 @@ func TestLayout_Root(t *testing.T) {
 
 	root := layout.Root()
 
-	if root != layout.root {
-		t.Error("Expected Root() to return the root element")
+	if root != layout.pages {
+		t.Error("Expected Root() to return the pages element")
 	}
 
 }
