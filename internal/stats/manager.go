@@ -133,25 +133,25 @@ func (mm *MetricsManager) SortBy(k Key, ascending bool) []Metrics {
 		case Host:
 			result = res[i].Name < res[j].Name
 		case Sent:
-			result = mi.Total > mj.Total
+			result = mi.Total < mj.Total  // 昇順：小さい値が先
 		case Success:
-			result = mi.Successful > mj.Successful
+			result = mi.Successful < mj.Successful  // 昇順：小さい値が先
 		case Loss:
-			result = mi.Loss > mj.Loss
+			result = mi.Loss < mj.Loss  // 昇順：小さい値が先
 		case Fail:
-			result = mi.Failed > mj.Failed
+			result = mi.Failed < mj.Failed  // 昇順：小さい値が先
 		case Last:
-			result = rejectLess(mi.LastRTT, mj.LastRTT)
+			result = rejectLessAscending(mi.LastRTT, mj.LastRTT)  // 昇順対応
 		case Avg:
-			result = rejectLess(mi.AverageRTT, mj.AverageRTT)
+			result = rejectLessAscending(mi.AverageRTT, mj.AverageRTT)  // 昇順対応
 		case Best:
-			result = rejectLess(mi.MinimumRTT, mj.MinimumRTT)
+			result = rejectLessAscending(mi.MinimumRTT, mj.MinimumRTT)  // 昇順対応
 		case Worst:
-			result = rejectLess(mi.MaximumRTT, mj.MaximumRTT)
+			result = rejectLessAscending(mi.MaximumRTT, mj.MaximumRTT)  // 昇順対応
 		case LastSuccTime:
-			result = mi.LastSuccTime.After(mj.LastSuccTime)
+			result = mi.LastSuccTime.Before(mj.LastSuccTime)  // 昇順：古い時刻が先
 		case LastFailTime:
-			result = mi.LastFailTime.After(mj.LastFailTime)
+			result = mi.LastFailTime.Before(mj.LastFailTime)  // 昇順：古い時刻が先
 		default:
 			return false
 		}
@@ -174,4 +174,16 @@ func rejectLess(i, j time.Duration) bool {
 		return true
 	}
 	return i < j
+}
+
+// rejectLessAscending は昇順ソート用のRTT比較関数
+// 0値（未測定）は常に後ろに配置される
+func rejectLessAscending(i, j time.Duration) bool {
+	if i == 0 {
+		return false  // i が 0 なら j を先に
+	}
+	if j == 0 {
+		return true   // j が 0 なら i を先に
+	}
+	return i < j      // 両方とも 0 でないなら小さい方を先に
 }

@@ -34,16 +34,14 @@ func NewRenderer(mm *stats.MetricsManager, cfg *Config, interval, timeout time.D
 		interval:   interval,
 		timeout:    timeout,
 		sortKey:    stats.Success,
-		ascending:  true,
+		ascending:  false,  // デフォルトを降順に変更
 		filterText: "",
 	}
 }
 
 // SetSortKey sets the sort key
 func (r *Renderer) SetSortKey(key stats.Key) {
-	// New key always resets to ascending order
 	r.sortKey = key
-	r.ascending = true
 }
 
 // RenderHeader generates header text
