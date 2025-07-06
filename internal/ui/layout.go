@@ -51,6 +51,9 @@ func (l *Layout) setupViews() {
 		SetSelectable(true, false).
 		SetSelectedFunc(l.handleRowSelection)
 	
+	// Set initial selection to first data row to ensure header visibility
+	l.tableView.Select(1, 0)
+	
 	// Footer
 	l.footer = tview.NewTextView().
 		SetDynamicColors(true).
