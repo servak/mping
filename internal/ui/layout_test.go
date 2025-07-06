@@ -5,14 +5,14 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
-	
+
 	"github.com/servak/mping/internal/stats"
 )
 
 func TestNewLayout(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	cfg := DefaultConfig()
-	renderer := NewRenderer(mm, cfg, time.Second)
+	renderer := NewRenderer(mm, cfg, time.Second, time.Second)
 
 	layout := NewLayout(renderer)
 
@@ -40,7 +40,7 @@ func TestNewLayout(t *testing.T) {
 func TestLayout_Root(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	cfg := DefaultConfig()
-	renderer := NewRenderer(mm, cfg, time.Second)
+	renderer := NewRenderer(mm, cfg, time.Second, time.Second)
 	layout := NewLayout(renderer)
 
 	root := layout.Root()
@@ -54,7 +54,7 @@ func TestLayout_Root(t *testing.T) {
 func TestLayout_HandleKeyEvent(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	cfg := DefaultConfig()
-	renderer := NewRenderer(mm, cfg, time.Second)
+	renderer := NewRenderer(mm, cfg, time.Second, time.Second)
 	layout := NewLayout(renderer)
 
 	tests := []struct {
@@ -133,7 +133,7 @@ func TestLayout_Update(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	mm.Register("test.com", "test.com")
 	cfg := DefaultConfig()
-	renderer := NewRenderer(mm, cfg, time.Second)
+	renderer := NewRenderer(mm, cfg, time.Second, time.Second)
 	layout := NewLayout(renderer)
 
 	// Updateの前後でテキストが設定されることを確認
@@ -149,7 +149,7 @@ func TestLayout_Update(t *testing.T) {
 func TestLayout_ScrollOperations(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	cfg := DefaultConfig()
-	renderer := NewRenderer(mm, cfg, time.Second)
+	renderer := NewRenderer(mm, cfg, time.Second, time.Second)
 	layout := NewLayout(renderer)
 
 	// 各スクロール操作が呼び出せることを確認（パニックしないこと）
@@ -211,7 +211,7 @@ func TestLayout_ScrollOperations(t *testing.T) {
 func TestLayout_ViewSetup(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	cfg := DefaultConfig()
-	renderer := NewRenderer(mm, cfg, time.Second)
+	renderer := NewRenderer(mm, cfg, time.Second, time.Second)
 	layout := NewLayout(renderer)
 
 	// 各ビューが正しく初期化されていることを確認

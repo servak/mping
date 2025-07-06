@@ -41,13 +41,14 @@ type App struct {
 	mm       *stats.MetricsManager
 	config   *Config
 	interval time.Duration
+	timeout  time.Duration
 	sortKey  stats.Key
 	ctx      context.Context
 	cancel   context.CancelFunc
 }
 
 // NewApp creates a new App instance
-func NewApp(mm *stats.MetricsManager, cfg *Config, interval time.Duration) *App {
+func NewApp(mm *stats.MetricsManager, cfg *Config, interval, timeout time.Duration) *App {
 	if cfg == nil {
 		cfg = DefaultConfig()
 	}
@@ -57,7 +58,7 @@ func NewApp(mm *stats.MetricsManager, cfg *Config, interval time.Duration) *App 
 	app := tview.NewApplication()
 	pages := tview.NewPages()
 
-	renderer := NewRenderer(mm, cfg, interval)
+	renderer := NewRenderer(mm, cfg, interval, timeout)
 	layout := NewLayout(renderer)
 
 	// Add main page and help modal
@@ -72,6 +73,7 @@ func NewApp(mm *stats.MetricsManager, cfg *Config, interval time.Duration) *App 
 		mm:       mm,
 		config:   cfg,
 		interval: interval,
+		timeout:  timeout,
 		sortKey:  stats.Success,
 		ctx:      ctx,
 		cancel:   cancel,

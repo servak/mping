@@ -8,14 +8,14 @@ import (
 	"github.com/servak/mping/internal/stats"
 )
 
-
 func TestNewRenderer(t *testing.T) {
 	// stats.MetricsManager を作成してテスト
 	mm := stats.NewMetricsManager()
 	cfg := DefaultConfig()
 	interval := 1 * time.Second
+	timeout := 1 * time.Second
 
-	renderer := NewRenderer(mm, cfg, interval)
+	renderer := NewRenderer(mm, cfg, interval, timeout)
 
 	if renderer.mm != mm {
 		t.Error("Expected mm to be set correctly")
@@ -35,7 +35,7 @@ func TestNewRenderer(t *testing.T) {
 }
 
 func TestRenderer_SetSortKey(t *testing.T) {
-	renderer := NewRenderer(stats.NewMetricsManager(), DefaultConfig(), time.Second)
+	renderer := NewRenderer(stats.NewMetricsManager(), DefaultConfig(), time.Second, time.Second)
 
 	renderer.SetSortKey(stats.Host)
 
@@ -46,10 +46,10 @@ func TestRenderer_SetSortKey(t *testing.T) {
 
 func TestRenderer_RenderHeader(t *testing.T) {
 	tests := []struct {
-		name           string
-		enableColors   bool
-		headerColor    string
-		expectedParts  []string
+		name            string
+		enableColors    bool
+		headerColor     string
+		expectedParts   []string
 		unexpectedParts []string
 	}{
 		{
@@ -57,8 +57,9 @@ func TestRenderer_RenderHeader(t *testing.T) {
 			enableColors: true,
 			headerColor:  "blue",
 			expectedParts: []string{
-				"[blue]Sort: Succ ^[-]",
+				"[blue]Sort: Succ[-]",
 				"[blue]Interval: 1000ms[-]",
+				"[blue]Timeout: 1000ms[-]",
 				"[blue]mping[-]",
 			},
 		},
@@ -66,8 +67,9 @@ func TestRenderer_RenderHeader(t *testing.T) {
 			name:         "with colors disabled",
 			enableColors: false,
 			expectedParts: []string{
-				"Sort: Succ ^",
+				"Sort: Succ",
 				"Interval: 1000ms",
+				"Timeout: 1000ms",
 				"mping",
 			},
 			unexpectedParts: []string{
@@ -80,8 +82,9 @@ func TestRenderer_RenderHeader(t *testing.T) {
 			enableColors: true,
 			headerColor:  "",
 			expectedParts: []string{
-				"Sort: Succ ^",
+				"Sort: Succ",
 				"Interval: 1000ms",
+				"Timeout: 1000ms",
 				"mping",
 			},
 			unexpectedParts: []string{
@@ -97,7 +100,7 @@ func TestRenderer_RenderHeader(t *testing.T) {
 			cfg.EnableColors = tt.enableColors
 			cfg.Colors.Header = tt.headerColor
 
-			renderer := NewRenderer(stats.NewMetricsManager(), cfg, time.Second)
+			renderer := NewRenderer(stats.NewMetricsManager(), cfg, time.Second, time.Second)
 			result := renderer.RenderHeader()
 
 			for _, part := range tt.expectedParts {
@@ -117,10 +120,10 @@ func TestRenderer_RenderHeader(t *testing.T) {
 
 func TestRenderer_RenderFooter(t *testing.T) {
 	tests := []struct {
-		name           string
-		enableColors   bool
-		footerColor    string
-		expectedParts  []string
+		name            string
+		enableColors    bool
+		footerColor     string
+		expectedParts   []string
 		unexpectedParts []string
 	}{
 		{
@@ -160,7 +163,7 @@ func TestRenderer_RenderFooter(t *testing.T) {
 			cfg.EnableColors = tt.enableColors
 			cfg.Colors.Footer = tt.footerColor
 
-			renderer := NewRenderer(stats.NewMetricsManager(), cfg, time.Second)
+			renderer := NewRenderer(stats.NewMetricsManager(), cfg, time.Second, time.Second)
 			result := renderer.RenderFooter()
 
 			for _, part := range tt.expectedParts {
@@ -227,7 +230,7 @@ func TestRenderer_RenderMain(t *testing.T) {
 			expected: []string{
 				"test.com",
 				"Host",
-				"Sent", 
+				"Sent",
 				"Succ ↑", // ソート矢印付き
 				"Fail",
 			},
@@ -244,7 +247,7 @@ func TestRenderer_RenderMain(t *testing.T) {
 			for _, metric := range tt.metrics {
 				mm.Register(metric.Name, metric.Name)
 			}
-			renderer := NewRenderer(mm, cfg, time.Second)
+			renderer := NewRenderer(mm, cfg, time.Second, time.Second)
 			result := renderer.RenderMain()
 
 			for _, expected := range tt.expected {

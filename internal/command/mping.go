@@ -76,32 +76,32 @@ mping dns://8.8.8.8/google.com`,
 			// Create ProbeManager and MetricsManager
 			probeManager := prober.NewProbeManager(cfg.Prober, cfg.Default)
 			metricsManager := stats.NewMetricsManager()
-			
+
 			// Add targets
 			err = probeManager.AddTargets(hosts...)
 			if err != nil {
 				return fmt.Errorf("failed to add targets: %w", err)
 			}
-			
+
 			// Subscribe to events for metrics collection
 			metricsManager.Subscribe(probeManager.Events())
-			
+
 			// Start probing in background
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			
+
 			go func() {
 				if err := probeManager.Run(ctx, _interval, _timeout); err != nil {
 					fmt.Printf("ProbeManager error: %v\n", err)
 				}
 			}()
-			
+
 			// Start TUI
-			startCUI(metricsManager, cfg.UI, _interval)
-			
+			startTUI(metricsManager, cfg.UI, _interval, _timeout)
+
 			// Stop probing when TUI exits
 			probeManager.Stop()
-			
+
 			// Final results
 			t := ui.TableRender(metricsManager, stats.Success)
 			t.SetStyle(table.StyleLight)
@@ -121,15 +121,14 @@ mping dns://8.8.8.8/google.com`,
 	return cmd
 }
 
-
-
-func startCUI(manager *stats.MetricsManager, cfg *ui.Config, interval time.Duration) {
-	app := ui.NewApp(manager, cfg, interval)
+func startTUI(manager *stats.MetricsManager, cfg *ui.Config, interval, timeout time.Duration) {
+	app := ui.NewApp(manager, cfg, interval, timeout)
 
 	refreshTime := time.Millisecond * 250 // Minimum refresh time that can be set
 	if refreshTime < (interval / 2) {
 		refreshTime = interval / 2
 	}
+	time.Sleep(refreshTime) // Wait for probe results before showing UI to avoid empty table display
 
 	go func() {
 		for {
@@ -137,13 +136,5 @@ func startCUI(manager *stats.MetricsManager, cfg *ui.Config, interval time.Durat
 			app.Update()
 		}
 	}()
-
 	app.Run()
 }
-
-
-
-
-
-
-

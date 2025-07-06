@@ -15,12 +15,13 @@ type Renderer struct {
 	mm        *stats.MetricsManager
 	config    *Config
 	interval  time.Duration
+	timeout   time.Duration
 	sortKey   stats.Key
 	ascending bool
 }
 
 // NewRenderer creates a new Renderer instance
-func NewRenderer(mm *stats.MetricsManager, cfg *Config, interval time.Duration) *Renderer {
+func NewRenderer(mm *stats.MetricsManager, cfg *Config, interval, timeout time.Duration) *Renderer {
 	// Fix Unicode character width calculation issues in East Asian locales
 	text.OverrideRuneWidthEastAsianWidth(false)
 
@@ -28,6 +29,7 @@ func NewRenderer(mm *stats.MetricsManager, cfg *Config, interval time.Duration) 
 		mm:        mm,
 		config:    cfg,
 		interval:  interval,
+		timeout:   timeout,
 		sortKey:   stats.Success,
 		ascending: true,
 	}
@@ -42,21 +44,15 @@ func (r *Renderer) SetSortKey(key stats.Key) {
 
 // RenderHeader generates header text
 func (r *Renderer) RenderHeader() string {
-	// Show sort state with ASCII arrows (^v)
 	sortDisplay := r.sortKey.String()
-	if r.ascending {
-		sortDisplay = sortDisplay + " ^"
-	} else {
-		sortDisplay = sortDisplay + " v"
-	}
-
 	if r.config.EnableColors && r.config.Colors.Header != "" {
 		sortText := fmt.Sprintf("[%s]Sort: %s[-]", r.config.Colors.Header, sortDisplay)
 		intervalText := fmt.Sprintf("[%s]Interval: %dms[-]", r.config.Colors.Header, r.interval.Milliseconds())
+		timeoutText := fmt.Sprintf("[%s]Timeout: %dms[-]", r.config.Colors.Header, r.timeout.Milliseconds())
 		titleText := fmt.Sprintf("[%s]%s[-]", r.config.Colors.Header, r.config.Title)
-		return fmt.Sprintf("%s    %s    %s", sortText, intervalText, titleText)
+		return fmt.Sprintf("%s    %s    %s    %s", sortText, intervalText, timeoutText, titleText)
 	} else {
-		return fmt.Sprintf("Sort: %s    Interval: %dms    %s", sortDisplay, r.interval.Milliseconds(), r.config.Title)
+		return fmt.Sprintf("Sort: %s    Interval: %dms    Timeout: %dms    %s", sortDisplay, r.interval.Milliseconds(), r.timeout.Milliseconds(), r.config.Title)
 	}
 }
 
