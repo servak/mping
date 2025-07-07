@@ -88,6 +88,11 @@ func (a *TUIApp) setupCallbacks() {
 
 	// Set row selection callback
 	a.layout.GetHostListPanel().SetSelectedFunc(a.handleRowSelection)
+	
+	// Set selection change callback for detail panel updates
+	a.layout.GetHostListPanel().SetSelectionChangeCallback(func(metrics stats.MetricsReader) {
+		a.layout.SetSelectedMetrics(metrics)
+	})
 }
 
 // setupKeyBindings configures key bindings
@@ -107,6 +112,7 @@ func (a *TUIApp) setupKeyBindings() {
 			}
 			return event
 		}
+
 
 		// When filter input is visible, let it handle its own keys
 		if a.layout.IsFilterShown() {
@@ -129,6 +135,9 @@ func (a *TUIApp) setupKeyBindings() {
 			return nil
 		case 'h':
 			a.showHelp()
+			return nil
+		case 'v':
+			a.toggleDetailView()
 			return nil
 		case 's':
 			a.nextSort()
@@ -173,6 +182,7 @@ NAVIGATION:
   S            Previous sort key      
   r            Reverse sort order     
   R            Reset all metrics      
+  v            Toggle detail view     
   /            Filter hosts           
   h            Show/hide this help    
   q, Ctrl+C    Quit application       
@@ -232,6 +242,11 @@ func (a *TUIApp) clearFilter() {
 	a.state.ClearFilter()
 }
 
+// View toggle methods
+func (a *TUIApp) toggleDetailView() {
+	a.layout.ToggleDetailView()
+}
+
 func (a *TUIApp) handleFilterDone(key tcell.Key) {
 	switch key {
 	case tcell.KeyEnter:
@@ -277,26 +292,11 @@ func (a *TUIApp) handleRowSelection(row, col int) {
 	// Convert table row to data row (subtract 1 for header)
 	dataRow := row - 1
 	if metric, ok := tableData.GetMetricAtRow(dataRow); ok {
-		a.showHostDetails(metric)
+		// Update detail panel instead of showing modal
+		a.layout.SetSelectedMetrics(metric)
 	}
 }
 
-// showHostDetails displays detailed information for a selected host
-func (a *TUIApp) showHostDetails(metric stats.MetricsReader) {
-	detailText := shared.FormatHostDetail(metric)
-
-	// Create and show modal
-	modal := tview.NewModal().
-		SetText(detailText).
-		AddButtons([]string{"Close"}).
-		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-			// Remove modal and restore focus
-			a.layout.RemoveModal("details")
-		})
-
-	a.layout.AddModal("details", modal)
-	a.layout.ShowPage("details")
-}
 
 // getFilteredMetrics returns filtered metrics based on current state
 func (a *TUIApp) getFilteredMetrics() []stats.MetricsReader {

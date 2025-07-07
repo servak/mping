@@ -15,6 +15,7 @@ type HostListPanel struct {
 	renderState    state.RenderState
 	selectionState state.SelectionState
 	mm             *stats.MetricsManager
+	onSelectionChange func(metrics stats.MetricsReader) // Callback when selection changes
 }
 
 type HostListParams interface {
@@ -83,6 +84,11 @@ func (h *HostListPanel) updateSelectedHost() {
 	tableData := shared.NewTableData(metrics, h.renderState.GetSortKey(), h.renderState.IsAscending())
 	selectedHost := h.GetSelectedHost(tableData)
 	h.selectionState.SetSelectedHost(selectedHost)
+	
+	// Call the callback to update detail panel with metrics object
+	if metric, ok := h.GetSelectedMetric(tableData); ok && h.onSelectionChange != nil {
+		h.onSelectionChange(metric)
+	}
 }
 
 // GetView returns the underlying tview component
@@ -110,6 +116,11 @@ func (h *HostListPanel) GetSelectedHost(tableData *shared.TableData) string {
 // SetSelectedFunc sets the function to call when a row is selected
 func (h *HostListPanel) SetSelectedFunc(fn func(row, col int)) {
 	h.table.SetSelectedFunc(fn)
+}
+
+// SetSelectionChangeCallback sets the callback for when selection changes
+func (h *HostListPanel) SetSelectionChangeCallback(fn func(metrics stats.MetricsReader)) {
+	h.onSelectionChange = fn
 }
 
 // Navigation methods

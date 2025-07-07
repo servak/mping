@@ -30,7 +30,7 @@ type LayoutManager struct {
 	header     *panels.HeaderPanel
 	hostList   *panels.HostListPanel
 	footer     *panels.FooterPanel
-	_ *panels.HostDetailPanel
+	hostDetail *panels.HostDetailPanel
 
 	// Filter input
 	filterInput *tview.InputField
@@ -61,7 +61,7 @@ func (l *LayoutManager) setupPanels(uiState *state.UIState, mm *stats.MetricsMan
 	l.header = panels.NewHeaderPanel(uiState, config, interval, timeout)
 	l.hostList = panels.NewHostListPanel(uiState, mm)
 	l.footer = panels.NewFooterPanel(config)
-	// hostDetail will be created on demand
+	l.hostDetail = panels.NewHostDetailPanel(mm)
 
 	// Setup filter input
 	l.filterInput = tview.NewInputField().
@@ -72,6 +72,7 @@ func (l *LayoutManager) setupPanels(uiState *state.UIState, mm *stats.MetricsMan
 
 // setupLayout configures the main layout structure
 func (l *LayoutManager) setupLayout() {
+	// Start with single pane layout (host list only)
 	l.root = tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(l.header.GetView(), 1, 0, false).
@@ -95,11 +96,68 @@ func (l *LayoutManager) GetHostListPanel() *panels.HostListPanel {
 	return l.hostList
 }
 
+// GetHostDetailPanel returns the host detail panel
+func (l *LayoutManager) GetHostDetailPanel() *panels.HostDetailPanel {
+	return l.hostDetail
+}
+
+// SetSelectedHost updates the detail panel with the selected host
+func (l *LayoutManager) SetSelectedHost(hostname string) {
+	l.hostDetail.SetHost(hostname)
+}
+
+// SetSelectedMetrics updates the detail panel with the selected metrics
+func (l *LayoutManager) SetSelectedMetrics(metrics stats.MetricsReader) {
+	l.hostDetail.SetMetrics(metrics)
+}
+
+// ToggleDetailView switches between single and dual pane layout
+func (l *LayoutManager) ToggleDetailView() {
+	if l.mode == ListOnly {
+		l.showDetailView()
+	} else {
+		l.hideDetailView()
+	}
+}
+
+// showDetailView switches to dual pane layout
+func (l *LayoutManager) showDetailView() {
+	l.mode = ListWithDetail
+	
+	// Create horizontal layout for host list and detail
+	mainContent := tview.NewFlex().
+		SetDirection(tview.FlexColumn).
+		AddItem(l.hostList.GetView(), 0, 2, true).    // Host list takes 2/3
+		AddItem(l.hostDetail.GetView(), 0, 1, false)  // Detail takes 1/3
+
+	// Rebuild root layout with dual pane
+	l.root.Clear()
+	l.root.AddItem(l.header.GetView(), 1, 0, false).
+		AddItem(mainContent, 0, 1, true).
+		AddItem(l.footer.GetView(), 1, 0, false)
+}
+
+// hideDetailView switches to single pane layout
+func (l *LayoutManager) hideDetailView() {
+	l.mode = ListOnly
+	
+	// Rebuild root layout with single pane
+	l.root.Clear()
+	l.root.AddItem(l.header.GetView(), 1, 0, false).
+		AddItem(l.hostList.GetView(), 0, 1, true).
+		AddItem(l.footer.GetView(), 1, 0, false)
+}
+
 // UpdateAll refreshes all panels
 func (l *LayoutManager) UpdateAll() {
 	l.header.Update()
 	l.footer.Update()
 	l.hostList.Update()
+	
+	// Only update detail panel when it's visible
+	if l.mode == ListWithDetail {
+		l.hostDetail.Update()
+	}
 }
 
 // HandleKeyEvent handles key events for navigation
@@ -205,6 +263,14 @@ func (l *LayoutManager) AddModal(name string, modal tview.Primitive) {
 }
 
 func (l *LayoutManager) RemoveModal(name string) {
+	l.pages.RemovePage(name)
+}
+
+func (l *LayoutManager) AddPage(name string, page tview.Primitive, resize, visible bool) {
+	l.pages.AddPage(name, page, resize, visible)
+}
+
+func (l *LayoutManager) RemovePage(name string) {
 	l.pages.RemovePage(name)
 }
 
