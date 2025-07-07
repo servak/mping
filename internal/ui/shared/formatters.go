@@ -30,9 +30,7 @@ func TimeFormater(t time.Time) string {
 
 // FormatHostDetail generates detailed information for a host
 func FormatHostDetail(metric stats.MetricsReader) string {
-	basicInfo := fmt.Sprintf(`Host Details: %s
-
-Total Probes: %d
+	basicInfo := fmt.Sprintf(`Total Probes: %d
 Successful: %d
 Failed: %d
 Loss Rate: %.1f%%
@@ -43,7 +41,6 @@ Maximum RTT: %s
 Last Success: %s
 Last Failure: %s
 Last Error: %s`,
-		metric.GetName(),
 		metric.GetTotal(),
 		metric.GetSuccessful(),
 		metric.GetFailed(),
@@ -80,11 +77,19 @@ func FormatHistory(metric stats.MetricsReader) string {
 
 	for _, entry := range history {
 		status := "OK"
+		details := ""
+		
 		if !entry.Success {
 			status = "FAIL"
+			// Show error message for failed entries
+			if entry.Error != "" {
+				details = entry.Error
+			}
+		} else {
+			// Show probe-specific details for successful entries
+			details = formatProbeDetails(entry.Details)
 		}
 
-		details := formatProbeDetails(entry.Details)
 		sb.WriteString(fmt.Sprintf("%-8s %-6s %-7s %s\n",
 			entry.Timestamp.Format("15:04:05"),
 			status,
@@ -103,27 +108,32 @@ func formatProbeDetails(details *prober.ProbeDetails) string {
 	}
 
 	switch details.ProbeType {
-	case "icmp":
+	case "icmp", "icmpv4", "icmpv6":
 		if details.ICMP != nil {
-			return fmt.Sprintf("seq=%d ttl=%d size=%d", 
-				details.ICMP.Sequence, details.ICMP.TTL, details.ICMP.DataSize)
+			// Only show sequence and size for now (TTL is not properly implemented)
+			return fmt.Sprintf("seq=%d size=%d", 
+				details.ICMP.Sequence, details.ICMP.DataSize)
 		}
+		return "icmp ping"
 	case "http", "https":
 		if details.HTTP != nil {
 			return fmt.Sprintf("status=%d size=%d", 
 				details.HTTP.StatusCode, details.HTTP.ResponseSize)
 		}
+		return "http probe"
 	case "dns":
 		if details.DNS != nil {
-			return fmt.Sprintf("code=%d answers=%d server=%s", 
-				details.DNS.ResponseCode, details.DNS.AnswerCount, details.DNS.Server)
+			return fmt.Sprintf("code=%d answers=%d", 
+				details.DNS.ResponseCode, details.DNS.AnswerCount)
 		}
+		return "dns query"
 	case "ntp":
 		if details.NTP != nil {
 			offset := time.Duration(details.NTP.Offset) * time.Microsecond
 			return fmt.Sprintf("stratum=%d offset=%s", 
 				details.NTP.Stratum, DurationFormater(offset))
 		}
+		return "ntp sync"
 	case "tcp":
 		return "connection"
 	}
