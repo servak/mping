@@ -276,9 +276,9 @@ func TestHostListPanelRestoreSelection(t *testing.T) {
 	mm.Register("google.com", "google.com")
 	mm.Register("example.com", "example.com")
 
-	metrics := []stats.Metrics{
-		{Name: "google.com"},
-		{Name: "example.com"},
+	metrics := []stats.MetricsReader{
+		&stats.Metrics{Name: "google.com"},
+		&stats.Metrics{Name: "example.com"},
 	}
 	tableData := shared.NewTableData(metrics, stats.Success, false)
 

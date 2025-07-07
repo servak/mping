@@ -16,8 +16,8 @@ func TestNewUIState(t *testing.T) {
 	}
 
 	// Test default values
-	if state.GetSortKey() != stats.Success {
-		t.Errorf("Expected default sort key to be %v, got %v", stats.Success, state.GetSortKey())
+	if state.GetSortKey() != stats.Fail {
+		t.Errorf("Expected default sort key to be %v, got %v", stats.Fail, state.GetSortKey())
 	}
 
 	if state.IsAscending() {

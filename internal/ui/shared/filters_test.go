@@ -9,29 +9,29 @@ import (
 
 func TestFilterMetrics(t *testing.T) {
 	// Create test metrics
-	metrics := []stats.Metrics{
-		{
+	metrics := []stats.MetricsReader{
+		&stats.Metrics{
 			Name:         "google.com",
 			Total:        100,
 			Successful:   95,
 			Failed:       5,
 			LastSuccTime: time.Now(),
 		},
-		{
+		&stats.Metrics{
 			Name:         "yahoo.com",
 			Total:        50,
 			Successful:   48,
 			Failed:       2,
 			LastSuccTime: time.Now(),
 		},
-		{
+		&stats.Metrics{
 			Name:         "example.org",
 			Total:        25,
 			Successful:   25,
 			Failed:       0,
 			LastSuccTime: time.Now(),
 		},
-		{
+		&stats.Metrics{
 			Name:         "test.net",
 			Total:        10,
 			Successful:   8,
@@ -108,7 +108,7 @@ func TestFilterMetrics(t *testing.T) {
 			// Check that all expected names are present
 			resultNames := make(map[string]bool)
 			for _, metric := range result {
-				resultNames[metric.Name] = true
+				resultNames[metric.GetName()] = true
 			}
 
 			for _, expectedName := range tt.expectedNames {
@@ -121,7 +121,7 @@ func TestFilterMetrics(t *testing.T) {
 			if len(resultNames) != len(tt.expectedNames) {
 				actualNames := make([]string, 0, len(result))
 				for _, metric := range result {
-					actualNames = append(actualNames, metric.Name)
+					actualNames = append(actualNames, metric.GetName())
 				}
 				t.Errorf("FilterMetrics() returned unexpected metrics. Got: %v, Want: %v", actualNames, tt.expectedNames)
 			}
@@ -130,24 +130,24 @@ func TestFilterMetrics(t *testing.T) {
 }
 
 func TestFilterMetricsPreservesOrder(t *testing.T) {
-	metrics := []stats.Metrics{
-		{Name: "alpha.com"},
-		{Name: "beta.com"},
-		{Name: "gamma.com"},
+	metrics := []stats.MetricsReader{
+		&stats.Metrics{Name: "alpha.com"},
+		&stats.Metrics{Name: "beta.com"},
+		&stats.Metrics{Name: "gamma.com"},
 	}
 
 	result := FilterMetrics(metrics, ".com")
 
 	expectedOrder := []string{"alpha.com", "beta.com", "gamma.com"}
 	for i, metric := range result {
-		if metric.Name != expectedOrder[i] {
-			t.Errorf("FilterMetrics() changed order. Got %s at position %d, want %s", metric.Name, i, expectedOrder[i])
+		if metric.GetName() != expectedOrder[i] {
+			t.Errorf("FilterMetrics() changed order. Got %s at position %d, want %s", metric.GetName(), i, expectedOrder[i])
 		}
 	}
 }
 
 func TestFilterMetricsWithEmptyMetrics(t *testing.T) {
-	var metrics []stats.Metrics
+	var metrics []stats.MetricsReader
 
 	result := FilterMetrics(metrics, "test")
 
@@ -157,14 +157,14 @@ func TestFilterMetricsWithEmptyMetrics(t *testing.T) {
 }
 
 func TestFilterMetricsDoesNotModifyOriginal(t *testing.T) {
-	original := []stats.Metrics{
-		{Name: "test1.com"},
-		{Name: "test2.com"},
-		{Name: "example.org"},
+	original := []stats.MetricsReader{
+		&stats.Metrics{Name: "test1.com"},
+		&stats.Metrics{Name: "test2.com"},
+		&stats.Metrics{Name: "example.org"},
 	}
 
 	// Create a copy to compare later
-	originalCopy := make([]stats.Metrics, len(original))
+	originalCopy := make([]stats.MetricsReader, len(original))
 	copy(originalCopy, original)
 
 	// Filter metrics
@@ -176,8 +176,8 @@ func TestFilterMetricsDoesNotModifyOriginal(t *testing.T) {
 	}
 
 	for i, metric := range original {
-		if metric.Name != originalCopy[i].Name {
-			t.Errorf("FilterMetrics() modified original slice at index %d: got %s, want %s", i, metric.Name, originalCopy[i].Name)
+		if metric.GetName() != originalCopy[i].GetName() {
+			t.Errorf("FilterMetrics() modified original slice at index %d: got %s, want %s", i, metric.GetName(), originalCopy[i].GetName())
 		}
 	}
 }
