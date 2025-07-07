@@ -247,7 +247,7 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 	}
 
 	// Success
-	p.success(result, target, now, rtt)
+	p.success(result, target, now, rtt, r)
 }
 
 func (p *DNSProber) sent(result chan *Event, target *DNSTarget, sentTime time.Time) {
@@ -261,7 +261,27 @@ func (p *DNSProber) sent(result chan *Event, target *DNSTarget, sentTime time.Ti
 	}
 }
 
-func (p *DNSProber) success(result chan *Event, target *DNSTarget, sentTime time.Time, rtt time.Duration) {
+func (p *DNSProber) success(result chan *Event, target *DNSTarget, sentTime time.Time, rtt time.Duration, resp *dns.Msg) {
+	// DNS詳細情報を作成
+	var answers []string
+	for _, ans := range resp.Answer {
+		answers = append(answers, ans.String())
+	}
+	
+	details := &ProbeDetails{
+		ProbeType: "dns",
+		DNS: &DNSDetails{
+			Server:       target.Server,
+			Port:         target.Port,
+			Domain:       target.Domain,
+			RecordType:   target.RecordType,
+			ResponseCode: resp.Rcode,
+			AnswerCount:  len(resp.Answer),
+			Answers:      answers,
+			UseTCP:       target.UseTCP,
+		},
+	}
+	
 	result <- &Event{
 		Key:         target.OriginalTarget,
 		DisplayName: target.OriginalTarget,
@@ -269,6 +289,7 @@ func (p *DNSProber) success(result chan *Event, target *DNSTarget, sentTime time
 		SentTime:    sentTime,
 		Rtt:         rtt,
 		Message:     "",
+		Details:     details,
 	}
 }
 

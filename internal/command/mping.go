@@ -104,7 +104,7 @@ mping dns://8.8.8.8/google.com`,
 			probeManager.Stop()
 
 			// Final results
-			metrics := metricsManager.SortBy(stats.Success, true)
+			metrics := metricsManager.SortByWithReader(stats.Success, true)
 			tableData := shared.NewTableData(metrics, stats.Success, true)
 			t := tableData.ToGoPrettyTable()
 			t.SetStyle(table.StyleLight)

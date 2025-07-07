@@ -282,7 +282,7 @@ func (a *TUIApp) handleRowSelection(row, col int) {
 }
 
 // showHostDetails displays detailed information for a selected host
-func (a *TUIApp) showHostDetails(metric stats.Metrics) {
+func (a *TUIApp) showHostDetails(metric stats.MetricsReader) {
 	detailText := shared.FormatHostDetail(metric)
 
 	// Create and show modal
@@ -299,8 +299,8 @@ func (a *TUIApp) showHostDetails(metric stats.Metrics) {
 }
 
 // getFilteredMetrics returns filtered metrics based on current state
-func (a *TUIApp) getFilteredMetrics() []stats.Metrics {
-	metrics := a.mm.SortBy(a.state.GetSortKey(), a.state.IsAscending())
+func (a *TUIApp) getFilteredMetrics() []stats.MetricsReader {
+	metrics := a.mm.SortByWithReader(a.state.GetSortKey(), a.state.IsAscending())
 	return shared.FilterMetrics(metrics, a.state.GetFilter())
 }
 

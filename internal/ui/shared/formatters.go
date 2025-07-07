@@ -27,7 +27,7 @@ func TimeFormater(t time.Time) string {
 }
 
 // FormatHostDetail generates detailed information for a host
-func FormatHostDetail(metric stats.Metrics) string {
+func FormatHostDetail(metric stats.MetricsReader) string {
 	return fmt.Sprintf(`Host Details: %s
 
 Total Probes: %d
@@ -41,17 +41,17 @@ Maximum RTT: %s
 Last Success: %s
 Last Failure: %s
 Last Error: %s`,
-		metric.Name,
-		metric.Total,
-		metric.Successful,
-		metric.Failed,
-		metric.Loss,
-		DurationFormater(metric.LastRTT),
-		DurationFormater(metric.AverageRTT),
-		DurationFormater(metric.MinimumRTT),
-		DurationFormater(metric.MaximumRTT),
-		TimeFormater(metric.LastSuccTime),
-		TimeFormater(metric.LastFailTime),
-		metric.LastFailDetail,
+		metric.GetName(),
+		metric.GetTotal(),
+		metric.GetSuccessful(),
+		metric.GetFailed(),
+		metric.GetLoss(),
+		DurationFormater(metric.GetLastRTT()),
+		DurationFormater(metric.GetAverageRTT()),
+		DurationFormater(metric.GetMinimumRTT()),
+		DurationFormater(metric.GetMaximumRTT()),
+		TimeFormater(metric.GetLastSuccTime()),
+		TimeFormater(metric.GetLastFailTime()),
+		metric.GetLastFailDetail(),
 	)
 }

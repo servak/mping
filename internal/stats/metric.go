@@ -18,6 +18,7 @@ type Metrics struct {
 	LastFailTime   time.Time
 	LastSuccTime   time.Time
 	LastFailDetail string
+	history        *TargetHistory // 履歴情報
 }
 
 func (m *Metrics) Success(rtt time.Duration, sentTime time.Time) {
@@ -63,4 +64,92 @@ func (m *Metrics) Reset() {
 	m.LastFailTime = time.Time{}
 	m.LastSuccTime = time.Time{}
 	m.LastFailDetail = ""
+	if m.history != nil {
+		m.history.Clear()
+	}
+}
+
+// MetricsReader インターフェースの実装
+
+func (m *Metrics) GetName() string {
+	return m.Name
+}
+
+func (m *Metrics) GetTotal() int {
+	return m.Total
+}
+
+func (m *Metrics) GetSuccessful() int {
+	return m.Successful
+}
+
+func (m *Metrics) GetFailed() int {
+	return m.Failed
+}
+
+func (m *Metrics) GetLoss() float64 {
+	return m.Loss
+}
+
+func (m *Metrics) GetLastRTT() time.Duration {
+	return m.LastRTT
+}
+
+func (m *Metrics) GetAverageRTT() time.Duration {
+	return m.AverageRTT
+}
+
+func (m *Metrics) GetMinimumRTT() time.Duration {
+	return m.MinimumRTT
+}
+
+func (m *Metrics) GetMaximumRTT() time.Duration {
+	return m.MaximumRTT
+}
+
+func (m *Metrics) GetLastSuccTime() time.Time {
+	return m.LastSuccTime
+}
+
+func (m *Metrics) GetLastFailTime() time.Time {
+	return m.LastFailTime
+}
+
+func (m *Metrics) GetLastFailDetail() string {
+	return m.LastFailDetail
+}
+
+func (m *Metrics) GetRecentHistory(n int) []HistoryEntry {
+	if m.history == nil {
+		return []HistoryEntry{}
+	}
+	return m.history.GetRecentEntries(n)
+}
+
+func (m *Metrics) GetHistorySince(since time.Time) []HistoryEntry {
+	if m.history == nil {
+		return []HistoryEntry{}
+	}
+	return m.history.GetEntriesSince(since)
+}
+
+func (m *Metrics) GetConsecutiveFailures() int {
+	if m.history == nil {
+		return 0
+	}
+	return m.history.GetConsecutiveFailures()
+}
+
+func (m *Metrics) GetConsecutiveSuccesses() int {
+	if m.history == nil {
+		return 0
+	}
+	return m.history.GetConsecutiveSuccesses()
+}
+
+func (m *Metrics) GetSuccessRateInPeriod(duration time.Duration) float64 {
+	if m.history == nil {
+		return 0.0
+	}
+	return m.history.GetSuccessRateInPeriod(duration)
 }

@@ -12,6 +12,7 @@ import (
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
+	
 )
 
 const (
@@ -187,12 +188,24 @@ func (p *ICMPProber) success(r chan *Event, runCnt int, addr string) {
 		table[addr] = true
 		elapse := time.Since(k.sentTime)
 		key, displayName := p.getTargetInfo(addr)
+		
+		// ICMP詳細情報を作成
+		details := &ProbeDetails{
+			ProbeType: string(p.version),
+			ICMP: &ICMPDetails{
+				Sequence: runCnt,
+				TTL:      0,                // TODO: IPヘッダーから取得
+				DataSize: len(p.body) + 8,  // ICMPヘッダー(8bytes) + データ
+			},
+		}
+		
 		r <- &Event{
 			Key:         key,
 			DisplayName: displayName,
 			Result:      SUCCESS,
 			SentTime:    k.sentTime,
 			Rtt:         elapse,
+			Details:     details,
 		}
 		return
 	}

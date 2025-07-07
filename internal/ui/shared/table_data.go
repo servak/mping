@@ -14,11 +14,11 @@ import (
 type TableData struct {
 	Headers []string
 	Rows    [][]string
-	Metrics []stats.Metrics // Keep reference for interactive row selection
+	Metrics []stats.MetricsReader // Keep reference for interactive row selection
 }
 
 // NewTableData creates TableData from metrics
-func NewTableData(metrics []stats.Metrics, sortKey stats.Key, ascending bool) *TableData {
+func NewTableData(metrics []stats.MetricsReader, sortKey stats.Key, ascending bool) *TableData {
 	// Generate headers with sort arrows
 	headers := []string{
 		headerWithArrow("Host", stats.Host, sortKey, ascending),
@@ -42,18 +42,18 @@ func NewTableData(metrics []stats.Metrics, sortKey stats.Key, ascending bool) *T
 
 	for i, m := range metrics {
 		rows[i] = []string{
-			m.Name,
-			fmt.Sprintf("%d", m.Total),
-			fmt.Sprintf("%d", m.Successful),
-			fmt.Sprintf("%d", m.Failed),
-			fmt.Sprintf("%5.1f%%", m.Loss),
-			df(m.LastRTT),
-			df(m.AverageRTT),
-			df(m.MinimumRTT),
-			df(m.MaximumRTT),
-			tf(m.LastSuccTime),
-			tf(m.LastFailTime),
-			m.LastFailDetail,
+			m.GetName(),
+			fmt.Sprintf("%d", m.GetTotal()),
+			fmt.Sprintf("%d", m.GetSuccessful()),
+			fmt.Sprintf("%d", m.GetFailed()),
+			fmt.Sprintf("%5.1f%%", m.GetLoss()),
+			df(m.GetLastRTT()),
+			df(m.GetAverageRTT()),
+			df(m.GetMinimumRTT()),
+			df(m.GetMaximumRTT()),
+			tf(m.GetLastSuccTime()),
+			tf(m.GetLastFailTime()),
+			m.GetLastFailDetail(),
 		}
 	}
 
@@ -149,9 +149,9 @@ func (td *TableData) ToTviewTable() *tview.Table {
 }
 
 // GetMetricAtRow returns the metric for a given row index
-func (td *TableData) GetMetricAtRow(row int) (stats.Metrics, bool) {
+func (td *TableData) GetMetricAtRow(row int) (stats.MetricsReader, bool) {
 	if row < 0 || row >= len(td.Metrics) {
-		return stats.Metrics{}, false
+		return nil, false
 	}
 	return td.Metrics[row], true
 }

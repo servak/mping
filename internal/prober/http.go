@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	
 )
 
 const (
@@ -181,12 +182,43 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 	} else if p.config.ExpectBody != "" && p.config.ExpectBody != strings.TrimRight(string(body), "\n") {
 		p.failed(r, target, now, errors.New("invalid body"))
 	} else {
+		// HTTP詳細情報を作成
+		headers := make(map[string]string)
+		for key, values := range resp.Header {
+			if len(values) > 0 {
+				headers[key] = values[0] // 最初の値のみを取得
+			}
+		}
+		
+		var redirects []string
+		if resp.Request.URL.String() != target {
+			redirects = append(redirects, resp.Request.URL.String())
+		}
+		
+		var probeType string
+		if strings.HasPrefix(target, "https://") {
+			probeType = "https"
+		} else {
+			probeType = "http"
+		}
+		
+		details := &ProbeDetails{
+			ProbeType: probeType,
+			HTTP: &HTTPDetails{
+				StatusCode:   resp.StatusCode,
+				ResponseSize: int64(len(body)),
+				Headers:      headers,
+				Redirects:    redirects,
+			},
+		}
+		
 		r <- &Event{
 			Key:         target,
 			DisplayName: target,
 			Result:      SUCCESS,
 			SentTime:    now,
 			Rtt:         time.Since(now),
+			Details:     details,
 		}
 	}
 }

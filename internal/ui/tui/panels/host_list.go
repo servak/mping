@@ -72,8 +72,8 @@ func (h *HostListPanel) Update() {
 }
 
 // getFilteredMetrics returns filtered metrics based on current state
-func (h *HostListPanel) getFilteredMetrics() []stats.Metrics {
-	metrics := h.mm.SortBy(h.renderState.GetSortKey(), h.renderState.IsAscending())
+func (h *HostListPanel) getFilteredMetrics() []stats.MetricsReader {
+	metrics := h.mm.SortByWithReader(h.renderState.GetSortKey(), h.renderState.IsAscending())
 	return shared.FilterMetrics(metrics, h.renderState.GetFilter())
 }
 
@@ -91,10 +91,10 @@ func (h *HostListPanel) GetView() *tview.Table {
 }
 
 // GetSelectedMetric returns the currently selected metric
-func (h *HostListPanel) GetSelectedMetric(tableData *shared.TableData) (stats.Metrics, bool) {
+func (h *HostListPanel) GetSelectedMetric(tableData *shared.TableData) (stats.MetricsReader, bool) {
 	row, _ := h.table.GetSelection()
 	if row <= 0 {
-		return stats.Metrics{}, false
+		return nil, false
 	}
 	return tableData.GetMetricAtRow(row - 1) // Subtract 1 for header
 }
@@ -102,7 +102,7 @@ func (h *HostListPanel) GetSelectedMetric(tableData *shared.TableData) (stats.Me
 // GetSelectedHost returns the name of the currently selected host
 func (h *HostListPanel) GetSelectedHost(tableData *shared.TableData) string {
 	if metric, ok := h.GetSelectedMetric(tableData); ok {
-		return metric.Name
+		return metric.GetName()
 	}
 	return ""
 }
@@ -225,7 +225,7 @@ func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 // restoreSelection finds and selects the row containing the specified host
 func (h *HostListPanel) restoreSelection(tableData *shared.TableData, selectedHost string) {
 	for i, metric := range tableData.Metrics {
-		if metric.Name == selectedHost {
+		if metric.GetName() == selectedHost {
 			h.table.Select(i+1, 0) // +1 because row 0 is header
 			return
 		}

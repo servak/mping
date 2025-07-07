@@ -7,15 +7,15 @@ import (
 )
 
 // FilterMetrics filters metrics based on filter text
-func FilterMetrics(metrics []stats.Metrics, filterText string) []stats.Metrics {
+func FilterMetrics(metrics []stats.MetricsReader, filterText string) []stats.MetricsReader {
 	if filterText == "" {
 		return metrics
 	}
 	
-	filtered := []stats.Metrics{}
+	filtered := []stats.MetricsReader{}
 	filterLower := strings.ToLower(filterText)
 	for _, m := range metrics {
-		if strings.Contains(strings.ToLower(m.Name), filterLower) {
+		if strings.Contains(strings.ToLower(m.GetName()), filterLower) {
 			filtered = append(filtered, m)
 		}
 	}

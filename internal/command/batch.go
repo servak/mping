@@ -99,7 +99,7 @@ mping batch dns://8.8.8.8/google.com`,
 			// Stop probing
 			probeManager.Stop()
 			cmd.Print("\r")
-			metrics := metricsManager.SortBy(stats.Success, true)
+			metrics := metricsManager.SortByWithReader(stats.Success, true)
 			tableData := shared.NewTableData(metrics, stats.Success, true)
 			t := tableData.ToGoPrettyTable()
 			t.SetStyle(table.StyleLight)
