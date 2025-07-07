@@ -30,7 +30,7 @@ type LayoutManager struct {
 	header     *panels.HeaderPanel
 	hostList   *panels.HostListPanel
 	footer     *panels.FooterPanel
-	hostDetail *panels.HostDetailPanel
+	_ *panels.HostDetailPanel
 
 	// Filter input
 	filterInput *tview.InputField

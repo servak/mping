@@ -155,7 +155,7 @@ func (mm *MetricsManager) SortBy(k Key, ascending bool) []Metrics {
 		default:
 			return false
 		}
-		
+
 		// ascending=falseの場合は結果を反転
 		if ascending {
 			return result
@@ -164,16 +164,6 @@ func (mm *MetricsManager) SortBy(k Key, ascending bool) []Metrics {
 		}
 	})
 	return res
-}
-
-func rejectLess(i, j time.Duration) bool {
-	if i == 0 {
-		return false
-	}
-	if j == 0 {
-		return true
-	}
-	return i < j
 }
 
 // rejectLessAscending は昇順ソート用のRTT比較関数
