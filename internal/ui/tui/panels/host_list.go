@@ -83,11 +83,15 @@ func (h *HostListPanel) updateSelectedHost() {
 	metrics := h.getFilteredMetrics()
 	tableData := shared.NewTableData(metrics, h.renderState.GetSortKey(), h.renderState.IsAscending())
 	selectedHost := h.GetSelectedHost(tableData)
-	h.selectionState.SetSelectedHost(selectedHost)
 	
-	// Call the callback to update detail panel with metrics object
-	if metric, ok := h.GetSelectedMetric(tableData); ok && h.onSelectionChange != nil {
-		h.onSelectionChange(metric)
+	// Only update if the selection actually changed to avoid loops
+	if h.selectionState.GetSelectedHost() != selectedHost {
+		h.selectionState.SetSelectedHost(selectedHost)
+		
+		// Call the callback to update detail panel with metrics object
+		if metric, ok := h.GetSelectedMetric(tableData); ok && h.onSelectionChange != nil {
+			h.onSelectionChange(metric)
+		}
 	}
 }
 

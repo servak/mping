@@ -254,7 +254,8 @@ func (a *TUIApp) handleFilterDone(key tcell.Key) {
 		filterText := a.layout.GetFilterText()
 		a.state.SetFilter(filterText)
 		a.layout.HideFilterInput()
-		a.Update()
+		// Don't call a.Update() here - it causes infinite loop
+		// The regular update cycle will handle the refresh
 		a.layout.RestoreFocus()
 	case tcell.KeyEscape:
 		// Cancel filter input

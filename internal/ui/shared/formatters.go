@@ -123,8 +123,24 @@ func formatProbeDetails(details *prober.ProbeDetails) string {
 		return "http probe"
 	case "dns":
 		if details.DNS != nil {
-			return fmt.Sprintf("code=%d answers=%d", 
-				details.DNS.ResponseCode, details.DNS.AnswerCount)
+			proto := ""
+			if details.DNS.UseTCP {
+				proto = "tcp "
+			}
+			
+			// Show just the essential info: protocol, response code, answer count, and first answer
+			baseInfo := fmt.Sprintf("%scode=%d ans=%d", 
+				proto, details.DNS.ResponseCode, details.DNS.AnswerCount)
+			
+			// Add first answer if available
+			if len(details.DNS.Answers) > 0 {
+				firstAnswer := extractDNSAnswer(details.DNS.Answers[0])
+				if firstAnswer != "" {
+					baseInfo += " " + firstAnswer
+				}
+			}
+			
+			return baseInfo
 		}
 		return "dns query"
 	case "ntp":
@@ -139,4 +155,30 @@ func formatProbeDetails(details *prober.ProbeDetails) string {
 	}
 	
 	return ""
+}
+
+// extractDNSAnswer extracts the answer value from DNS record string
+// Example: "google.com. 300 IN A 142.250.196.14" -> "142.250.196.14"
+func extractDNSAnswer(record string) string {
+	if record == "" {
+		return ""
+	}
+	
+	// Split by whitespace and get the last part (the answer value)
+	parts := strings.Fields(record)
+	if len(parts) == 0 {
+		return ""
+	}
+	
+	// The last part is usually the answer value
+	answer := parts[len(parts)-1]
+	
+	// Truncate very long answers (like long TXT records)
+	// TODO: Make this configurable in the future
+	maxAnswerLength := 35
+	if len(answer) > maxAnswerLength {
+		answer = answer[:maxAnswerLength-3] + "..."
+	}
+	
+	return answer
 }
