@@ -5,6 +5,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/rivo/tview"
 
 	"github.com/servak/mping/internal/stats"
@@ -66,6 +67,7 @@ func NewTableData(metrics []stats.MetricsReader, sortKey stats.Key, ascending bo
 
 // ToGoPrettyTable converts to go-pretty table format for final output only
 func (td *TableData) ToGoPrettyTable() table.Writer {
+	text.OverrideRuneWidthEastAsianWidth(false)
 	t := table.NewWriter()
 
 	// Convert headers to interface{} slice
@@ -92,11 +94,11 @@ func (td *TableData) ToTviewTable() *tview.Table {
 	t := tview.NewTable().
 		SetFixed(1, 0).
 		SetSelectable(true, false).
-		SetBorders(false).  // Disable all borders
-		SetSeparator(' ').  // Use space separator instead of lines
+		SetBorders(false). // Disable all borders
+		SetSeparator(' '). // Use space separator instead of lines
 		SetSelectedStyle(tcell.StyleDefault.
 			Background(tcell.ColorDarkBlue).
-			Foreground(tcell.ColorWhite))  // Pattern 1: DarkBlue + White - k9s style
+			Foreground(tcell.ColorWhite)) // Pattern 1: DarkBlue + White - k9s style
 
 	// Define alignment for each column
 	alignments := []int{
@@ -120,7 +122,7 @@ func (td *TableData) ToTviewTable() *tview.Table {
 		if col < len(alignments) {
 			alignment = alignments[col]
 		}
-		
+
 		t.SetCell(0, col, &tview.TableCell{
 			Text:          "  " + header + "  ",
 			Color:         tcell.ColorYellow,
@@ -136,7 +138,7 @@ func (td *TableData) ToTviewTable() *tview.Table {
 			if col < len(alignments) {
 				alignment = alignments[col]
 			}
-			
+
 			t.SetCell(row+1, col, &tview.TableCell{
 				Text:  "  " + cellData + "  ",
 				Color: tcell.ColorWhite,
