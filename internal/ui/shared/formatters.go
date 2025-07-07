@@ -30,21 +30,40 @@ func TimeFormater(t time.Time) string {
 
 // FormatHostDetail generates detailed information for a host
 func FormatHostDetail(metric stats.MetricsReader) string {
-	basicInfo := fmt.Sprintf(`Total Probes: %d
-Successful: %d
-Failed: %d
-Loss Rate: %.1f%%
-Last RTT: %s
-Average RTT: %s
-Minimum RTT: %s
-Maximum RTT: %s
-Last Success: %s
-Last Failure: %s
-Last Error: %s`,
+	// Color-coded basic statistics
+	lossRate := metric.GetLoss()
+	lossColor := "green"
+	if lossRate > 50 {
+		lossColor = "red"
+	} else if lossRate > 10 {
+		lossColor = "yellow"
+	}
+	
+	successColor := "green"
+	if metric.GetSuccessful() == 0 {
+		successColor = "red"
+	}
+	
+	failColor := "white"
+	if metric.GetFailed() > 0 {
+		failColor = "red"
+	}
+	
+	basicInfo := fmt.Sprintf(`[cyan]Total Probes:[white] %d
+[%s]Successful:[white] %d
+[%s]Failed:[white] %d
+[cyan]Loss Rate:[white] [%s]%.1f%%[white]
+[cyan]Last RTT:[white] %s
+[cyan]Average RTT:[white] %s
+[cyan]Minimum RTT:[white] %s
+[cyan]Maximum RTT:[white] %s
+[cyan]Last Success:[white] %s
+[cyan]Last Failure:[white] %s
+[cyan]Last Error:[white] %s`,
 		metric.GetTotal(),
-		metric.GetSuccessful(),
-		metric.GetFailed(),
-		metric.GetLoss(),
+		successColor, metric.GetSuccessful(),
+		failColor, metric.GetFailed(),
+		lossColor, lossRate,
 		DurationFormater(metric.GetLastRTT()),
 		DurationFormater(metric.GetAverageRTT()),
 		DurationFormater(metric.GetMinimumRTT()),
@@ -71,28 +90,30 @@ func FormatHistory(metric stats.MetricsReader) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Recent History (last 10 entries):\n")
-	sb.WriteString("Time     Status RTT     Details\n")
-	sb.WriteString("-------- ------ ------- --------\n")
+	sb.WriteString("\n[yellow]Recent History (last 10 entries):[white]\n")
+	sb.WriteString("[cyan]Time     Status RTT     Details[white]\n")
+	sb.WriteString("[gray]-------- ------ ------- --------[white]\n")
 
 	for _, entry := range history {
+		statusColor := "green"
 		status := "OK"
 		details := ""
 		
 		if !entry.Success {
 			status = "FAIL"
+			statusColor = "red"
 			// Show error message for failed entries
 			if entry.Error != "" {
-				details = entry.Error
+				details = fmt.Sprintf("[red]%s[white]", entry.Error)
 			}
 		} else {
 			// Show probe-specific details for successful entries
 			details = formatProbeDetails(entry.Details)
 		}
 
-		sb.WriteString(fmt.Sprintf("%-8s %-6s %-7s %s\n",
+		sb.WriteString(fmt.Sprintf("[gray]%-8s[white] [%s]%-6s[white] %-7s %s\n",
 			entry.Timestamp.Format("15:04:05"),
-			status,
+			statusColor, status,
 			DurationFormater(entry.RTT),
 			details,
 		))
