@@ -12,7 +12,9 @@ import (
 	"github.com/servak/mping/internal/config"
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
-	"github.com/servak/mping/internal/ui"
+	"github.com/servak/mping/internal/ui/output"
+	"github.com/servak/mping/internal/ui/shared"
+	"github.com/servak/mping/internal/ui/tui"
 )
 
 func NewPingCmd() *cobra.Command {
@@ -103,7 +105,7 @@ mping dns://8.8.8.8/google.com`,
 			probeManager.Stop()
 
 			// Final results
-			t := ui.TableRender(metricsManager, stats.Success)
+			t := output.TableRender(metricsManager, stats.Success)
 			t.SetStyle(table.StyleLight)
 			cmd.Println(t.Render())
 			return nil
@@ -121,8 +123,8 @@ mping dns://8.8.8.8/google.com`,
 	return cmd
 }
 
-func startTUI(manager *stats.MetricsManager, cfg *ui.Config, interval, timeout time.Duration) {
-	app := ui.NewApp(manager, cfg, interval, timeout)
+func startTUI(manager *stats.MetricsManager, cfg *shared.Config, interval, timeout time.Duration) {
+	app := tui.NewTUIApp(manager, cfg, interval, timeout)
 
 	refreshTime := time.Millisecond * 250 // Minimum refresh time that can be set
 	if refreshTime < (interval / 2) {

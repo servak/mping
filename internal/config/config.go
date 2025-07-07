@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/servak/mping/internal/prober"
-	"github.com/servak/mping/internal/ui"
+	"github.com/servak/mping/internal/ui/shared"
 )
 
 const DefaultICMPBody = "mping"
@@ -49,7 +49,7 @@ func (ve *ValidationErrors) HasErrors() bool {
 type Config struct {
 	Prober  map[string]*prober.ProberConfig `yaml:"prober"`
 	Default string                          `yaml:"default"`
-	UI      *ui.Config                      `yaml:"ui"`
+	UI      *shared.Config                  `yaml:"ui"`
 }
 
 func (c *Config) SetTitle(t string) {
@@ -149,7 +149,7 @@ func DefaultConfig() *Config {
 				},
 			},
 		},
-		UI: ui.DefaultConfig(),
+		UI: shared.DefaultConfig(),
 	}
 }
 

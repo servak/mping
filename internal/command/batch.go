@@ -12,7 +12,7 @@ import (
 	"github.com/servak/mping/internal/config"
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
-	"github.com/servak/mping/internal/ui"
+	"github.com/servak/mping/internal/ui/output"
 )
 
 func NewPingBatchCmd() *cobra.Command {
@@ -99,7 +99,7 @@ mping batch dns://8.8.8.8/google.com`,
 			// Stop probing
 			probeManager.Stop()
 			cmd.Print("\r")
-			t := ui.TableRender(metricsManager, stats.Success)
+			t := output.TableRender(metricsManager, stats.Success)
 			t.SetStyle(table.StyleLight)
 			cmd.Println(t.Render())
 			return nil
