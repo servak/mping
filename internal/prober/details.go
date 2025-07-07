@@ -1,15 +1,15 @@
 package prober
 
-// プローブ詳細情報（TargetIPを削除、TCPDetailsも削除）
+// Probe detail information (TargetIP and TCPDetails removed)
 type ProbeDetails struct {
 	ProbeType string `json:"probe_type"`
 
-	// 型別詳細（どれか一つのみ使用）
+	// Type-specific details (only one should be used)
 	ICMP *ICMPDetails `json:"icmp,omitempty"`
 	HTTP *HTTPDetails `json:"http,omitempty"`
 	DNS  *DNSDetails  `json:"dns,omitempty"`
 	NTP  *NTPDetails  `json:"ntp,omitempty"`
-	// TCP は詳細情報なし（接続可否のみのため）
+	// TCP has no detailed information (only connection availability)
 }
 
 type ICMPDetails struct {
@@ -40,6 +40,6 @@ type NTPDetails struct {
 	Server    string `json:"server"`
 	Port      int    `json:"port"`
 	Stratum   int    `json:"stratum"`
-	Offset    int64  `json:"offset_microseconds"` // マイクロ秒単位
+	Offset    int64  `json:"offset_microseconds"` // In microseconds
 	Precision int    `json:"precision"`
 }

@@ -262,7 +262,7 @@ func (p *DNSProber) sent(result chan *Event, target *DNSTarget, sentTime time.Ti
 }
 
 func (p *DNSProber) success(result chan *Event, target *DNSTarget, sentTime time.Time, rtt time.Duration, resp *dns.Msg) {
-	// DNS詳細情報を作成
+	// Create DNS detail information
 	var answers []string
 	for _, ans := range resp.Answer {
 		answers = append(answers, ans.String())

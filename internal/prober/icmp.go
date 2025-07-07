@@ -12,7 +12,6 @@ import (
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
-	
 )
 
 const (
@@ -172,7 +171,7 @@ func (p *ICMPProber) sent(r chan *Event, addr string) {
 	}
 }
 
-func (p *ICMPProber) success(r chan *Event, runCnt int, addr string) {
+func (p *ICMPProber) success(r chan *Event, runCnt int, addr string, payload icmp.Message) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for k, table := range p.tables {
@@ -188,17 +187,17 @@ func (p *ICMPProber) success(r chan *Event, runCnt int, addr string) {
 		table[addr] = true
 		elapse := time.Since(k.sentTime)
 		key, displayName := p.getTargetInfo(addr)
-		
-		// ICMP詳細情報を作成
+
+		// Create ICMP detail information
 		details := &ProbeDetails{
 			ProbeType: string(p.version),
 			ICMP: &ICMPDetails{
 				Sequence: runCnt,
-				TTL:      0,                // TODO: IPヘッダーから取得
-				DataSize: len(p.body) + 8,  // ICMPヘッダー(8bytes) + データ
+				TTL:      0,               // TODO: Extract from IP header
+				DataSize: len(p.body) + 8, // ICMP header (8 bytes) + data
 			},
 		}
-		
+
 		r <- &Event{
 			Key:         key,
 			DisplayName: displayName,
@@ -313,7 +312,7 @@ func (p *ICMPProber) probe(r chan *Event) {
 func (p *ICMPProber) recvPkts(r chan *Event) {
 	pktbuf := make([]byte, maxPacketSize)
 	for {
-		n, ip, err := p.c.ReadFrom(pktbuf)
+		n, addr, err := p.c.ReadFrom(pktbuf)
 		if err != nil {
 			fmt.Printf("Error reading ICMP packet: %s\n", err)
 			os.Exit(1)
@@ -336,7 +335,7 @@ func (p *ICMPProber) recvPkts(r chan *Event) {
 		if rm.Code == 0 {
 			switch rm.Type {
 			case ipv4.ICMPTypeEchoReply, ipv6.ICMPTypeEchoReply:
-				p.success(r, int(seq), ip.String())
+				p.success(r, int(seq), addr.String(), *rm)
 			}
 		}
 	}

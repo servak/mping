@@ -10,7 +10,7 @@ import (
 func TestTargetHistory(t *testing.T) {
 	th := NewTargetHistory(3)
 
-	// 初期状態のテスト
+	// Test initial state
 	if th.GetConsecutiveFailures() != 0 {
 		t.Errorf("Expected 0 consecutive failures, got %d", th.GetConsecutiveFailures())
 	}
@@ -20,7 +20,7 @@ func TestTargetHistory(t *testing.T) {
 
 	now := time.Now()
 
-	// 成功エントリを追加
+	// Add success entry
 	th.AddEntry(HistoryEntry{
 		Timestamp: now,
 		RTT:       100 * time.Millisecond,
@@ -35,12 +35,12 @@ func TestTargetHistory(t *testing.T) {
 		},
 	})
 
-	// 連続成功数をテスト
+	// Test consecutive successes
 	if th.GetConsecutiveSuccesses() != 1 {
 		t.Errorf("Expected 1 consecutive success, got %d", th.GetConsecutiveSuccesses())
 	}
 
-	// 失敗エントリを追加
+	// Add failure entry
 	th.AddEntry(HistoryEntry{
 		Timestamp: now.Add(time.Second),
 		RTT:       0,
@@ -48,7 +48,7 @@ func TestTargetHistory(t *testing.T) {
 		Error:     "timeout",
 	})
 
-	// 連続失敗数をテスト
+	// Test consecutive failures
 	if th.GetConsecutiveFailures() != 1 {
 		t.Errorf("Expected 1 consecutive failure, got %d", th.GetConsecutiveFailures())
 	}
@@ -56,7 +56,7 @@ func TestTargetHistory(t *testing.T) {
 		t.Errorf("Expected 0 consecutive successes, got %d", th.GetConsecutiveSuccesses())
 	}
 
-	// 最新エントリを取得
+	// Get recent entries
 	recent := th.GetRecentEntries(2)
 	if len(recent) != 2 {
 		t.Errorf("Expected 2 recent entries, got %d", len(recent))
@@ -68,7 +68,7 @@ func TestTargetHistory(t *testing.T) {
 		t.Errorf("Expected second recent entry to be success, got failure")
 	}
 
-	// リングバッファの動作をテスト
+	// Test ring buffer behavior
 	th.AddEntry(HistoryEntry{
 		Timestamp: now.Add(2 * time.Second),
 		RTT:       200 * time.Millisecond,
@@ -80,7 +80,7 @@ func TestTargetHistory(t *testing.T) {
 		Success:   true,
 	})
 
-	// 最大サイズを超えたエントリを取得
+	// Get entries exceeding maximum size
 	allRecent := th.GetRecentEntries(5)
 	if len(allRecent) != 3 {
 		t.Errorf("Expected 3 recent entries (max size), got %d", len(allRecent))
@@ -91,7 +91,7 @@ func TestMetricsWithHistory(t *testing.T) {
 	mm := NewMetricsManager()
 	host := "example.com"
 
-	// 成功を記録
+	// Record success
 	details := &prober.ProbeDetails{
 		ProbeType: "icmp",
 		ICMP: &prober.ICMPDetails{
@@ -126,10 +126,10 @@ func TestMetricsWithHistory(t *testing.T) {
 		t.Errorf("Expected probe type to be 'icmp', got %s", history[0].Details.ProbeType)
 	}
 
-	// 失敗を記録
+	// Record failure
 	mm.Failed(host, time.Now(), "timeout")
 
-	// 連続失敗数をテスト
+	// Test consecutive failures
 	if metrics.GetConsecutiveFailures() != 1 {
 		t.Errorf("Expected 1 consecutive failure, got %d", metrics.GetConsecutiveFailures())
 	}
@@ -139,8 +139,8 @@ func TestSuccessRateInPeriod(t *testing.T) {
 	th := NewTargetHistory(10)
 	now := time.Now()
 
-	// 現在時刻に近い時刻でテストデータを作成
-	// 5つの成功を追加
+	// Create test data with timestamps close to current time
+	// Add 5 successes
 	for i := 0; i < 5; i++ {
 		th.AddEntry(HistoryEntry{
 			Timestamp: now.Add(time.Duration(-i-10) * time.Second),
@@ -149,7 +149,7 @@ func TestSuccessRateInPeriod(t *testing.T) {
 		})
 	}
 	
-	// 5つの失敗を追加
+	// Add 5 failures
 	for i := 0; i < 5; i++ {
 		th.AddEntry(HistoryEntry{
 			Timestamp: now.Add(time.Duration(-i-1) * time.Second),
@@ -159,13 +159,13 @@ func TestSuccessRateInPeriod(t *testing.T) {
 		})
 	}
 
-	// 全期間の成功率（50%）
+	// Overall success rate (50%)
 	rate := th.GetSuccessRateInPeriod(time.Hour)
 	if rate != 50.0 {
 		t.Errorf("Expected 50%% success rate, got %f%%", rate)
 	}
 
-	// 直近6秒間の成功率（最新の失敗エントリのみ）
+	// Success rate for recent 6 seconds (only latest failure entries)
 	recentRate := th.GetSuccessRateInPeriod(6 * time.Second)
 	if recentRate != 0.0 {
 		t.Errorf("Expected 0%% success rate for recent period, got %f%%", recentRate)

@@ -9,21 +9,21 @@ import (
 )
 
 const (
-	DefaultHistorySize = 100 // デフォルトの履歴保持数
+	DefaultHistorySize = 100 // Default number of history entries to keep
 )
 
 type MetricsManager struct {
 	metrics     map[string]*Metrics
-	historySize int // 履歴保持数
+	historySize int // Number of history entries to keep
 	mu          sync.Mutex
 }
 
-// 新しいMetricsManagerを生成
+// Create a new MetricsManager
 func NewMetricsManager() *MetricsManager {
 	return NewMetricsManagerWithHistorySize(DefaultHistorySize)
 }
 
-// 履歴サイズを指定してMetricsManagerを生成
+// Create MetricsManager with specified history size
 func NewMetricsManagerWithHistorySize(historySize int) *MetricsManager {
 	return &MetricsManager{
 		metrics:     make(map[string]*Metrics),
@@ -68,12 +68,12 @@ func (mm *MetricsManager) ResetAllMetrics() {
 	}
 }
 
-// ホストに対する成功を登録
+// Register success for host
 func (mm *MetricsManager) Success(host string, rtt time.Duration, sentTime time.Time) {
 	mm.SuccessWithDetails(host, rtt, sentTime, nil)
 }
 
-// ホストに対する成功を詳細情報付きで登録
+// Register success for host with detailed information
 func (mm *MetricsManager) SuccessWithDetails(host string, rtt time.Duration, sentTime time.Time, details *prober.ProbeDetails) {
 	m := mm.GetMetrics(host)
 
@@ -90,7 +90,7 @@ func (mm *MetricsManager) SuccessWithDetails(host string, rtt time.Duration, sen
 	mm.mu.Unlock()
 }
 
-// ホストに対する失敗を登録
+// Register failure for host
 func (mm *MetricsManager) Failed(host string, sentTime time.Time, msg string) {
 	m := mm.GetMetrics(host)
 
@@ -199,7 +199,7 @@ func (mm *MetricsManager) SortBy(k Key, ascending bool) []Metrics {
 	return res
 }
 
-// SortByWithReader は MetricsReader インターフェースを使用するバージョン
+// SortByWithReader is a version that uses the MetricsReader interface
 func (mm *MetricsManager) SortByWithReader(k Key, ascending bool) []MetricsReader {
 	mm.mu.Lock()
 	var res []MetricsReader
@@ -253,7 +253,7 @@ func (mm *MetricsManager) SortByWithReader(k Key, ascending bool) []MetricsReade
 	return res
 }
 
-// GetAllTargets は全ターゲットのリストを取得
+// GetAllTargets retrieves a list of all targets
 func (mm *MetricsManager) GetAllTargets() []string {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
@@ -265,7 +265,7 @@ func (mm *MetricsManager) GetAllTargets() []string {
 	return targets
 }
 
-// GetTargetHistory は指定ターゲットの履歴を取得
+// GetTargetHistory retrieves the history of the specified target
 func (mm *MetricsManager) GetTargetHistory(target string, n int) []HistoryEntry {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
@@ -276,7 +276,7 @@ func (mm *MetricsManager) GetTargetHistory(target string, n int) []HistoryEntry 
 	return []HistoryEntry{}
 }
 
-// GetAllTargetsRecentHistory は全ターゲットの最新履歴を取得
+// GetAllTargetsRecentHistory retrieves the recent history of all targets
 func (mm *MetricsManager) GetAllTargetsRecentHistory(n int) map[string][]HistoryEntry {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
@@ -290,19 +290,19 @@ func (mm *MetricsManager) GetAllTargetsRecentHistory(n int) map[string][]History
 	return result
 }
 
-// GetMetricsAsReader は MetricsReader インターフェースとして取得
+// GetMetricsAsReader retrieves as MetricsReader interface
 func (mm *MetricsManager) GetMetricsAsReader(target string) MetricsReader {
 	return mm.GetMetrics(target)
 }
 
-// rejectLessAscending は昇順ソート用のRTT比較関数
-// 0値（未測定）は常に後ろに配置される
+// rejectLessAscending is RTT comparison function for ascending sort
+// Zero values (unmeasured) are always placed at the end
 func rejectLessAscending(i, j time.Duration) bool {
 	if i == 0 {
-		return false  // i が 0 なら j を先に
+		return false  // If i is 0, put j first
 	}
 	if j == 0 {
-		return true   // j が 0 なら i を先に
+		return true   // If j is 0, put i first
 	}
-	return i < j      // 両方とも 0 でないなら小さい方を先に
+	return i < j      // If both are non-zero, put the smaller one first
 }

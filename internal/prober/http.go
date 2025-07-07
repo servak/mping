@@ -182,11 +182,11 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 	} else if p.config.ExpectBody != "" && p.config.ExpectBody != strings.TrimRight(string(body), "\n") {
 		p.failed(r, target, now, errors.New("invalid body"))
 	} else {
-		// HTTP詳細情報を作成
+		// Create HTTP detail information
 		headers := make(map[string]string)
 		for key, values := range resp.Header {
 			if len(values) > 0 {
-				headers[key] = values[0] // 最初の値のみを取得
+				headers[key] = values[0] // Get only the first value
 			}
 		}
 		

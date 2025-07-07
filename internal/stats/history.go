@@ -6,7 +6,7 @@ import (
 	"github.com/servak/mping/internal/prober"
 )
 
-// 履歴エントリ
+// History entry
 type HistoryEntry struct {
 	Timestamp time.Time     `json:"timestamp"`
 	RTT       time.Duration `json:"rtt"`
@@ -15,7 +15,7 @@ type HistoryEntry struct {
 	Details   *prober.ProbeDetails `json:"details,omitempty"`
 }
 
-// 各ターゲットの履歴を管理する構造体（リングバッファ）
+// Structure to manage history for each target (ring buffer)
 type TargetHistory struct {
 	entries []HistoryEntry
 	size    int // リングバッファサイズ
@@ -23,7 +23,7 @@ type TargetHistory struct {
 	count   int // 実際のエントリ数
 }
 
-// NewTargetHistory は新しいTargetHistoryを作成
+// NewTargetHistory creates a new TargetHistory
 func NewTargetHistory(size int) *TargetHistory {
 	return &TargetHistory{
 		entries: make([]HistoryEntry, size),
@@ -33,7 +33,7 @@ func NewTargetHistory(size int) *TargetHistory {
 	}
 }
 
-// AddEntry は新しい履歴エントリを追加
+// AddEntry adds a new history entry
 func (th *TargetHistory) AddEntry(entry HistoryEntry) {
 	th.entries[th.index] = entry
 	th.index = (th.index + 1) % th.size
@@ -42,7 +42,7 @@ func (th *TargetHistory) AddEntry(entry HistoryEntry) {
 	}
 }
 
-// GetRecentEntries は最新のn件のエントリを取得（新しい順）
+// GetRecentEntries retrieves the latest n entries (newest first)
 func (th *TargetHistory) GetRecentEntries(n int) []HistoryEntry {
 	if n <= 0 || th.count == 0 {
 		return []HistoryEntry{}
@@ -54,7 +54,7 @@ func (th *TargetHistory) GetRecentEntries(n int) []HistoryEntry {
 
 	result := make([]HistoryEntry, n)
 	for i := 0; i < n; i++ {
-		// 最新から順に取得
+		// Retrieve from newest to oldest
 		pos := (th.index - 1 - i + th.size) % th.size
 		result[i] = th.entries[pos]
 	}
@@ -62,7 +62,7 @@ func (th *TargetHistory) GetRecentEntries(n int) []HistoryEntry {
 	return result
 }
 
-// GetEntriesSince は指定時刻以降のエントリを取得
+// GetEntriesSince retrieves entries since the specified time
 func (th *TargetHistory) GetEntriesSince(since time.Time) []HistoryEntry {
 	if th.count == 0 {
 		return []HistoryEntry{}
@@ -75,14 +75,14 @@ func (th *TargetHistory) GetEntriesSince(since time.Time) []HistoryEntry {
 		if entry.Timestamp.After(since) || entry.Timestamp.Equal(since) {
 			result = append(result, entry)
 		} else {
-			break // 古いエントリに到達したので終了
+			break // Reached older entries, so stop
 		}
 	}
 
 	return result
 }
 
-// GetConsecutiveFailures は連続失敗回数を取得
+// GetConsecutiveFailures retrieves the number of consecutive failures
 func (th *TargetHistory) GetConsecutiveFailures() int {
 	if th.count == 0 {
 		return 0
@@ -102,7 +102,7 @@ func (th *TargetHistory) GetConsecutiveFailures() int {
 	return count
 }
 
-// GetConsecutiveSuccesses は連続成功回数を取得
+// GetConsecutiveSuccesses retrieves the number of consecutive successes
 func (th *TargetHistory) GetConsecutiveSuccesses() int {
 	if th.count == 0 {
 		return 0
@@ -122,7 +122,7 @@ func (th *TargetHistory) GetConsecutiveSuccesses() int {
 	return count
 }
 
-// GetSuccessRateInPeriod は指定期間内の成功率を取得
+// GetSuccessRateInPeriod retrieves the success rate within the specified period
 func (th *TargetHistory) GetSuccessRateInPeriod(duration time.Duration) float64 {
 	if th.count == 0 {
 		return 0.0
@@ -145,7 +145,7 @@ func (th *TargetHistory) GetSuccessRateInPeriod(duration time.Duration) float64 
 	return float64(successCount) / float64(len(entries)) * 100.0
 }
 
-// Clear は履歴をクリア
+// Clear clears the history
 func (th *TargetHistory) Clear() {
 	th.index = 0
 	th.count = 0

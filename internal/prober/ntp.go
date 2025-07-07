@@ -251,10 +251,10 @@ func (p *NTPProber) sent(result chan *Event, serverAddr, displayName string, sen
 }
 
 func (p *NTPProber) success(result chan *Event, serverAddr, displayName string, sentTime time.Time, rtt time.Duration, resp *ntpPacket, offset time.Duration) {
-	// NTP詳細情報を作成
-	// ポートを抽出（serverAddrは "host:port" 形式）
+	// Create NTP detail information
+	// Extract port (serverAddr is in "host:port" format)
 	_, portStr, _ := net.SplitHostPort(serverAddr)
-	port := 123 // デフォルトNTPポート
+	port := 123 // Default NTP port
 	if portStr != "" {
 		if p, err := net.LookupPort("udp", portStr); err == nil {
 			port = p

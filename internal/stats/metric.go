@@ -69,7 +69,7 @@ func (m *Metrics) Reset() {
 	}
 }
 
-// MetricsReader インターフェースの実装
+// Implementation of MetricsReader interface
 
 func (m *Metrics) GetName() string {
 	return m.Name
