@@ -11,16 +11,16 @@ import (
 
 // Layout manages the main screen layout
 type Layout struct {
-	root           *tview.Flex
-	pages          *tview.Pages
-	header         *tview.TextView
-	tableView      *tview.Table
-	footer         *tview.TextView
-	filterInput    *tview.InputField
-	renderer       *Renderer
-	showFilter     bool
-	focusCallback  func()
-	selectedHost   string // Track selected host by name instead of row number
+	root          *tview.Flex
+	pages         *tview.Pages
+	header        *tview.TextView
+	tableView     *tview.Table
+	footer        *tview.TextView
+	filterInput   *tview.InputField
+	renderer      *Renderer
+	showFilter    bool
+	focusCallback func()
+	selectedHost  string // Track selected host by name instead of row number
 }
 
 // NewLayout creates a new Layout
@@ -28,14 +28,14 @@ func NewLayout(renderer *Renderer) *Layout {
 	layout := &Layout{
 		renderer: renderer,
 	}
-	
+
 	layout.setupViews()
 	layout.setupLayout()
-	
+
 	// Setup pages for modal support
 	layout.pages = tview.NewPages()
 	layout.pages.AddPage("main", layout.root, true, true)
-	
+
 	return layout
 }
 
@@ -45,26 +45,90 @@ func (l *Layout) setupViews() {
 	l.header = tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter)
-	
+
 	// Interactive table view
 	l.tableView = tview.NewTable().
-		SetSelectable(true, false).
 		SetSelectedFunc(l.handleRowSelection)
-	
+
+	// Apply all table configuration in one place
+	l.configureTable()
+
 	// Set initial selection to first data row to ensure header visibility
 	l.tableView.Select(1, 0)
-	
+
 	// Footer
 	l.footer = tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter)
-	
+
 	// Filter input field
 	l.filterInput = tview.NewInputField().
 		SetLabel("Filter: ").
 		SetLabelColor(tcell.ColorWhite).
 		SetFieldBackgroundColor(tcell.ColorBlack).
 		SetDoneFunc(l.handleFilterDone)
+}
+
+// configureTable applies all table settings in one place to prevent configuration drift
+func (l *Layout) configureTable() {
+	l.tableView.
+		SetBorders(false).                   // Clean look without internal borders
+		SetSeparator(' ').                   // Space separator
+		SetFixed(1, 0).                      // Fix header row - CRITICAL for header visibility
+		SetSelectable(true, false).          // Row selection only
+		SetSelectedStyle(tcell.StyleDefault. // Selection highlighting
+							Background(tcell.ColorDarkGreen).
+							Foreground(tcell.ColorWhite))
+}
+
+// populateTableDirect populates table directly from TableData without intermediate table creation
+func (l *Layout) populateTableDirect(tableData *TableData) {
+	// Define alignment for each column (same as in table_data.go)
+	alignments := []int{
+		tview.AlignLeft,   // Host
+		tview.AlignRight,  // Sent
+		tview.AlignRight,  // Succ
+		tview.AlignRight,  // Fail
+		tview.AlignRight,  // Loss
+		tview.AlignRight,  // Last
+		tview.AlignRight,  // Avg
+		tview.AlignRight,  // Best
+		tview.AlignRight,  // Worst
+		tview.AlignCenter, // LastSuccTime
+		tview.AlignCenter, // LastFailTime
+		tview.AlignLeft,   // FAIL Reason
+	}
+
+	// Set headers
+	for col, header := range tableData.Headers {
+		alignment := tview.AlignLeft
+		if col < len(alignments) {
+			alignment = alignments[col]
+		}
+
+		l.tableView.SetCell(0, col, &tview.TableCell{
+			Text:          "  " + header + "  ",
+			Color:         tcell.ColorYellow,
+			Align:         alignment,
+			NotSelectable: true,
+		})
+	}
+
+	// Set data rows
+	for row, rowData := range tableData.Rows {
+		for col, cellData := range rowData {
+			alignment := tview.AlignLeft
+			if col < len(alignments) {
+				alignment = alignments[col]
+			}
+
+			l.tableView.SetCell(row+1, col, &tview.TableCell{
+				Text:  "  " + cellData + "  ",
+				Color: tcell.ColorWhite,
+				Align: alignment,
+			})
+		}
+	}
 }
 
 // setupLayout configures the layout
@@ -85,7 +149,7 @@ func (l *Layout) Root() tview.Primitive {
 func (l *Layout) Update() {
 	l.header.SetText(l.renderer.RenderHeader())
 	l.footer.SetText(l.renderer.RenderFooter())
-	
+
 	// Save current selection before update
 	currentRow, _ := l.tableView.GetSelection()
 	if currentRow > 0 && l.selectedHost == "" { // First time or no selection yet
@@ -94,29 +158,15 @@ func (l *Layout) Update() {
 			l.selectedHost = metric.Name
 		}
 	}
-	
-	// Update tview.Table content while preserving the original table instance
-	newTable := l.renderer.GetTviewTable()
+
+	// Update table content directly without creating temporary table
 	l.tableView.Clear()
-	
-	// Copy all table settings from the new table to preserve styling
-	l.tableView.SetBorders(false).
-		SetSeparator(' ').
-		SetSelectedStyle(tcell.StyleDefault.
-			Background(tcell.ColorDarkGreen).
-			Foreground(tcell.ColorWhite))
-	
-	// Copy content from new table to existing table
-	rows := newTable.GetRowCount()
-	cols := newTable.GetColumnCount()
-	
-	for row := 0; row < rows; row++ {
-		for col := 0; col < cols; col++ {
-			cell := newTable.GetCell(row, col)
-			l.tableView.SetCell(row, col, cell)
-		}
-	}
-	
+	l.configureTable() // Ensure all settings are applied after Clear()
+
+	// Get table data and populate directly
+	tableData := l.renderer.getTableData()
+	l.populateTableDirect(tableData)
+
 	// Restore selection based on host name
 	if l.selectedHost != "" {
 		l.restoreSelectionByHost()
@@ -156,7 +206,7 @@ func (l *Layout) restoreSelectionByHost() {
 	if l.selectedHost == "" {
 		return
 	}
-	
+
 	tableData := l.renderer.getTableData()
 	for i, metric := range tableData.Metrics {
 		if metric.Name == l.selectedHost {
@@ -164,7 +214,7 @@ func (l *Layout) restoreSelectionByHost() {
 			return
 		}
 	}
-	
+
 	// If host not found, select first row
 	if l.tableView.GetRowCount() > 1 {
 		l.tableView.Select(1, 0)
@@ -243,10 +293,10 @@ func (l *Layout) showFilterInput() {
 	if l.showFilter {
 		return
 	}
-	
+
 	l.showFilter = true
 	l.filterInput.SetText(l.renderer.GetFilter())
-	
+
 	// Rebuild layout with filter input
 	l.root.Clear()
 	l.root.AddItem(l.header, 1, 0, false).
@@ -259,9 +309,9 @@ func (l *Layout) hideFilterInput() {
 	if !l.showFilter {
 		return
 	}
-	
+
 	l.showFilter = false
-	
+
 	// Rebuild layout without filter input
 	l.root.Clear()
 	l.root.AddItem(l.header, 1, 0, false).
@@ -309,10 +359,10 @@ func (l *Layout) handleRowSelection(row, col int) {
 	if row == 0 {
 		return // Skip header row
 	}
-	
+
 	// Get table data
 	tableData := l.renderer.getTableData()
-	
+
 	// Convert table row to data row (subtract 1 for header)
 	dataRow := row - 1
 	if metric, ok := tableData.GetMetricAtRow(dataRow); ok {
