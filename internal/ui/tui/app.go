@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -17,7 +16,6 @@ import (
 type TUIApp struct {
 	app      *tview.Application
 	layout   *LayoutManager
-	renderer *Renderer
 	state    *state.UIState
 	mm       *stats.MetricsManager
 	config   *shared.Config
@@ -38,12 +36,10 @@ func NewTUIApp(mm *stats.MetricsManager, cfg *shared.Config, interval, timeout t
 	app := tview.NewApplication()
 	uiState := state.NewUIState()
 	layout := NewLayoutManager(uiState, mm, cfg, interval, timeout)
-	renderer := NewRenderer(mm, cfg, interval, timeout)
 
 	tuiApp := &TUIApp{
 		app:      app,
 		layout:   layout,
-		renderer: renderer,
 		state:    uiState,
 		mm:       mm,
 		config:   cfg,
@@ -158,8 +154,42 @@ func (a *TUIApp) setupKeyBindings() {
 
 // setupHelpModal creates and adds help modal
 func (a *TUIApp) setupHelpModal() {
-	helpModal := a.renderer.CreateHelpModal()
+	helpModal := a.createHelpModal()
 	a.layout.AddModal("help", helpModal)
+}
+
+// createHelpModal creates help modal content
+func (a *TUIApp) createHelpModal() *tview.Modal {
+	helpText := `mping - Multi-target Ping Tool      
+
+NAVIGATION:                          
+  j, ↓         Move down              
+  k, ↑         Move up                
+  g            Go to top              
+  G            Go to bottom           
+  u, Page Up   Page up                
+  d, Page Down Page down              
+  s            Next sort key          
+  S            Previous sort key      
+  r            Reverse sort order     
+  R            Reset all metrics      
+  /            Filter hosts           
+  h            Show/hide this help    
+  q, Ctrl+C    Quit application       
+
+FILTER:                              
+  /            Start filter input     
+  Enter        Apply filter           
+  Esc          Cancel/Clear filter    
+
+Press 'h' or Esc to close           `
+
+	return tview.NewModal().
+		SetText(helpText).
+		AddButtons([]string{"Close"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			// Button press handling is done by parent
+		})
 }
 
 // Sort-related methods
@@ -253,7 +283,7 @@ func (a *TUIApp) handleRowSelection(row, col int) {
 
 // showHostDetails displays detailed information for a selected host
 func (a *TUIApp) showHostDetails(metric stats.Metrics) {
-	detailText := a.renderer.RenderHostDetail(metric)
+	detailText := shared.FormatHostDetail(metric)
 
 	// Create and show modal
 	modal := tview.NewModal().
@@ -271,18 +301,6 @@ func (a *TUIApp) showHostDetails(metric stats.Metrics) {
 // getFilteredMetrics returns filtered metrics based on current state
 func (a *TUIApp) getFilteredMetrics() []stats.Metrics {
 	metrics := a.mm.SortBy(a.state.GetSortKey(), a.state.IsAscending())
-	filterText := a.state.GetFilter()
-	if filterText == "" {
-		return metrics
-	}
-	
-	filtered := []stats.Metrics{}
-	filterLower := strings.ToLower(filterText)
-	for _, m := range metrics {
-		if strings.Contains(strings.ToLower(m.Name), filterLower) {
-			filtered = append(filtered, m)
-		}
-	}
-	return filtered
+	return shared.FilterMetrics(metrics, a.state.GetFilter())
 }
 

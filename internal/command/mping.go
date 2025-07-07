@@ -12,7 +12,6 @@ import (
 	"github.com/servak/mping/internal/config"
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
-	"github.com/servak/mping/internal/ui/output"
 	"github.com/servak/mping/internal/ui/shared"
 	"github.com/servak/mping/internal/ui/tui"
 )
@@ -105,7 +104,9 @@ mping dns://8.8.8.8/google.com`,
 			probeManager.Stop()
 
 			// Final results
-			t := output.TableRender(metricsManager, stats.Success)
+			metrics := metricsManager.SortBy(stats.Success, true)
+			tableData := shared.NewTableData(metrics, stats.Success, true)
+			t := tableData.ToGoPrettyTable()
 			t.SetStyle(table.StyleLight)
 			cmd.Println(t.Render())
 			return nil

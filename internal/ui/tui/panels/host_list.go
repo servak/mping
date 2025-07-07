@@ -1,8 +1,6 @@
 package panels
 
 import (
-	"strings"
-
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
@@ -36,11 +34,6 @@ func NewHostListPanel(state HostListParams, mm *stats.MetricsManager) *HostListP
 		mm:             mm,
 	}
 
-	panel.configureTable()
-
-	// Set initial selection to first data row to ensure header visibility
-	table.Select(1, 0)
-
 	return panel
 }
 
@@ -50,12 +43,21 @@ func (h *HostListPanel) Update() {
 	metrics := h.getFilteredMetrics()
 	tableData := shared.NewTableData(metrics, h.renderState.GetSortKey(), h.renderState.IsAscending())
 
-	// Clear existing content
+	// Clear existing content and repopulate
 	h.table.Clear()
-	h.configureTable() // Reapply configuration after Clear()
-
-	// Populate table with new data
-	h.populateTable(tableData)
+	
+	// Configure table settings
+	h.table.
+		SetBorders(false).
+		SetSeparator(' ').
+		SetFixed(1, 0).
+		SetSelectable(true, false).
+		SetSelectedStyle(tcell.StyleDefault.
+			Background(tcell.ColorDarkGreen).
+			Foreground(tcell.ColorWhite))
+	
+	// Use TableData's logic but populate our existing table
+	h.populateTableFromData(tableData)
 
 	// Restore selection if specified
 	selectedHost := h.renderState.GetSelectedHost()
@@ -72,19 +74,7 @@ func (h *HostListPanel) Update() {
 // getFilteredMetrics returns filtered metrics based on current state
 func (h *HostListPanel) getFilteredMetrics() []stats.Metrics {
 	metrics := h.mm.SortBy(h.renderState.GetSortKey(), h.renderState.IsAscending())
-	filterText := h.renderState.GetFilter()
-	if filterText == "" {
-		return metrics
-	}
-
-	filtered := []stats.Metrics{}
-	filterLower := strings.ToLower(filterText)
-	for _, m := range metrics {
-		if strings.Contains(strings.ToLower(m.Name), filterLower) {
-			filtered = append(filtered, m)
-		}
-	}
-	return filtered
+	return shared.FilterMetrics(metrics, h.renderState.GetFilter())
 }
 
 // updateSelectedHost updates the selection state based on current table selection
@@ -181,20 +171,9 @@ func (h *HostListPanel) PageUp() {
 	h.updateSelectedHost()
 }
 
-// configureTable applies all table settings in one place to prevent configuration drift
-func (h *HostListPanel) configureTable() {
-	h.table.
-		SetBorders(false).                   // Clean look without internal borders
-		SetSeparator(' ').                   // Space separator
-		SetFixed(1, 0).                      // Fix header row - CRITICAL for header visibility
-		SetSelectable(true, false).          // Row selection only
-		SetSelectedStyle(tcell.StyleDefault. // Selection highlighting
-							Background(tcell.ColorDarkGreen).
-							Foreground(tcell.ColorWhite))
-}
 
-// populateTable populates table directly from TableData
-func (h *HostListPanel) populateTable(tableData *shared.TableData) {
+// populateTableFromData populates our table using TableData content
+func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 	// Define alignment for each column (same as in shared/table_data.go)
 	alignments := []int{
 		tview.AlignLeft,   // Host
