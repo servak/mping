@@ -1,0 +1,169 @@
+# mping configuration example
+# Place this file at ~/.mping.yml to customize behavior
+
+# Default prober used for bare hostnames (without protocol prefix)
+# If not specified, defaults to 'icmpv4'
+default: http
+
+# Prober configurations
+prober:
+  # Built-in probers (default configurations)
+  icmpv4:
+    probe: icmpv4
+    icmp:
+      body: "mping"
+      source_interface: ""
+
+  icmpv6:
+    probe: icmpv6
+    icmp:
+      body: "mping"
+      source_interface: ""
+
+  http:
+    probe: http
+    http:
+      expect_code: 200
+      expect_body: ""
+
+  https:
+    probe: http  # Same probe type, but with TLS config
+    http:
+      expect_code: 200
+      expect_body: ""
+      tls:
+        skip_verify: true  # TLS configuration determines HTTPS
+
+  tcp:
+    probe: tcp
+    tcp:
+      source_interface: ""
+      timeout: "5000ms"
+
+  dns:
+    probe: dns
+    dns:
+      server: "8.8.8.8"
+      port: 53
+      record_type: "A"
+      use_tcp: false
+      timeout: "5000ms"
+
+  # Custom prober examples
+  # These demonstrate how to create specialized probers
+
+  # HTTP API monitoring with flexible status codes
+  web-api:
+    probe: http
+    http:
+      expect_codes: "200-299"  # Accept any 2xx status code
+      expect_body: ""
+
+  # HTTPS with strict status code checking
+  web-secure:
+    probe: http  # Uses TLS config for HTTPS
+    http:
+      expect_code: 200  # Only 200 is acceptable
+      tls:
+        skip_verify: false  # Strict TLS verification
+  
+  # Web service with redirects allowed
+  web-redirects:
+    probe: http
+    http:
+      expect_codes: "200,301,302"  # Accept success and redirects
+  
+  # REST API with multiple success codes
+  rest-api:
+    probe: http
+    http:
+      expect_codes: "200,201,202,204"  # Various success responses
+
+  # DNS over TCP
+  dns-tcp:
+    probe: dns
+    dns:
+      server: "1.1.1.1"
+      port: 53
+      record_type: "A"
+      use_tcp: true
+      timeout: "3000ms"
+
+  # DNS with recursion desired (default behavior)
+  dns-recursive:
+    probe: dns
+    dns:
+      server: "8.8.8.8"
+      port: 53
+      record_type: "A"
+      use_tcp: false
+      recursion_desired: true
+  
+  # DNS authoritative query (no recursion)
+  dns-auth:
+    probe: dns
+    dns:
+      server: "ns1.google.com"
+      port: 53
+      record_type: "A"
+      use_tcp: false
+      recursion_desired: false
+  
+  # DNS with flexible response code matching
+  dns-flexible:
+    probe: dns
+    dns:
+      server: "8.8.8.8"
+      port: 53
+      record_type: "A"
+      expect_codes: "0,2,3"  # Accept NOERROR, SERVFAIL, NXDOMAIN
+  
+  # DNS testing server errors
+  dns-errors:
+    probe: dns
+    dns:
+      server: "test.dns.server"
+      port: 53
+      record_type: "A"
+      expect_codes: "1-5"  # Accept various error codes
+
+  # Fast ICMP for low-latency monitoring
+  icmp-fast:
+    probe: icmpv4
+    icmp:
+      body: "fast"
+      timeout: "1000ms"
+
+# UI configuration
+ui:
+  cui:
+    border: true            # テーブルボーダーの表示
+    enable_colors: true     # 色付けの有効化（true/false）
+    colors:
+      header: "dodgerblue"     # ヘッダーの色
+      footer: "gray"           # フッターの色  
+      success: "green"         # 成功時の色
+      warning: "yellow"        # 警告時の色
+      error: "red"             # エラー時の色
+      modal_border: "white"    # モーダルボーダーの色
+
+# 色付けを無効にする場合:
+# ui:
+#   cui:
+#     enable_colors: false
+
+# 使用可能な色名例:
+# black, red, green, yellow, blue, magenta, cyan, white, gray,
+# dodgerblue, darkgreen, orange, purple, brown, pink, lime,
+# navy, olive, teal, silver, maroon, etc.
+
+# Usage examples:
+# mping example.com                    # Uses default_prober (http)
+# mping web-api://api.example.com      # Uses flexible 200-299 status code matching
+# mping web-redirects://site.com       # Accepts 200, 301, 302 status codes
+# mping rest-api://api.service.com     # Accepts 200, 201, 202, 204 responses
+# mping dns-tcp://google.com           # Uses DNS over TCP
+# mping dns-auth://ns1.google.com/google.com    # Authoritative DNS query (no recursion)
+# mping dns-flexible://8.8.8.8/google.com       # Accepts NOERROR, SERVFAIL, NXDOMAIN
+# mping dns-errors://test.server/example.com     # Tests server error handling (codes 1-5)
+# mping icmp-fast://target.com         # Uses fast ICMP configuration

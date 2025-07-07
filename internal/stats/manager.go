@@ -113,7 +113,7 @@ func (mm *MetricsManager) autoRegister(key, displayName string) {
 	}
 }
 
-func (mm *MetricsManager) GetSortedMetricsByKey(k Key) []Metrics {
+func (mm *MetricsManager) SortBy(k Key, ascending bool) []Metrics {
 	mm.mu.Lock()
 	var res []Metrics
 	for _, m := range mm.metrics {
@@ -128,41 +128,52 @@ func (mm *MetricsManager) GetSortedMetricsByKey(k Key) []Metrics {
 	sort.SliceStable(res, func(i, j int) bool {
 		mi := res[i]
 		mj := res[j]
+		var result bool
 		switch k {
 		case Host:
-			return res[i].Name < res[j].Name
+			result = res[i].Name < res[j].Name
 		case Sent:
-			return mi.Total > mj.Total
+			result = mi.Total < mj.Total  // 昇順：小さい値が先
 		case Success:
-			return mi.Successful > mj.Successful
+			result = mi.Successful < mj.Successful  // 昇順：小さい値が先
 		case Loss:
-			return mi.Loss > mj.Loss
+			result = mi.Loss < mj.Loss  // 昇順：小さい値が先
 		case Fail:
-			return mi.Failed > mj.Failed
+			result = mi.Failed < mj.Failed  // 昇順：小さい値が先
 		case Last:
-			return rejectLess(mi.LastRTT, mj.LastRTT)
+			result = rejectLessAscending(mi.LastRTT, mj.LastRTT)  // 昇順対応
 		case Avg:
-			return rejectLess(mi.AverageRTT, mj.AverageRTT)
+			result = rejectLessAscending(mi.AverageRTT, mj.AverageRTT)  // 昇順対応
 		case Best:
-			return rejectLess(mi.MinimumRTT, mj.MinimumRTT)
+			result = rejectLessAscending(mi.MinimumRTT, mj.MinimumRTT)  // 昇順対応
 		case Worst:
-			return rejectLess(mi.MaximumRTT, mj.MaximumRTT)
+			result = rejectLessAscending(mi.MaximumRTT, mj.MaximumRTT)  // 昇順対応
 		case LastSuccTime:
-			return mi.LastSuccTime.After(mj.LastSuccTime)
+			result = mi.LastSuccTime.Before(mj.LastSuccTime)  // 昇順：古い時刻が先
 		case LastFailTime:
-			return mi.LastFailTime.After(mj.LastFailTime)
+			result = mi.LastFailTime.Before(mj.LastFailTime)  // 昇順：古い時刻が先
+		default:
+			return false
 		}
-		return false
+
+		// ascending=falseの場合は結果を反転
+		if ascending {
+			return result
+		} else {
+			return !result
+		}
 	})
 	return res
 }
 
-func rejectLess(i, j time.Duration) bool {
+// rejectLessAscending は昇順ソート用のRTT比較関数
+// 0値（未測定）は常に後ろに配置される
+func rejectLessAscending(i, j time.Duration) bool {
 	if i == 0 {
-		return false
+		return false  // i が 0 なら j を先に
 	}
 	if j == 0 {
-		return true
+		return true   // j が 0 なら i を先に
 	}
-	return i < j
+	return i < j      // 両方とも 0 でないなら小さい方を先に
 }

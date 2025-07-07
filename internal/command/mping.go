@@ -12,7 +12,8 @@ import (
 	"github.com/servak/mping/internal/config"
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
-	"github.com/servak/mping/internal/ui"
+	"github.com/servak/mping/internal/ui/shared"
+	"github.com/servak/mping/internal/ui/tui"
 )
 
 func NewPingCmd() *cobra.Command {
@@ -76,34 +77,36 @@ mping dns://8.8.8.8/google.com`,
 			// Create ProbeManager and MetricsManager
 			probeManager := prober.NewProbeManager(cfg.Prober, cfg.Default)
 			metricsManager := stats.NewMetricsManager()
-			
+
 			// Add targets
 			err = probeManager.AddTargets(hosts...)
 			if err != nil {
 				return fmt.Errorf("failed to add targets: %w", err)
 			}
-			
+
 			// Subscribe to events for metrics collection
 			metricsManager.Subscribe(probeManager.Events())
-			
+
 			// Start probing in background
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			
+
 			go func() {
 				if err := probeManager.Run(ctx, _interval, _timeout); err != nil {
 					fmt.Printf("ProbeManager error: %v\n", err)
 				}
 			}()
-			
+
 			// Start TUI
-			startCUI(metricsManager, cfg.UI.CUI, _interval)
-			
+			startTUI(metricsManager, cfg.UI, _interval, _timeout)
+
 			// Stop probing when TUI exits
 			probeManager.Stop()
-			
+
 			// Final results
-			t := ui.TableRender(metricsManager, stats.Success)
+			metrics := metricsManager.SortBy(stats.Success, true)
+			tableData := shared.NewTableData(metrics, stats.Success, true)
+			t := tableData.ToGoPrettyTable()
 			t.SetStyle(table.StyleLight)
 			cmd.Println(t.Render())
 			return nil
@@ -121,33 +124,18 @@ mping dns://8.8.8.8/google.com`,
 	return cmd
 }
 
-
-
-func startCUI(manager *stats.MetricsManager, cui *ui.CUIConfig, interval time.Duration) {
-	r, err := ui.NewCUI(manager, cui, interval)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+func startTUI(manager *stats.MetricsManager, cfg *shared.Config, interval, timeout time.Duration) {
+	app := tui.NewTUIApp(manager, cfg, interval, timeout)
 
 	refreshTime := time.Millisecond * 250 // Minimum refresh time that can be set
 	if refreshTime < (interval / 2) {
 		refreshTime = interval / 2
 	}
-
 	go func() {
 		for {
+			app.Update()
 			time.Sleep(refreshTime)
-			r.Update()
 		}
 	}()
-
-	r.Run()
+	app.Run()
 }
-
-
-
-
-
-
-

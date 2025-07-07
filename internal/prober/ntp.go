@@ -53,11 +53,11 @@ func (cfg *NTPConfig) Validate() error {
 	if cfg.Server == "" {
 		return fmt.Errorf("NTP server is required")
 	}
-	
+
 	if cfg.Port <= 0 || cfg.Port > 65535 {
 		return fmt.Errorf("invalid NTP server port: %d (must be 1-65535)", cfg.Port)
 	}
-	
+
 	return nil
 }
 
@@ -97,7 +97,7 @@ func (p *NTPProber) Accept(target string) error {
 
 func (p *NTPProber) parseTarget(target string) (string, int, error) {
 	originalTarget := target
-	
+
 	// Remove ntp:// or ntp: prefix
 	if strings.HasPrefix(target, p.prefix+"://") {
 		target = strings.TrimPrefix(target, p.prefix+"://")
@@ -108,7 +108,7 @@ func (p *NTPProber) parseTarget(target string) (string, int, error) {
 	// Parse server and port
 	server := p.config.Server
 	port := p.config.Port
-	
+
 	if target != "" {
 		if strings.Contains(target, ":") {
 			host, portStr, err := net.SplitHostPort(target)
@@ -223,7 +223,7 @@ func (p *NTPProber) sendProbe(result chan *Event, serverAddr string, timeout tim
 
 	// Calculate RTT and offset
 	rtt := time.Since(now)
-	
+
 	// Convert NTP timestamp to time.Time
 	serverTime := ntpTimeToTime(resp.TxTimeSec, resp.TxTimeFrac)
 	offset := serverTime.Sub(now.Add(rtt / 2))
@@ -280,11 +280,11 @@ func ntpTimeFromTime(t time.Time) (uint32, uint32) {
 	// NTP epoch is January 1, 1900, Unix epoch is January 1, 1970
 	const ntpEpochOffset = 2208988800 // seconds between 1900 and 1970
 	const ntpFracScale = 1 << 32      // 2^32 for NTP fraction conversion
-	
+
 	unix := t.Unix()
 	sec := uint32(unix + ntpEpochOffset)
 	frac := uint32(int64(t.Nanosecond()) * ntpFracScale / 1000000000) // Convert nanoseconds to NTP fraction
-	
+
 	return sec, frac
 }
 
@@ -292,9 +292,9 @@ func ntpTimeFromTime(t time.Time) (uint32, uint32) {
 func ntpTimeToTime(sec, frac uint32) time.Time {
 	const ntpEpochOffset = 2208988800 // seconds between 1900 and 1970
 	const ntpFracScale = 1 << 32      // 2^32 for NTP fraction conversion
-	
+
 	unix := int64(sec) - ntpEpochOffset
 	nsec := int64(frac) * 1000000000 / ntpFracScale
-	
+
 	return time.Unix(unix, nsec)
 }
