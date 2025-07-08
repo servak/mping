@@ -29,8 +29,7 @@ func TestTargetHistory(t *testing.T) {
 			ProbeType: "icmp",
 			ICMP: &prober.ICMPDetails{
 				Sequence: 1,
-				TTL:      64,
-				DataSize: 64,
+				Payload:  "test",
 			},
 		},
 	})
@@ -96,8 +95,7 @@ func TestMetricsWithHistory(t *testing.T) {
 		ProbeType: "icmp",
 		ICMP: &prober.ICMPDetails{
 			Sequence: 1,
-			TTL:      64,
-			DataSize: 64,
+			Payload:  "test",
 		},
 	}
 	mm.SuccessWithDetails(host, 50*time.Millisecond, time.Now(), details)

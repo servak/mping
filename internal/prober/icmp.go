@@ -171,7 +171,7 @@ func (p *ICMPProber) sent(r chan *Event, addr string) {
 	}
 }
 
-func (p *ICMPProber) success(r chan *Event, runCnt int, addr string, payload icmp.Message) {
+func (p *ICMPProber) success(r chan *Event, runCnt int, addr string, payload icmp.Message, packetData []byte, packetSize int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for k, table := range p.tables {
@@ -188,14 +188,13 @@ func (p *ICMPProber) success(r chan *Event, runCnt int, addr string, payload icm
 		elapse := time.Since(k.sentTime)
 		key, displayName := p.getTargetInfo(addr)
 
+		// Extract detailed packet information
+		icmpDetails := p.extractICMPDetails(runCnt, addr, payload, packetData, packetSize)
+		
 		// Create ICMP detail information
 		details := &ProbeDetails{
 			ProbeType: string(p.version),
-			ICMP: &ICMPDetails{
-				Sequence: runCnt,
-				TTL:      0,               // TODO: Extract from IP header
-				DataSize: len(p.body) + 8, // ICMP header (8 bytes) + data
-			},
+			ICMP:      icmpDetails,
 		}
 
 		r <- &Event{
@@ -208,6 +207,83 @@ func (p *ICMPProber) success(r chan *Event, runCnt int, addr string, payload icm
 		}
 		return
 	}
+}
+
+// extractICMPDetails extracts detailed information from ICMP packet
+func (p *ICMPProber) extractICMPDetails(runCnt int, addr string, payload icmp.Message, packetData []byte, packetSize int) *ICMPDetails {
+	var payloadContent string
+	var checksum uint16
+	
+	// Extract echo data if available
+	if echoBody, ok := payload.Body.(*icmp.Echo); ok {
+		
+		// Format payload content with length limit
+		payloadContent = formatPayloadContent(echoBody.Data)
+	}
+	
+	// Extract checksum from raw packet data if available
+	// ICMP checksum is at offset 2-3 in the ICMP header
+	if len(packetData) >= 4 {
+		checksum = binary.BigEndian.Uint16(packetData[2:4])
+	}
+	
+	
+	// Convert ICMP type to int safely
+	var icmpType int
+	switch payload.Type {
+	case ipv4.ICMPTypeEchoReply:
+		icmpType = 0
+	case ipv6.ICMPTypeEchoReply:
+		icmpType = 129
+	default:
+		// Use reflection or type assertion for other types
+		if t, ok := payload.Type.(interface{ Int() int }); ok {
+			icmpType = t.Int()
+		} else {
+			icmpType = -1 // Unknown type
+		}
+	}
+	
+	details := &ICMPDetails{
+		Sequence:   runCnt,
+		PacketSize: packetSize,
+		ICMPType:   icmpType,
+		ICMPCode:   payload.Code,
+		Checksum:   checksum,
+		Payload:    payloadContent,
+	}
+	
+	return details
+}
+
+
+
+// formatPayloadContent formats payload bytes for display with length limit
+func formatPayloadContent(data []byte) string {
+	const maxDisplayLength = 32 // Maximum characters to display
+	
+	if len(data) == 0 {
+		return ""
+	}
+	
+	// Convert to string, replacing non-printable characters
+	var result strings.Builder
+	for _, b := range data {
+		if b >= 32 && b <= 126 { // Printable ASCII characters
+			result.WriteByte(b)
+		} else {
+			result.WriteString(fmt.Sprintf("\\x%02x", b))
+		}
+	}
+	
+	payloadStr := result.String()
+	
+	// Truncate if too long
+	if len(payloadStr) > maxDisplayLength {
+		payloadStr = payloadStr[:maxDisplayLength-3] + "..."
+	}
+	
+	return payloadStr
 }
 
 func (p *ICMPProber) failed(r chan *Event, runCnt int, addr string, err error) {
@@ -335,7 +411,7 @@ func (p *ICMPProber) recvPkts(r chan *Event) {
 		if rm.Code == 0 {
 			switch rm.Type {
 			case ipv4.ICMPTypeEchoReply, ipv6.ICMPTypeEchoReply:
-				p.success(r, int(seq), addr.String(), *rm)
+				p.success(r, int(seq), addr.String(), *rm, pktbuf[:n], n)
 			}
 		}
 	}

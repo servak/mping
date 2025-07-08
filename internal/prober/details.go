@@ -13,9 +13,12 @@ type ProbeDetails struct {
 }
 
 type ICMPDetails struct {
-	Sequence int `json:"sequence"`
-	TTL      int `json:"ttl"`
-	DataSize int `json:"data_size"`
+	Sequence   int    `json:"sequence"`
+	PacketSize int    `json:"packet_size"`
+	ICMPType   int    `json:"icmp_type"`
+	ICMPCode   int    `json:"icmp_code"`
+	Checksum   uint16 `json:"checksum"`
+	Payload    string `json:"payload"` // Actual payload content with length limit
 }
 
 type HTTPDetails struct {

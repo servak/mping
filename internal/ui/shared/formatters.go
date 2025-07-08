@@ -82,6 +82,7 @@ func FormatHostDetail(metric stats.MetricsReader) string {
 	return basicInfo
 }
 
+
 // FormatHistory generates history section for a host
 func FormatHistory(metric stats.MetricsReader) string {
 	history := metric.GetRecentHistory(10)
@@ -131,9 +132,21 @@ func formatProbeDetails(details *prober.ProbeDetails) string {
 	switch details.ProbeType {
 	case "icmp", "icmpv4", "icmpv6":
 		if details.ICMP != nil {
-			// Only show sequence and size for now (TTL is not properly implemented)
-			return fmt.Sprintf("seq=%d size=%d", 
-				details.ICMP.Sequence, details.ICMP.DataSize)
+			// Show enhanced ICMP details
+			var parts []string
+			parts = append(parts, fmt.Sprintf("seq=%d", details.ICMP.Sequence))
+			parts = append(parts, fmt.Sprintf("size=%d", details.ICMP.PacketSize))
+			
+			
+			if details.ICMP.ICMPType >= 0 {
+				parts = append(parts, fmt.Sprintf("type=%d", details.ICMP.ICMPType))
+			}
+			
+			if details.ICMP.Payload != "" {
+				parts = append(parts, fmt.Sprintf("payload=%s", details.ICMP.Payload))
+			}
+			
+			return strings.Join(parts, " ")
 		}
 		return "icmp ping"
 	case "http", "https":
