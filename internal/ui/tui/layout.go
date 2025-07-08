@@ -44,7 +44,7 @@ type LayoutManager struct {
 }
 
 // NewLayoutManager creates a new LayoutManager
-func NewLayoutManager(uiState *state.UIState, mm *stats.MetricsManager, config *shared.Config, interval, timeout time.Duration) *LayoutManager {
+func NewLayoutManager(uiState *state.UIState, mm stats.MetricsManagerInterface, config *shared.Config, interval, timeout time.Duration) *LayoutManager {
 	layout := &LayoutManager{
 		mode: ListOnly,
 	}
@@ -57,7 +57,7 @@ func NewLayoutManager(uiState *state.UIState, mm *stats.MetricsManager, config *
 }
 
 // setupPanels initializes all panels
-func (l *LayoutManager) setupPanels(uiState *state.UIState, mm *stats.MetricsManager, config *shared.Config, interval, timeout time.Duration) {
+func (l *LayoutManager) setupPanels(uiState *state.UIState, mm stats.MetricsManagerInterface, config *shared.Config, interval, timeout time.Duration) {
 	l.header = panels.NewHeaderPanel(uiState, config, interval, timeout)
 	l.hostList = panels.NewHostListPanel(uiState, mm)
 	l.footer = panels.NewFooterPanel(config)

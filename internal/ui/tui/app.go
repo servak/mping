@@ -17,7 +17,7 @@ type TUIApp struct {
 	app      *tview.Application
 	layout   *LayoutManager
 	state    *state.UIState
-	mm       *stats.MetricsManager
+	mm       stats.MetricsManagerInterface
 	config   *shared.Config
 	interval time.Duration
 	timeout  time.Duration
@@ -26,7 +26,7 @@ type TUIApp struct {
 }
 
 // NewTUIApp creates a new TUIApp instance
-func NewTUIApp(mm *stats.MetricsManager, cfg *shared.Config, interval, timeout time.Duration) *TUIApp {
+func NewTUIApp(mm stats.MetricsManagerInterface, cfg *shared.Config, interval, timeout time.Duration) *TUIApp {
 	if cfg == nil {
 		cfg = shared.DefaultConfig()
 	}

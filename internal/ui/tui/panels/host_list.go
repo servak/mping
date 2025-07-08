@@ -15,7 +15,7 @@ type HostListPanel struct {
 	container         *tview.Flex  // Container with border
 	renderState       state.RenderState
 	selectionState    state.SelectionState
-	mm                *stats.MetricsManager
+	mm                stats.MetricsProvider
 	onSelectionChange func(metrics stats.MetricsReader) // Callback when selection changes
 }
 
@@ -25,7 +25,7 @@ type HostListParams interface {
 }
 
 // NewHostListPanel creates a new HostListPanel
-func NewHostListPanel(state HostListParams, mm *stats.MetricsManager) *HostListPanel {
+func NewHostListPanel(state HostListParams, mm stats.MetricsProvider) *HostListPanel {
 	table := tview.NewTable().
 		SetSelectable(true, false)
 

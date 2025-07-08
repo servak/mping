@@ -124,7 +124,7 @@ mping dns://8.8.8.8/google.com`,
 	return cmd
 }
 
-func startTUI(manager *stats.MetricsManager, cfg *shared.Config, interval, timeout time.Duration) {
+func startTUI(manager stats.MetricsManagerInterface, cfg *shared.Config, interval, timeout time.Duration) {
 	app := tui.NewTUIApp(manager, cfg, interval, timeout)
 
 	refreshTime := time.Millisecond * 250 // Minimum refresh time that can be set

@@ -6,9 +6,8 @@ import (
 	"github.com/servak/mping/internal/prober"
 )
 
-// Interface for reading metrics by target
-type MetricsReader interface {
-	// Basic statistics
+// BasicMetrics provides basic statistics for display and sorting
+type BasicMetrics interface {
 	GetName() string
 	GetTotal() int
 	GetSuccessful() int
@@ -21,41 +20,50 @@ type MetricsReader interface {
 	GetLastSuccTime() time.Time
 	GetLastFailTime() time.Time
 	GetLastFailDetail() string
+}
 
-	// History information
+// DetailedMetrics extends BasicMetrics with history and detailed analysis
+type DetailedMetrics interface {
+	BasicMetrics
 	GetRecentHistory(n int) []HistoryEntry
-	GetHistorySince(since time.Time) []HistoryEntry
 	GetConsecutiveFailures() int
 	GetConsecutiveSuccesses() int
 	GetSuccessRateInPeriod(duration time.Duration) float64
 }
 
-// Interface for overall metrics management
-type MetricsManagerInterface interface {
-	// Basic operations
-	GetMetrics(target string) MetricsReader
-	GetAllTargets() []string
-	ResetAllMetrics()
+// MetricsReader provides complete read access to metrics (for backward compatibility)
+type MetricsReader interface {
+	DetailedMetrics
+	GetHistorySince(since time.Time) []HistoryEntry
+}
 
-	// Statistics registration
+// MetricsProvider provides external API for metrics access
+type MetricsProvider interface {
+	SortByWithReader(k Key, ascending bool) []MetricsReader
+	GetMetrics(target string) MetricsReader
+}
+
+// MetricsSystemManager provides system-level operations
+type MetricsSystemManager interface {
+	ResetAllMetrics()
+}
+
+// MetricsEventRecorder handles internal event recording
+type MetricsEventRecorder interface {
 	Success(target string, rtt time.Duration, sentTime time.Time, details *prober.ProbeDetails)
 	Failed(target string, sentTime time.Time, msg string)
 	Sent(target string)
-
-	// History functions
-	GetTargetHistory(target string, n int) []HistoryEntry
-	GetAllTargetsRecentHistory(n int) map[string][]HistoryEntry
-
-	// Sort functions
-	SortBy(k Key, ascending bool) []MetricsReader
 }
 
-// Interface dedicated to history management
-type HistoryManagerInterface interface {
-	AddSuccessEntry(target string, timestamp time.Time, rtt time.Duration, details *prober.ProbeDetails)
-	AddFailureEntry(target string, timestamp time.Time, error string)
-	GetHistory(target string, n int) []HistoryEntry
-	GetHistorySince(target string, since time.Time) []HistoryEntry
-	ClearHistory(target string)
-	ClearAllHistory()
+// MetricsManagerInterface provides comprehensive metrics management (for backward compatibility)
+type MetricsManagerInterface interface {
+	MetricsProvider
+	MetricsSystemManager
+	MetricsEventRecorder
+	
+	// Legacy methods - will be removed in future versions
+	GetAllTargets() []string
+	GetTargetHistory(target string, n int) []HistoryEntry
+	GetAllTargetsRecentHistory(n int) map[string][]HistoryEntry
+	SortBy(k Key, ascending bool) []MetricsReader
 }

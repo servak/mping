@@ -42,8 +42,8 @@ func (mm *MetricsManager) Register(target, name string) {
 	}
 }
 
-// 指定されたホストのMetricsを取得
-func (mm *MetricsManager) GetMetrics(host string) *Metrics {
+// 指定されたホストのMetricsを取得（内部用）
+func (mm *MetricsManager) getMetrics(host string) *Metrics {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 
@@ -58,6 +58,11 @@ func (mm *MetricsManager) GetMetrics(host string) *Metrics {
 	return m
 }
 
+// 指定されたホストのMetricsを取得（外部用）
+func (mm *MetricsManager) GetMetrics(host string) MetricsReader {
+	return mm.getMetrics(host)
+}
+
 // 全てのMetricsをリセット
 func (mm *MetricsManager) ResetAllMetrics() {
 	mm.mu.Lock()
@@ -69,13 +74,13 @@ func (mm *MetricsManager) ResetAllMetrics() {
 }
 
 // Register success for host
-func (mm *MetricsManager) Success(host string, rtt time.Duration, sentTime time.Time) {
-	mm.SuccessWithDetails(host, rtt, sentTime, nil)
+func (mm *MetricsManager) Success(host string, rtt time.Duration, sentTime time.Time, details *prober.ProbeDetails) {
+	mm.SuccessWithDetails(host, rtt, sentTime, details)
 }
 
 // Register success for host with detailed information
 func (mm *MetricsManager) SuccessWithDetails(host string, rtt time.Duration, sentTime time.Time, details *prober.ProbeDetails) {
-	m := mm.GetMetrics(host)
+	m := mm.getMetrics(host)
 
 	mm.mu.Lock()
 	m.Success(rtt, sentTime)
@@ -92,7 +97,7 @@ func (mm *MetricsManager) SuccessWithDetails(host string, rtt time.Duration, sen
 
 // Register failure for host
 func (mm *MetricsManager) Failed(host string, sentTime time.Time, msg string) {
-	m := mm.GetMetrics(host)
+	m := mm.getMetrics(host)
 
 	mm.mu.Lock()
 	m.Fail(sentTime, msg)
@@ -108,7 +113,7 @@ func (mm *MetricsManager) Failed(host string, sentTime time.Time, msg string) {
 }
 
 func (mm *MetricsManager) Sent(host string) {
-	m := mm.GetMetrics(host)
+	m := mm.getMetrics(host)
 
 	mm.mu.Lock()
 	m.Sent()
@@ -147,16 +152,16 @@ func (mm *MetricsManager) autoRegister(key, displayName string) {
 	}
 }
 
-func (mm *MetricsManager) SortBy(k Key, ascending bool) []Metrics {
+func (mm *MetricsManager) SortBy(k Key, ascending bool) []MetricsReader {
 	mm.mu.Lock()
-	var res []Metrics
+	var res []MetricsReader
 	for _, m := range mm.metrics {
-		res = append(res, *m)
+		res = append(res, m)
 	}
 	mm.mu.Unlock()
 	if k != Host {
 		sort.SliceStable(res, func(i, j int) bool {
-			return res[i].Name < res[j].Name
+			return res[i].GetName() < res[j].GetName()
 		})
 	}
 	sort.SliceStable(res, func(i, j int) bool {
@@ -165,27 +170,27 @@ func (mm *MetricsManager) SortBy(k Key, ascending bool) []Metrics {
 		var result bool
 		switch k {
 		case Host:
-			result = res[i].Name < res[j].Name
+			result = res[i].GetName() < res[j].GetName()
 		case Sent:
-			result = mi.Total < mj.Total
+			result = mi.GetTotal() < mj.GetTotal()
 		case Success:
-			result = mi.Successful < mj.Successful
+			result = mi.GetSuccessful() < mj.GetSuccessful()
 		case Loss:
-			result = mi.Loss < mj.Loss
+			result = mi.GetLoss() < mj.GetLoss()
 		case Fail:
-			result = mi.Failed < mj.Failed
+			result = mi.GetFailed() < mj.GetFailed()
 		case Last:
-			result = rejectLessAscending(mi.LastRTT, mj.LastRTT)
+			result = rejectLessAscending(mi.GetLastRTT(), mj.GetLastRTT())
 		case Avg:
-			result = rejectLessAscending(mi.AverageRTT, mj.AverageRTT)
+			result = rejectLessAscending(mi.GetAverageRTT(), mj.GetAverageRTT())
 		case Best:
-			result = rejectLessAscending(mi.MinimumRTT, mj.MinimumRTT)
+			result = rejectLessAscending(mi.GetMinimumRTT(), mj.GetMinimumRTT())
 		case Worst:
-			result = rejectLessAscending(mi.MaximumRTT, mj.MaximumRTT)
+			result = rejectLessAscending(mi.GetMaximumRTT(), mj.GetMaximumRTT())
 		case LastSuccTime:
-			result = mi.LastSuccTime.Before(mj.LastSuccTime)
+			result = mi.GetLastSuccTime().Before(mj.GetLastSuccTime())
 		case LastFailTime:
-			result = mi.LastFailTime.Before(mj.LastFailTime)
+			result = mi.GetLastFailTime().Before(mj.GetLastFailTime())
 		default:
 			return false
 		}
@@ -292,7 +297,7 @@ func (mm *MetricsManager) GetAllTargetsRecentHistory(n int) map[string][]History
 
 // GetMetricsAsReader retrieves as MetricsReader interface
 func (mm *MetricsManager) GetMetricsAsReader(target string) MetricsReader {
-	return mm.GetMetrics(target)
+	return mm.getMetrics(target)
 }
 
 // rejectLessAscending is RTT comparison function for ascending sort
