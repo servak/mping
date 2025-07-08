@@ -67,13 +67,13 @@ func TestHostListPanelGetView(t *testing.T) {
 	state := newMockState()
 	panel := NewHostListPanel(state, mm)
 
-	table := panel.GetView()
-	if table == nil {
+	view := panel.GetView()
+	if view == nil {
 		t.Error("GetView() returned nil")
 	}
 
-	if table != panel.table {
-		t.Error("GetView() returned different table instance")
+	if view != panel.container {
+		t.Error("GetView() returned different container instance")
 	}
 }
 

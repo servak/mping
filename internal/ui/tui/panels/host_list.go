@@ -11,10 +11,11 @@ import (
 
 // HostListPanel manages host list table display
 type HostListPanel struct {
-	table          *tview.Table
-	renderState    state.RenderState
-	selectionState state.SelectionState
-	mm             *stats.MetricsManager
+	table             *tview.Table
+	container         *tview.Flex  // Container with border
+	renderState       state.RenderState
+	selectionState    state.SelectionState
+	mm                *stats.MetricsManager
 	onSelectionChange func(metrics stats.MetricsReader) // Callback when selection changes
 }
 
@@ -28,8 +29,17 @@ func NewHostListPanel(state HostListParams, mm *stats.MetricsManager) *HostListP
 	table := tview.NewTable().
 		SetSelectable(true, false)
 
+	// Create container with border and title
+	container := tview.NewFlex().
+		SetDirection(tview.FlexRow).
+		AddItem(table, 0, 1, true)
+	
+	container.SetBorder(true).
+		SetTitle(" Host List ")
+
 	panel := &HostListPanel{
 		table:          table,
+		container:      container,
 		renderState:    state,
 		selectionState: state,
 		mm:             mm,
@@ -46,7 +56,7 @@ func (h *HostListPanel) Update() {
 
 	// Clear existing content and repopulate
 	h.table.Clear()
-	
+
 	// Configure table settings
 	h.table.
 		SetBorders(false).
@@ -56,7 +66,7 @@ func (h *HostListPanel) Update() {
 		SetSelectedStyle(tcell.StyleDefault.
 			Background(tcell.ColorDarkGreen).
 			Foreground(tcell.ColorWhite))
-	
+
 	// Use TableData's logic but populate our existing table
 	h.populateTableFromData(tableData)
 
@@ -83,11 +93,11 @@ func (h *HostListPanel) updateSelectedHost() {
 	metrics := h.getFilteredMetrics()
 	tableData := shared.NewTableData(metrics, h.renderState.GetSortKey(), h.renderState.IsAscending())
 	selectedHost := h.GetSelectedHost(tableData)
-	
+
 	// Only update if the selection actually changed to avoid loops
 	if h.selectionState.GetSelectedHost() != selectedHost {
 		h.selectionState.SetSelectedHost(selectedHost)
-		
+
 		// Call the callback to update detail panel with metrics object
 		if metric, ok := h.GetSelectedMetric(tableData); ok && h.onSelectionChange != nil {
 			h.onSelectionChange(metric)
@@ -96,8 +106,8 @@ func (h *HostListPanel) updateSelectedHost() {
 }
 
 // GetView returns the underlying tview component
-func (h *HostListPanel) GetView() *tview.Table {
-	return h.table
+func (h *HostListPanel) GetView() tview.Primitive {
+	return h.container
 }
 
 // GetSelectedMetric returns the currently selected metric
@@ -186,7 +196,6 @@ func (h *HostListPanel) PageUp() {
 	h.updateSelectedHost()
 }
 
-
 // populateTableFromData populates our table using TableData content
 func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 	// Define alignment for each column (same as in shared/table_data.go)
@@ -250,4 +259,20 @@ func (h *HostListPanel) restoreSelection(tableData *shared.TableData, selectedHo
 	if h.table.GetRowCount() > 1 {
 		h.table.Select(1, 0)
 	}
+}
+
+// GetSelectedMetrics returns the currently selected metrics
+func (h *HostListPanel) GetSelectedMetrics() stats.MetricsReader {
+	metrics := h.getFilteredMetrics()
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	row, _ := h.table.GetSelection()
+	// row 0 is header, so data starts from row 1
+	if row >= 1 && row-1 < len(metrics) {
+		return metrics[row-1]
+	}
+
+	return nil
 }

@@ -124,6 +124,12 @@ func (l *LayoutManager) ToggleDetailView() {
 func (l *LayoutManager) showDetailView() {
 	l.mode = ListWithDetail
 	
+	// Get currently selected metrics and set them in the detail panel
+	selectedMetrics := l.hostList.GetSelectedMetrics()
+	if selectedMetrics != nil {
+		l.hostDetail.SetMetrics(selectedMetrics)
+	}
+	
 	// Create horizontal layout for host list and detail
 	mainContent := tview.NewFlex().
 		SetDirection(tview.FlexColumn).
