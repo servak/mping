@@ -12,26 +12,26 @@ const (
 	DefaultHistorySize = 100 // Default number of history entries to keep
 )
 
-type MetricsManager struct {
+type metricsManager struct {
 	metrics     map[string]*Metrics
 	historySize int // Number of history entries to keep
 	mu          sync.Mutex
 }
 
 // Create a new MetricsManager
-func NewMetricsManager() *MetricsManager {
+func NewMetricsManager() MetricsManager {
 	return NewMetricsManagerWithHistorySize(DefaultHistorySize)
 }
 
 // Create MetricsManager with specified history size
-func NewMetricsManagerWithHistorySize(historySize int) *MetricsManager {
-	return &MetricsManager{
+func NewMetricsManagerWithHistorySize(historySize int) MetricsManager {
+	return &metricsManager{
 		metrics:     make(map[string]*Metrics),
 		historySize: historySize,
 	}
 }
 
-func (mm *MetricsManager) Register(target, name string) {
+func (mm *metricsManager) Register(target, name string) {
 	v, ok := mm.metrics[target]
 	if ok && v.Name != target {
 		return
@@ -43,7 +43,7 @@ func (mm *MetricsManager) Register(target, name string) {
 }
 
 // 指定されたホストのMetricsを取得（内部用）
-func (mm *MetricsManager) getMetrics(host string) *Metrics {
+func (mm *metricsManager) getMetrics(host string) *Metrics {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 
@@ -59,12 +59,12 @@ func (mm *MetricsManager) getMetrics(host string) *Metrics {
 }
 
 // 指定されたホストのMetricsを取得（外部用）
-func (mm *MetricsManager) GetMetrics(host string) MetricsReader {
+func (mm *metricsManager) GetMetrics(host string) MetricsReader {
 	return mm.getMetrics(host)
 }
 
 // 全てのMetricsをリセット
-func (mm *MetricsManager) ResetAllMetrics() {
+func (mm *metricsManager) ResetAllMetrics() {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 
@@ -74,12 +74,12 @@ func (mm *MetricsManager) ResetAllMetrics() {
 }
 
 // Register success for host
-func (mm *MetricsManager) Success(host string, rtt time.Duration, sentTime time.Time, details *prober.ProbeDetails) {
+func (mm *metricsManager) Success(host string, rtt time.Duration, sentTime time.Time, details *prober.ProbeDetails) {
 	mm.SuccessWithDetails(host, rtt, sentTime, details)
 }
 
 // Register success for host with detailed information
-func (mm *MetricsManager) SuccessWithDetails(host string, rtt time.Duration, sentTime time.Time, details *prober.ProbeDetails) {
+func (mm *metricsManager) SuccessWithDetails(host string, rtt time.Duration, sentTime time.Time, details *prober.ProbeDetails) {
 	m := mm.getMetrics(host)
 
 	mm.mu.Lock()
@@ -96,7 +96,7 @@ func (mm *MetricsManager) SuccessWithDetails(host string, rtt time.Duration, sen
 }
 
 // Register failure for host
-func (mm *MetricsManager) Failed(host string, sentTime time.Time, msg string) {
+func (mm *metricsManager) Failed(host string, sentTime time.Time, msg string) {
 	m := mm.getMetrics(host)
 
 	mm.mu.Lock()
@@ -112,7 +112,7 @@ func (mm *MetricsManager) Failed(host string, sentTime time.Time, msg string) {
 	mm.mu.Unlock()
 }
 
-func (mm *MetricsManager) Sent(host string) {
+func (mm *metricsManager) Sent(host string) {
 	m := mm.getMetrics(host)
 
 	mm.mu.Lock()
@@ -120,7 +120,7 @@ func (mm *MetricsManager) Sent(host string) {
 	mm.mu.Unlock()
 }
 
-func (mm *MetricsManager) Subscribe(res <-chan *prober.Event) {
+func (mm *metricsManager) Subscribe(res <-chan *prober.Event) {
 	go func() {
 		for r := range res {
 			switch r.Result {
@@ -140,7 +140,7 @@ func (mm *MetricsManager) Subscribe(res <-chan *prober.Event) {
 }
 
 // autoRegister automatically registers target if not already registered
-func (mm *MetricsManager) autoRegister(key, displayName string) {
+func (mm *metricsManager) autoRegister(key, displayName string) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 
@@ -152,67 +152,15 @@ func (mm *MetricsManager) autoRegister(key, displayName string) {
 	}
 }
 
-func (mm *MetricsManager) SortBy(k Key, ascending bool) []MetricsReader {
+// SortBy sorts metrics by specified key and returns MetricsReader slice
+func (mm *metricsManager) SortBy(k Key, ascending bool) []MetricsReader {
 	mm.mu.Lock()
 	var res []MetricsReader
 	for _, m := range mm.metrics {
 		res = append(res, m)
 	}
 	mm.mu.Unlock()
-	if k != Host {
-		sort.SliceStable(res, func(i, j int) bool {
-			return res[i].GetName() < res[j].GetName()
-		})
-	}
-	sort.SliceStable(res, func(i, j int) bool {
-		mi := res[i]
-		mj := res[j]
-		var result bool
-		switch k {
-		case Host:
-			result = res[i].GetName() < res[j].GetName()
-		case Sent:
-			result = mi.GetTotal() < mj.GetTotal()
-		case Success:
-			result = mi.GetSuccessful() < mj.GetSuccessful()
-		case Loss:
-			result = mi.GetLoss() < mj.GetLoss()
-		case Fail:
-			result = mi.GetFailed() < mj.GetFailed()
-		case Last:
-			result = rejectLessAscending(mi.GetLastRTT(), mj.GetLastRTT())
-		case Avg:
-			result = rejectLessAscending(mi.GetAverageRTT(), mj.GetAverageRTT())
-		case Best:
-			result = rejectLessAscending(mi.GetMinimumRTT(), mj.GetMinimumRTT())
-		case Worst:
-			result = rejectLessAscending(mi.GetMaximumRTT(), mj.GetMaximumRTT())
-		case LastSuccTime:
-			result = mi.GetLastSuccTime().Before(mj.GetLastSuccTime())
-		case LastFailTime:
-			result = mi.GetLastFailTime().Before(mj.GetLastFailTime())
-		default:
-			return false
-		}
 
-		if ascending {
-			return result
-		} else {
-			return !result
-		}
-	})
-	return res
-}
-
-// SortByWithReader is a version that uses the MetricsReader interface
-func (mm *MetricsManager) SortByWithReader(k Key, ascending bool) []MetricsReader {
-	mm.mu.Lock()
-	var res []MetricsReader
-	for _, m := range mm.metrics {
-		res = append(res, m)
-	}
-	mm.mu.Unlock()
-	
 	if k != Host {
 		sort.SliceStable(res, func(i, j int) bool {
 			return res[i].GetName() < res[j].GetName()
@@ -258,45 +206,8 @@ func (mm *MetricsManager) SortByWithReader(k Key, ascending bool) []MetricsReade
 	return res
 }
 
-// GetAllTargets retrieves a list of all targets
-func (mm *MetricsManager) GetAllTargets() []string {
-	mm.mu.Lock()
-	defer mm.mu.Unlock()
-	
-	var targets []string
-	for target := range mm.metrics {
-		targets = append(targets, target)
-	}
-	return targets
-}
-
-// GetTargetHistory retrieves the history of the specified target
-func (mm *MetricsManager) GetTargetHistory(target string, n int) []HistoryEntry {
-	mm.mu.Lock()
-	defer mm.mu.Unlock()
-	
-	if m, exists := mm.metrics[target]; exists && m.history != nil {
-		return m.history.GetRecentEntries(n)
-	}
-	return []HistoryEntry{}
-}
-
-// GetAllTargetsRecentHistory retrieves the recent history of all targets
-func (mm *MetricsManager) GetAllTargetsRecentHistory(n int) map[string][]HistoryEntry {
-	mm.mu.Lock()
-	defer mm.mu.Unlock()
-	
-	result := make(map[string][]HistoryEntry)
-	for target, m := range mm.metrics {
-		if m.history != nil {
-			result[target] = m.history.GetRecentEntries(n)
-		}
-	}
-	return result
-}
-
 // GetMetricsAsReader retrieves as MetricsReader interface
-func (mm *MetricsManager) GetMetricsAsReader(target string) MetricsReader {
+func (mm *metricsManager) GetMetricsAsReader(target string) MetricsReader {
 	return mm.getMetrics(target)
 }
 
@@ -304,10 +215,10 @@ func (mm *MetricsManager) GetMetricsAsReader(target string) MetricsReader {
 // Zero values (unmeasured) are always placed at the end
 func rejectLessAscending(i, j time.Duration) bool {
 	if i == 0 {
-		return false  // If i is 0, put j first
+		return false // If i is 0, put j first
 	}
 	if j == 0 {
-		return true   // If j is 0, put i first
+		return true // If j is 0, put i first
 	}
-	return i < j      // If both are non-zero, put the smaller one first
+	return i < j // If both are non-zero, put the smaller one first
 }

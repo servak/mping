@@ -126,12 +126,6 @@ func (m *Metrics) GetRecentHistory(n int) []HistoryEntry {
 	return m.history.GetRecentEntries(n)
 }
 
-func (m *Metrics) GetHistorySince(since time.Time) []HistoryEntry {
-	if m.history == nil {
-		return []HistoryEntry{}
-	}
-	return m.history.GetEntriesSince(since)
-}
 
 func (m *Metrics) GetConsecutiveFailures() int {
 	if m.history == nil {

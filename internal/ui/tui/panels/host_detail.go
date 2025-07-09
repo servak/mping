@@ -13,11 +13,10 @@ type HostDetailPanel struct {
 	container      *tview.Flex  // Container with border
 	currentHost    string
 	currentMetrics stats.MetricsReader
-	mm             stats.MetricsProvider
 }
 
 // NewHostDetailPanel creates a new HostDetailPanel
-func NewHostDetailPanel(mm stats.MetricsProvider) *HostDetailPanel {
+func NewHostDetailPanel() *HostDetailPanel {
 	view := tview.NewTextView()
 	view.SetDynamicColors(true).
 		SetScrollable(true)
@@ -33,7 +32,6 @@ func NewHostDetailPanel(mm stats.MetricsProvider) *HostDetailPanel {
 	return &HostDetailPanel{
 		view:      view,
 		container: container,
-		mm:        mm,
 	}
 }
 

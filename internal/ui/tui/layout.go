@@ -44,7 +44,7 @@ type LayoutManager struct {
 }
 
 // NewLayoutManager creates a new LayoutManager
-func NewLayoutManager(uiState *state.UIState, mm stats.MetricsManagerInterface, config *shared.Config, interval, timeout time.Duration) *LayoutManager {
+func NewLayoutManager(uiState *state.UIState, mm stats.MetricsManager, config *shared.Config, interval, timeout time.Duration) *LayoutManager {
 	layout := &LayoutManager{
 		mode: ListOnly,
 	}
@@ -57,11 +57,11 @@ func NewLayoutManager(uiState *state.UIState, mm stats.MetricsManagerInterface, 
 }
 
 // setupPanels initializes all panels
-func (l *LayoutManager) setupPanels(uiState *state.UIState, mm stats.MetricsManagerInterface, config *shared.Config, interval, timeout time.Duration) {
+func (l *LayoutManager) setupPanels(uiState *state.UIState, mm stats.MetricsProvider, config *shared.Config, interval, timeout time.Duration) {
 	l.header = panels.NewHeaderPanel(uiState, config, interval, timeout)
 	l.hostList = panels.NewHostListPanel(uiState, mm)
 	l.footer = panels.NewFooterPanel(config)
-	l.hostDetail = panels.NewHostDetailPanel(mm)
+	l.hostDetail = panels.NewHostDetailPanel()
 
 	// Setup filter input
 	l.filterInput = tview.NewInputField().
@@ -123,18 +123,18 @@ func (l *LayoutManager) ToggleDetailView() {
 // showDetailView switches to dual pane layout
 func (l *LayoutManager) showDetailView() {
 	l.mode = ListWithDetail
-	
+
 	// Get currently selected metrics and set them in the detail panel
 	selectedMetrics := l.hostList.GetSelectedMetrics()
 	if selectedMetrics != nil {
 		l.hostDetail.SetMetrics(selectedMetrics)
 	}
-	
+
 	// Create horizontal layout for host list and detail
 	mainContent := tview.NewFlex().
 		SetDirection(tview.FlexColumn).
-		AddItem(l.hostList.GetView(), 0, 2, true).    // Host list takes 2/3
-		AddItem(l.hostDetail.GetView(), 0, 1, false)  // Detail takes 1/3
+		AddItem(l.hostList.GetView(), 0, 2, true).   // Host list takes 2/3
+		AddItem(l.hostDetail.GetView(), 0, 1, false) // Detail takes 1/3
 
 	// Rebuild root layout with dual pane
 	l.root.Clear()
@@ -146,7 +146,7 @@ func (l *LayoutManager) showDetailView() {
 // hideDetailView switches to single pane layout
 func (l *LayoutManager) hideDetailView() {
 	l.mode = ListOnly
-	
+
 	// Rebuild root layout with single pane
 	l.root.Clear()
 	l.root.AddItem(l.header.GetView(), 1, 0, false).
@@ -159,7 +159,7 @@ func (l *LayoutManager) UpdateAll() {
 	l.header.Update()
 	l.footer.Update()
 	l.hostList.Update()
-	
+
 	// Only update detail panel when it's visible
 	if l.mode == ListWithDetail {
 		l.hostDetail.Update()

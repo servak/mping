@@ -17,7 +17,7 @@ type TUIApp struct {
 	app      *tview.Application
 	layout   *LayoutManager
 	state    *state.UIState
-	mm       stats.MetricsManagerInterface
+	mm       stats.MetricsManager
 	config   *shared.Config
 	interval time.Duration
 	timeout  time.Duration
@@ -26,7 +26,7 @@ type TUIApp struct {
 }
 
 // NewTUIApp creates a new TUIApp instance
-func NewTUIApp(mm stats.MetricsManagerInterface, cfg *shared.Config, interval, timeout time.Duration) *TUIApp {
+func NewTUIApp(mm stats.MetricsManager, cfg *shared.Config, interval, timeout time.Duration) *TUIApp {
 	if cfg == nil {
 		cfg = shared.DefaultConfig()
 	}
@@ -88,7 +88,7 @@ func (a *TUIApp) setupCallbacks() {
 
 	// Set row selection callback
 	a.layout.GetHostListPanel().SetSelectedFunc(a.handleRowSelection)
-	
+
 	// Set selection change callback for detail panel updates
 	a.layout.GetHostListPanel().SetSelectionChangeCallback(func(metrics stats.MetricsReader) {
 		a.layout.SetSelectedMetrics(metrics)
@@ -112,7 +112,6 @@ func (a *TUIApp) setupKeyBindings() {
 			}
 			return event
 		}
-
 
 		// When filter input is visible, let it handle its own keys
 		if a.layout.IsFilterShown() {
@@ -298,10 +297,8 @@ func (a *TUIApp) handleRowSelection(row, col int) {
 	}
 }
 
-
 // getFilteredMetrics returns filtered metrics based on current state
 func (a *TUIApp) getFilteredMetrics() []stats.MetricsReader {
-	metrics := a.mm.SortByWithReader(a.state.GetSortKey(), a.state.IsAscending())
+	metrics := a.mm.SortBy(a.state.GetSortKey(), a.state.IsAscending())
 	return shared.FilterMetrics(metrics, a.state.GetFilter())
 }
-

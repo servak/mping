@@ -3,7 +3,7 @@ package stats
 import (
 	"testing"
 	"time"
-	
+
 	"github.com/servak/mping/internal/prober"
 )
 
@@ -87,7 +87,10 @@ func TestTargetHistory(t *testing.T) {
 }
 
 func TestMetricsWithHistory(t *testing.T) {
-	mm := NewMetricsManager()
+	mm := metricsManager{
+		metrics:     make(map[string]*Metrics),
+		historySize: DefaultHistorySize, // Set history size for testing
+	}
 	host := "example.com"
 
 	// Record success
@@ -98,7 +101,7 @@ func TestMetricsWithHistory(t *testing.T) {
 			Payload:  "test",
 		},
 	}
-	mm.SuccessWithDetails(host, 50*time.Millisecond, time.Now(), details)
+	mm.Success(host, 50*time.Millisecond, time.Now(), details)
 
 	// メトリクスを取得
 	metrics := mm.GetMetrics(host)
@@ -146,7 +149,7 @@ func TestSuccessRateInPeriod(t *testing.T) {
 			Success:   true,
 		})
 	}
-	
+
 	// Add 5 failures
 	for i := 0; i < 5; i++ {
 		th.AddEntry(HistoryEntry{

@@ -84,7 +84,7 @@ func (h *HostListPanel) Update() {
 
 // getFilteredMetrics returns filtered metrics based on current state
 func (h *HostListPanel) getFilteredMetrics() []stats.MetricsReader {
-	metrics := h.mm.SortByWithReader(h.renderState.GetSortKey(), h.renderState.IsAscending())
+	metrics := h.mm.SortBy(h.renderState.GetSortKey(), h.renderState.IsAscending())
 	return shared.FilterMetrics(metrics, h.renderState.GetFilter())
 }
 
