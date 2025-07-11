@@ -107,7 +107,7 @@ func (l *LayoutManager) SetSelectedHost(hostname string) {
 }
 
 // SetSelectedMetrics updates the detail panel with the selected metrics
-func (l *LayoutManager) SetSelectedMetrics(metrics stats.MetricsReader) {
+func (l *LayoutManager) SetSelectedMetrics(metrics stats.Metrics) {
 	l.hostDetail.SetMetrics(metrics)
 }
 

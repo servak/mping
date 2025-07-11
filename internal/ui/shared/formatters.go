@@ -29,7 +29,7 @@ func TimeFormater(t time.Time) string {
 }
 
 // FormatHostDetail generates detailed information for a host
-func FormatHostDetail(metric stats.MetricsReader) string {
+func FormatHostDetail(metric stats.Metrics) string {
 	// Color-coded basic statistics
 	lossRate := metric.GetLoss()
 	lossColor := "green"
@@ -38,17 +38,17 @@ func FormatHostDetail(metric stats.MetricsReader) string {
 	} else if lossRate > 10 {
 		lossColor = "yellow"
 	}
-	
+
 	successColor := "green"
 	if metric.GetSuccessful() == 0 {
 		successColor = "red"
 	}
-	
+
 	failColor := "white"
 	if metric.GetFailed() > 0 {
 		failColor = "red"
 	}
-	
+
 	basicInfo := fmt.Sprintf(`[cyan]Total Probes:[white] %d
 [%s]Successful:[white] %d
 [%s]Failed:[white] %d
@@ -82,9 +82,8 @@ func FormatHostDetail(metric stats.MetricsReader) string {
 	return basicInfo
 }
 
-
 // FormatHistory generates history section for a host
-func FormatHistory(metric stats.MetricsReader) string {
+func FormatHistory(metric stats.Metrics) string {
 	history := metric.GetRecentHistory(10)
 	if len(history) == 0 {
 		return ""
@@ -99,7 +98,7 @@ func FormatHistory(metric stats.MetricsReader) string {
 		statusColor := "green"
 		status := "OK"
 		details := ""
-		
+
 		if !entry.Success {
 			status = "FAIL"
 			statusColor = "red"
@@ -136,22 +135,21 @@ func formatProbeDetails(details *prober.ProbeDetails) string {
 			var parts []string
 			parts = append(parts, fmt.Sprintf("seq=%d", details.ICMP.Sequence))
 			parts = append(parts, fmt.Sprintf("size=%d", details.ICMP.PacketSize))
-			
-			
+
 			if details.ICMP.ICMPType >= 0 {
 				parts = append(parts, fmt.Sprintf("type=%d", details.ICMP.ICMPType))
 			}
-			
+
 			if details.ICMP.Payload != "" {
 				parts = append(parts, fmt.Sprintf("payload=%s", details.ICMP.Payload))
 			}
-			
+
 			return strings.Join(parts, " ")
 		}
 		return "icmp ping"
 	case "http", "https":
 		if details.HTTP != nil {
-			return fmt.Sprintf("status=%d size=%d", 
+			return fmt.Sprintf("status=%d size=%d",
 				details.HTTP.StatusCode, details.HTTP.ResponseSize)
 		}
 		return "http probe"
@@ -161,11 +159,11 @@ func formatProbeDetails(details *prober.ProbeDetails) string {
 			if details.DNS.UseTCP {
 				proto = "tcp "
 			}
-			
+
 			// Show just the essential info: protocol, response code, answer count, and first answer
-			baseInfo := fmt.Sprintf("%scode=%d ans=%d", 
+			baseInfo := fmt.Sprintf("%scode=%d ans=%d",
 				proto, details.DNS.ResponseCode, details.DNS.AnswerCount)
-			
+
 			// Add first answer if available
 			if len(details.DNS.Answers) > 0 {
 				firstAnswer := extractDNSAnswer(details.DNS.Answers[0])
@@ -173,21 +171,21 @@ func formatProbeDetails(details *prober.ProbeDetails) string {
 					baseInfo += " " + firstAnswer
 				}
 			}
-			
+
 			return baseInfo
 		}
 		return "dns query"
 	case "ntp":
 		if details.NTP != nil {
 			offset := time.Duration(details.NTP.Offset) * time.Microsecond
-			return fmt.Sprintf("stratum=%d offset=%s", 
+			return fmt.Sprintf("stratum=%d offset=%s",
 				details.NTP.Stratum, DurationFormater(offset))
 		}
 		return "ntp sync"
 	case "tcp":
 		return "connection"
 	}
-	
+
 	return ""
 }
 
@@ -197,22 +195,22 @@ func extractDNSAnswer(record string) string {
 	if record == "" {
 		return ""
 	}
-	
+
 	// Split by whitespace and get the last part (the answer value)
 	parts := strings.Fields(record)
 	if len(parts) == 0 {
 		return ""
 	}
-	
+
 	// The last part is usually the answer value
 	answer := parts[len(parts)-1]
-	
+
 	// Truncate very long answers (like long TXT records)
 	// TODO: Make this configurable in the future
 	maxAnswerLength := 35
 	if len(answer) > maxAnswerLength {
 		answer = answer[:maxAnswerLength-3] + "..."
 	}
-	
+
 	return answer
 }

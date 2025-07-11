@@ -13,7 +13,7 @@ const (
 )
 
 type metricsManager struct {
-	metrics     map[string]*Metrics
+	metrics     map[string]*metrics
 	historySize int // Number of history entries to keep
 	mu          sync.Mutex
 }
@@ -26,7 +26,7 @@ func NewMetricsManager() MetricsManager {
 // Create MetricsManager with specified history size
 func NewMetricsManagerWithHistorySize(historySize int) MetricsManager {
 	return &metricsManager{
-		metrics:     make(map[string]*Metrics),
+		metrics:     make(map[string]*metrics),
 		historySize: historySize,
 	}
 }
@@ -36,34 +36,33 @@ func (mm *metricsManager) Register(target, name string) {
 	if ok && v.Name != target {
 		return
 	}
-	mm.metrics[target] = &Metrics{
+	mm.metrics[target] = &metrics{
 		Name:    name,
 		history: NewTargetHistory(mm.historySize),
 	}
 }
 
 // 指定されたホストのMetricsを取得（内部用）
-func (mm *metricsManager) getMetrics(host string) *Metrics {
+func (mm *metricsManager) getMetrics(host string) *metrics {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 
 	m, ok := mm.metrics[host]
 	if !ok {
-		m = &Metrics{
+		m = &metrics{
 			Name:    host,
 			history: NewTargetHistory(mm.historySize),
 		}
+		// Register the new metrics for the host
 		mm.metrics[host] = m
 	}
 	return m
 }
 
-// 指定されたホストのMetricsを取得（外部用）
-func (mm *metricsManager) GetMetrics(host string) MetricsReader {
+func (mm *metricsManager) GetMetrics(host string) Metrics {
 	return mm.getMetrics(host)
 }
 
-// 全てのMetricsをリセット
 func (mm *metricsManager) ResetAllMetrics() {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
@@ -145,17 +144,17 @@ func (mm *metricsManager) autoRegister(key, displayName string) {
 	defer mm.mu.Unlock()
 
 	if _, exists := mm.metrics[key]; !exists {
-		mm.metrics[key] = &Metrics{
+		mm.metrics[key] = &metrics{
 			Name:    displayName,
 			history: NewTargetHistory(mm.historySize),
 		}
 	}
 }
 
-// SortBy sorts metrics by specified key and returns MetricsReader slice
-func (mm *metricsManager) SortBy(k Key, ascending bool) []MetricsReader {
+// SortBy sorts metrics by specified key and returns Metrics slice
+func (mm *metricsManager) SortBy(k Key, ascending bool) []Metrics {
 	mm.mu.Lock()
-	var res []MetricsReader
+	var res []Metrics
 	for _, m := range mm.metrics {
 		res = append(res, m)
 	}
@@ -206,8 +205,8 @@ func (mm *metricsManager) SortBy(k Key, ascending bool) []MetricsReader {
 	return res
 }
 
-// GetMetricsAsReader retrieves as MetricsReader interface
-func (mm *metricsManager) GetMetricsAsReader(target string) MetricsReader {
+// GetMetricsAsReader retrieves as Metrics interface
+func (mm *metricsManager) GetMetricsAsReader(target string) Metrics {
 	return mm.getMetrics(target)
 }
 

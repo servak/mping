@@ -2,49 +2,24 @@ package shared
 
 import (
 	"testing"
-	"time"
 
 	"github.com/servak/mping/internal/stats"
 )
 
 func TestFilterMetrics(t *testing.T) {
 	// Create test metrics
-	metrics := []stats.MetricsReader{
-		&stats.Metrics{
-			Name:         "google.com",
-			Total:        100,
-			Successful:   95,
-			Failed:       5,
-			LastSuccTime: time.Now(),
-		},
-		&stats.Metrics{
-			Name:         "yahoo.com",
-			Total:        50,
-			Successful:   48,
-			Failed:       2,
-			LastSuccTime: time.Now(),
-		},
-		&stats.Metrics{
-			Name:         "example.org",
-			Total:        25,
-			Successful:   25,
-			Failed:       0,
-			LastSuccTime: time.Now(),
-		},
-		&stats.Metrics{
-			Name:         "test.net",
-			Total:        10,
-			Successful:   8,
-			Failed:       2,
-			LastSuccTime: time.Now(),
-		},
+	metrics := []stats.Metrics{
+		stats.NewMetrics("google.com", 1),
+		stats.NewMetrics("yahoo.com", 1),
+		stats.NewMetrics("example.org", 1),
+		stats.NewMetrics("test.net", 1),
 	}
 
 	tests := []struct {
-		name           string
-		filterText     string
-		expectedCount  int
-		expectedNames  []string
+		name          string
+		filterText    string
+		expectedCount int
+		expectedNames []string
 	}{
 		{
 			name:          "empty filter returns all metrics",
@@ -130,10 +105,10 @@ func TestFilterMetrics(t *testing.T) {
 }
 
 func TestFilterMetricsPreservesOrder(t *testing.T) {
-	metrics := []stats.MetricsReader{
-		&stats.Metrics{Name: "alpha.com"},
-		&stats.Metrics{Name: "beta.com"},
-		&stats.Metrics{Name: "gamma.com"},
+	metrics := []stats.Metrics{
+		stats.NewMetrics("alpha.com", 1),
+		stats.NewMetrics("beta.com", 1),
+		stats.NewMetrics("gamma.com", 1),
 	}
 
 	result := FilterMetrics(metrics, ".com")
@@ -147,7 +122,7 @@ func TestFilterMetricsPreservesOrder(t *testing.T) {
 }
 
 func TestFilterMetricsWithEmptyMetrics(t *testing.T) {
-	var metrics []stats.MetricsReader
+	var metrics []stats.Metrics
 
 	result := FilterMetrics(metrics, "test")
 
@@ -157,14 +132,14 @@ func TestFilterMetricsWithEmptyMetrics(t *testing.T) {
 }
 
 func TestFilterMetricsDoesNotModifyOriginal(t *testing.T) {
-	original := []stats.MetricsReader{
-		&stats.Metrics{Name: "test1.com"},
-		&stats.Metrics{Name: "test2.com"},
-		&stats.Metrics{Name: "example.org"},
+	original := []stats.Metrics{
+		stats.NewMetrics("test1.com", 1),
+		stats.NewMetrics("test2.com", 1),
+		stats.NewMetrics("example.org", 1),
 	}
 
 	// Create a copy to compare later
-	originalCopy := make([]stats.MetricsReader, len(original))
+	originalCopy := make([]stats.Metrics, len(original))
 	copy(originalCopy, original)
 
 	// Filter metrics

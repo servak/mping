@@ -88,7 +88,7 @@ func TestTargetHistory(t *testing.T) {
 
 func TestMetricsWithHistory(t *testing.T) {
 	mm := metricsManager{
-		metrics:     make(map[string]*Metrics),
+		metrics:     make(map[string]*metrics),
 		historySize: DefaultHistorySize, // Set history size for testing
 	}
 	host := "example.com"

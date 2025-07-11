@@ -6,8 +6,8 @@ import (
 	"github.com/servak/mping/internal/prober"
 )
 
-// BasicMetrics provides basic statistics for display and sorting
-type BasicMetrics interface {
+// Metrics provides basic statistics for display and sorting
+type Metrics interface {
 	GetName() string
 	GetTotal() int
 	GetSuccessful() int
@@ -27,14 +27,9 @@ type BasicMetrics interface {
 	GetSuccessRateInPeriod(duration time.Duration) float64
 }
 
-// MetricsReader provides complete read access to metrics including history and detailed analysis
-type MetricsReader interface {
-	BasicMetrics
-}
-
 // MetricsProvider provides external API for metrics access
 type MetricsProvider interface {
-	SortBy(k Key, ascending bool) []MetricsReader
+	SortBy(k Key, ascending bool) []Metrics
 }
 
 // MetricsSystemManager provides system-level operations

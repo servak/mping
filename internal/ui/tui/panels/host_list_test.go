@@ -16,21 +16,21 @@ type mockState struct {
 	selectedHost string
 }
 
-func (m *mockState) GetSortKey() stats.Key        { return m.sortKey }
+func (m *mockState) GetSortKey() stats.Key       { return m.sortKey }
 func (m *mockState) SetSortKey(key stats.Key)    { m.sortKey = key }
-func (m *mockState) IsAscending() bool            { return m.ascending }
-func (m *mockState) ReverseSort()                 { m.ascending = !m.ascending }
-func (m *mockState) GetFilter() string            { return m.filter }
+func (m *mockState) IsAscending() bool           { return m.ascending }
+func (m *mockState) ReverseSort()                { m.ascending = !m.ascending }
+func (m *mockState) GetFilter() string           { return m.filter }
 func (m *mockState) SetFilter(filter string)     { m.filter = filter }
-func (m *mockState) ClearFilter()                 { m.filter = "" }
-func (m *mockState) GetSelectedHost() string      { return m.selectedHost }
-func (m *mockState) SetSelectedHost(host string)  { m.selectedHost = host }
+func (m *mockState) ClearFilter()                { m.filter = "" }
+func (m *mockState) GetSelectedHost() string     { return m.selectedHost }
+func (m *mockState) SetSelectedHost(host string) { m.selectedHost = host }
 
 func newMockState() *mockState {
 	return &mockState{
-		sortKey:   stats.Success,
-		ascending: false,
-		filter:    "",
+		sortKey:      stats.Success,
+		ascending:    false,
+		filter:       "",
 		selectedHost: "",
 	}
 }
@@ -276,9 +276,9 @@ func TestHostListPanelRestoreSelection(t *testing.T) {
 	mm.Register("google.com", "google.com")
 	mm.Register("example.com", "example.com")
 
-	metrics := []stats.MetricsReader{
-		&stats.Metrics{Name: "google.com"},
-		&stats.Metrics{Name: "example.com"},
+	metrics := []stats.Metrics{
+		stats.NewMetrics("google.com", 1),
+		stats.NewMetrics("example.com", 1),
 	}
 	tableData := shared.NewTableData(metrics, stats.Success, false)
 
@@ -292,4 +292,3 @@ func TestHostListPanelRestoreSelection(t *testing.T) {
 	panel.restoreSelection(tableData, "google.com")
 	panel.restoreSelection(tableData, "nonexistent.com")
 }
-

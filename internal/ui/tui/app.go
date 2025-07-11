@@ -90,7 +90,7 @@ func (a *TUIApp) setupCallbacks() {
 	a.layout.GetHostListPanel().SetSelectedFunc(a.handleRowSelection)
 
 	// Set selection change callback for detail panel updates
-	a.layout.GetHostListPanel().SetSelectionChangeCallback(func(metrics stats.MetricsReader) {
+	a.layout.GetHostListPanel().SetSelectionChangeCallback(func(metrics stats.Metrics) {
 		a.layout.SetSelectedMetrics(metrics)
 	})
 }
@@ -298,7 +298,7 @@ func (a *TUIApp) handleRowSelection(row, col int) {
 }
 
 // getFilteredMetrics returns filtered metrics based on current state
-func (a *TUIApp) getFilteredMetrics() []stats.MetricsReader {
+func (a *TUIApp) getFilteredMetrics() []stats.Metrics {
 	metrics := a.mm.SortBy(a.state.GetSortKey(), a.state.IsAscending())
 	return shared.FilterMetrics(metrics, a.state.GetFilter())
 }

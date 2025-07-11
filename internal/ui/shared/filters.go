@@ -7,12 +7,12 @@ import (
 )
 
 // FilterMetrics filters metrics based on filter text
-func FilterMetrics(metrics []stats.MetricsReader, filterText string) []stats.MetricsReader {
+func FilterMetrics(metrics []stats.Metrics, filterText string) []stats.Metrics {
 	if filterText == "" {
 		return metrics
 	}
-	
-	filtered := []stats.MetricsReader{}
+
+	filtered := []stats.Metrics{}
 	filterLower := strings.ToLower(filterText)
 	for _, m := range metrics {
 		if strings.Contains(strings.ToLower(m.GetName()), filterLower) {

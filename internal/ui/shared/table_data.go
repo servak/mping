@@ -15,11 +15,11 @@ import (
 type TableData struct {
 	Headers []string
 	Rows    [][]string
-	Metrics []stats.MetricsReader // Keep reference for interactive row selection
+	Metrics []stats.Metrics // Keep reference for interactive row selection
 }
 
 // NewTableData creates TableData from metrics
-func NewTableData(metrics []stats.MetricsReader, sortKey stats.Key, ascending bool) *TableData {
+func NewTableData(metrics []stats.Metrics, sortKey stats.Key, ascending bool) *TableData {
 	// Generate headers with sort arrows
 	headers := []string{
 		headerWithArrow("Host", stats.Host, sortKey, ascending),
@@ -151,7 +151,7 @@ func (td *TableData) ToTviewTable() *tview.Table {
 }
 
 // GetMetricAtRow returns the metric for a given row index
-func (td *TableData) GetMetricAtRow(row int) (stats.MetricsReader, bool) {
+func (td *TableData) GetMetricAtRow(row int) (stats.Metrics, bool) {
 	if row < 0 || row >= len(td.Metrics) {
 		return nil, false
 	}

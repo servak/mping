@@ -12,11 +12,11 @@ import (
 // HostListPanel manages host list table display
 type HostListPanel struct {
 	table             *tview.Table
-	container         *tview.Flex  // Container with border
+	container         *tview.Flex // Container with border
 	renderState       state.RenderState
 	selectionState    state.SelectionState
 	mm                stats.MetricsProvider
-	onSelectionChange func(metrics stats.MetricsReader) // Callback when selection changes
+	onSelectionChange func(metrics stats.Metrics) // Callback when selection changes
 }
 
 type HostListParams interface {
@@ -33,7 +33,7 @@ func NewHostListPanel(state HostListParams, mm stats.MetricsProvider) *HostListP
 	container := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(table, 0, 1, true)
-	
+
 	container.SetBorder(true).
 		SetTitle(" Host List ")
 
@@ -83,7 +83,7 @@ func (h *HostListPanel) Update() {
 }
 
 // getFilteredMetrics returns filtered metrics based on current state
-func (h *HostListPanel) getFilteredMetrics() []stats.MetricsReader {
+func (h *HostListPanel) getFilteredMetrics() []stats.Metrics {
 	metrics := h.mm.SortBy(h.renderState.GetSortKey(), h.renderState.IsAscending())
 	return shared.FilterMetrics(metrics, h.renderState.GetFilter())
 }
@@ -111,7 +111,7 @@ func (h *HostListPanel) GetView() tview.Primitive {
 }
 
 // GetSelectedMetric returns the currently selected metric
-func (h *HostListPanel) GetSelectedMetric(tableData *shared.TableData) (stats.MetricsReader, bool) {
+func (h *HostListPanel) GetSelectedMetric(tableData *shared.TableData) (stats.Metrics, bool) {
 	row, _ := h.table.GetSelection()
 	if row <= 0 {
 		return nil, false
@@ -133,7 +133,7 @@ func (h *HostListPanel) SetSelectedFunc(fn func(row, col int)) {
 }
 
 // SetSelectionChangeCallback sets the callback for when selection changes
-func (h *HostListPanel) SetSelectionChangeCallback(fn func(metrics stats.MetricsReader)) {
+func (h *HostListPanel) SetSelectionChangeCallback(fn func(metrics stats.Metrics)) {
 	h.onSelectionChange = fn
 }
 
@@ -262,7 +262,7 @@ func (h *HostListPanel) restoreSelection(tableData *shared.TableData, selectedHo
 }
 
 // GetSelectedMetrics returns the currently selected metrics
-func (h *HostListPanel) GetSelectedMetrics() stats.MetricsReader {
+func (h *HostListPanel) GetSelectedMetrics() stats.Metrics {
 	metrics := h.getFilteredMetrics()
 	if len(metrics) == 0 {
 		return nil

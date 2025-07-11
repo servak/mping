@@ -2,7 +2,7 @@ package panels
 
 import (
 	"github.com/rivo/tview"
-	
+
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/ui/shared"
 )
@@ -10,9 +10,9 @@ import (
 // HostDetailPanel manages host detail display
 type HostDetailPanel struct {
 	view           *tview.TextView
-	container      *tview.Flex  // Container with border
+	container      *tview.Flex // Container with border
 	currentHost    string
-	currentMetrics stats.MetricsReader
+	currentMetrics stats.Metrics
 }
 
 // NewHostDetailPanel creates a new HostDetailPanel
@@ -25,7 +25,7 @@ func NewHostDetailPanel() *HostDetailPanel {
 	container := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(view, 0, 1, false)
-	
+
 	container.SetBorder(true).
 		SetTitle(" Host Details ")
 
@@ -54,7 +54,7 @@ func (h *HostDetailPanel) SetHost(hostname string) {
 }
 
 // SetMetrics sets the current metrics object directly
-func (h *HostDetailPanel) SetMetrics(metrics stats.MetricsReader) {
+func (h *HostDetailPanel) SetMetrics(metrics stats.Metrics) {
 	h.currentMetrics = metrics
 	if metrics != nil {
 		h.currentHost = metrics.GetName()
