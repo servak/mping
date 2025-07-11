@@ -30,6 +30,7 @@ type Event struct {
 	SentTime    time.Time
 	Rtt         time.Duration
 	Message     string
+	Details     *ProbeDetails // Added: detailed information
 }
 
 type Prober interface {

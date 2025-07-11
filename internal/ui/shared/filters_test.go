@@ -2,7 +2,6 @@ package shared
 
 import (
 	"testing"
-	"time"
 
 	"github.com/servak/mping/internal/stats"
 )
@@ -10,41 +9,17 @@ import (
 func TestFilterMetrics(t *testing.T) {
 	// Create test metrics
 	metrics := []stats.Metrics{
-		{
-			Name:         "google.com",
-			Total:        100,
-			Successful:   95,
-			Failed:       5,
-			LastSuccTime: time.Now(),
-		},
-		{
-			Name:         "yahoo.com",
-			Total:        50,
-			Successful:   48,
-			Failed:       2,
-			LastSuccTime: time.Now(),
-		},
-		{
-			Name:         "example.org",
-			Total:        25,
-			Successful:   25,
-			Failed:       0,
-			LastSuccTime: time.Now(),
-		},
-		{
-			Name:         "test.net",
-			Total:        10,
-			Successful:   8,
-			Failed:       2,
-			LastSuccTime: time.Now(),
-		},
+		stats.NewMetrics("google.com", 1),
+		stats.NewMetrics("yahoo.com", 1),
+		stats.NewMetrics("example.org", 1),
+		stats.NewMetrics("test.net", 1),
 	}
 
 	tests := []struct {
-		name           string
-		filterText     string
-		expectedCount  int
-		expectedNames  []string
+		name          string
+		filterText    string
+		expectedCount int
+		expectedNames []string
 	}{
 		{
 			name:          "empty filter returns all metrics",
@@ -108,7 +83,7 @@ func TestFilterMetrics(t *testing.T) {
 			// Check that all expected names are present
 			resultNames := make(map[string]bool)
 			for _, metric := range result {
-				resultNames[metric.Name] = true
+				resultNames[metric.GetName()] = true
 			}
 
 			for _, expectedName := range tt.expectedNames {
@@ -121,7 +96,7 @@ func TestFilterMetrics(t *testing.T) {
 			if len(resultNames) != len(tt.expectedNames) {
 				actualNames := make([]string, 0, len(result))
 				for _, metric := range result {
-					actualNames = append(actualNames, metric.Name)
+					actualNames = append(actualNames, metric.GetName())
 				}
 				t.Errorf("FilterMetrics() returned unexpected metrics. Got: %v, Want: %v", actualNames, tt.expectedNames)
 			}
@@ -131,17 +106,17 @@ func TestFilterMetrics(t *testing.T) {
 
 func TestFilterMetricsPreservesOrder(t *testing.T) {
 	metrics := []stats.Metrics{
-		{Name: "alpha.com"},
-		{Name: "beta.com"},
-		{Name: "gamma.com"},
+		stats.NewMetrics("alpha.com", 1),
+		stats.NewMetrics("beta.com", 1),
+		stats.NewMetrics("gamma.com", 1),
 	}
 
 	result := FilterMetrics(metrics, ".com")
 
 	expectedOrder := []string{"alpha.com", "beta.com", "gamma.com"}
 	for i, metric := range result {
-		if metric.Name != expectedOrder[i] {
-			t.Errorf("FilterMetrics() changed order. Got %s at position %d, want %s", metric.Name, i, expectedOrder[i])
+		if metric.GetName() != expectedOrder[i] {
+			t.Errorf("FilterMetrics() changed order. Got %s at position %d, want %s", metric.GetName(), i, expectedOrder[i])
 		}
 	}
 }
@@ -158,9 +133,9 @@ func TestFilterMetricsWithEmptyMetrics(t *testing.T) {
 
 func TestFilterMetricsDoesNotModifyOriginal(t *testing.T) {
 	original := []stats.Metrics{
-		{Name: "test1.com"},
-		{Name: "test2.com"},
-		{Name: "example.org"},
+		stats.NewMetrics("test1.com", 1),
+		stats.NewMetrics("test2.com", 1),
+		stats.NewMetrics("example.org", 1),
 	}
 
 	// Create a copy to compare later
@@ -176,8 +151,8 @@ func TestFilterMetricsDoesNotModifyOriginal(t *testing.T) {
 	}
 
 	for i, metric := range original {
-		if metric.Name != originalCopy[i].Name {
-			t.Errorf("FilterMetrics() modified original slice at index %d: got %s, want %s", i, metric.Name, originalCopy[i].Name)
+		if metric.GetName() != originalCopy[i].GetName() {
+			t.Errorf("FilterMetrics() modified original slice at index %d: got %s, want %s", i, metric.GetName(), originalCopy[i].GetName())
 		}
 	}
 }

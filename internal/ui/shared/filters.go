@@ -11,11 +11,11 @@ func FilterMetrics(metrics []stats.Metrics, filterText string) []stats.Metrics {
 	if filterText == "" {
 		return metrics
 	}
-	
+
 	filtered := []stats.Metrics{}
 	filterLower := strings.ToLower(filterText)
 	for _, m := range metrics {
-		if strings.Contains(strings.ToLower(m.Name), filterLower) {
+		if strings.Contains(strings.ToLower(m.GetName()), filterLower) {
 			filtered = append(filtered, m)
 		}
 	}

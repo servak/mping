@@ -16,21 +16,21 @@ type mockState struct {
 	selectedHost string
 }
 
-func (m *mockState) GetSortKey() stats.Key        { return m.sortKey }
+func (m *mockState) GetSortKey() stats.Key       { return m.sortKey }
 func (m *mockState) SetSortKey(key stats.Key)    { m.sortKey = key }
-func (m *mockState) IsAscending() bool            { return m.ascending }
-func (m *mockState) ReverseSort()                 { m.ascending = !m.ascending }
-func (m *mockState) GetFilter() string            { return m.filter }
+func (m *mockState) IsAscending() bool           { return m.ascending }
+func (m *mockState) ReverseSort()                { m.ascending = !m.ascending }
+func (m *mockState) GetFilter() string           { return m.filter }
 func (m *mockState) SetFilter(filter string)     { m.filter = filter }
-func (m *mockState) ClearFilter()                 { m.filter = "" }
-func (m *mockState) GetSelectedHost() string      { return m.selectedHost }
-func (m *mockState) SetSelectedHost(host string)  { m.selectedHost = host }
+func (m *mockState) ClearFilter()                { m.filter = "" }
+func (m *mockState) GetSelectedHost() string     { return m.selectedHost }
+func (m *mockState) SetSelectedHost(host string) { m.selectedHost = host }
 
 func newMockState() *mockState {
 	return &mockState{
-		sortKey:   stats.Success,
-		ascending: false,
-		filter:    "",
+		sortKey:      stats.Success,
+		ascending:    false,
+		filter:       "",
 		selectedHost: "",
 	}
 }
@@ -67,13 +67,13 @@ func TestHostListPanelGetView(t *testing.T) {
 	state := newMockState()
 	panel := NewHostListPanel(state, mm)
 
-	table := panel.GetView()
-	if table == nil {
+	view := panel.GetView()
+	if view == nil {
 		t.Error("GetView() returned nil")
 	}
 
-	if table != panel.table {
-		t.Error("GetView() returned different table instance")
+	if view != panel.container {
+		t.Error("GetView() returned different container instance")
 	}
 }
 
@@ -277,8 +277,8 @@ func TestHostListPanelRestoreSelection(t *testing.T) {
 	mm.Register("example.com", "example.com")
 
 	metrics := []stats.Metrics{
-		{Name: "google.com"},
-		{Name: "example.com"},
+		stats.NewMetrics("google.com", 1),
+		stats.NewMetrics("example.com", 1),
 	}
 	tableData := shared.NewTableData(metrics, stats.Success, false)
 
@@ -292,4 +292,3 @@ func TestHostListPanelRestoreSelection(t *testing.T) {
 	panel.restoreSelection(tableData, "google.com")
 	panel.restoreSelection(tableData, "nonexistent.com")
 }
-

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	
 )
 
 const (
@@ -235,7 +236,7 @@ func (p *NTPProber) sendProbe(result chan *Event, serverAddr string, timeout tim
 	}
 
 	// Success
-	p.success(result, serverAddr, displayName, now, rtt)
+	p.success(result, serverAddr, displayName, now, rtt, &resp, offset)
 }
 
 func (p *NTPProber) sent(result chan *Event, serverAddr, displayName string, sentTime time.Time) {
@@ -249,7 +250,28 @@ func (p *NTPProber) sent(result chan *Event, serverAddr, displayName string, sen
 	}
 }
 
-func (p *NTPProber) success(result chan *Event, serverAddr, displayName string, sentTime time.Time, rtt time.Duration) {
+func (p *NTPProber) success(result chan *Event, serverAddr, displayName string, sentTime time.Time, rtt time.Duration, resp *ntpPacket, offset time.Duration) {
+	// Create NTP detail information
+	// Extract port (serverAddr is in "host:port" format)
+	_, portStr, _ := net.SplitHostPort(serverAddr)
+	port := 123 // Default NTP port
+	if portStr != "" {
+		if p, err := net.LookupPort("udp", portStr); err == nil {
+			port = p
+		}
+	}
+	
+	details := &ProbeDetails{
+		ProbeType: "ntp",
+		NTP: &NTPDetails{
+			Server:    displayName,
+			Port:      port,
+			Stratum:   int(resp.Stratum),
+			Offset:    offset.Microseconds(),
+			Precision: int(resp.Precision),
+		},
+	}
+	
 	result <- &Event{
 		Key:         serverAddr,
 		DisplayName: displayName,
@@ -257,6 +279,7 @@ func (p *NTPProber) success(result chan *Event, serverAddr, displayName string, 
 		SentTime:    sentTime,
 		Rtt:         rtt,
 		Message:     "",
+		Details:     details,
 	}
 }
 

@@ -18,7 +18,7 @@ type UIState struct {
 // NewUIState creates a new UIState with defaults
 func NewUIState() *UIState {
 	return &UIState{
-		sortKey:      stats.Success,
+		sortKey:      stats.Fail,
 		ascending:    false, // Default to descending
 		filterText:   "",
 		selectedHost: "",

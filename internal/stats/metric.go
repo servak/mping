@@ -4,7 +4,33 @@ import (
 	"time"
 )
 
-type Metrics struct {
+func NewMetrics(name string, historySize int) Metrics {
+	return &metrics{
+		Name:    name,
+		history: NewTargetHistory(historySize),
+	}
+}
+
+func NewMetricsForTest(name string, historySize, total, success, failed int, loss float64, totalRTT, averageRTT, minimumRTT, maximumRTT, lastRTT time.Duration, lastSuccTime, lastFailTime time.Time, lastFailDetail string) Metrics {
+	return &metrics{
+		Name:           name,
+		Total:          total,
+		Successful:     success,
+		Failed:         failed,
+		Loss:           loss,
+		TotalRTT:       totalRTT,
+		AverageRTT:     averageRTT,
+		MinimumRTT:     minimumRTT,
+		MaximumRTT:     maximumRTT,
+		LastRTT:        lastRTT,
+		LastSuccTime:   lastSuccTime,
+		LastFailTime:   lastFailTime,
+		LastFailDetail: lastFailDetail,
+		history:        NewTargetHistory(historySize),
+	}
+}
+
+type metrics struct {
 	Name           string
 	Total          int
 	Successful     int
@@ -18,9 +44,10 @@ type Metrics struct {
 	LastFailTime   time.Time
 	LastSuccTime   time.Time
 	LastFailDetail string
+	history        *TargetHistory // 履歴情報
 }
 
-func (m *Metrics) Success(rtt time.Duration, sentTime time.Time) {
+func (m *metrics) Success(rtt time.Duration, sentTime time.Time) {
 	m.Successful++
 	m.LastSuccTime = sentTime
 	m.LastRTT = rtt
@@ -35,22 +62,22 @@ func (m *Metrics) Success(rtt time.Duration, sentTime time.Time) {
 	m.loss()
 }
 
-func (m *Metrics) Fail(sentTime time.Time, msg string) {
+func (m *metrics) Fail(sentTime time.Time, msg string) {
 	m.Failed++
 	m.LastFailTime = sentTime
 	m.LastFailDetail = msg
 	m.loss()
 }
 
-func (m *Metrics) loss() {
+func (m *metrics) loss() {
 	m.Loss = float64(m.Failed) / float64(m.Successful+m.Failed) * 100
 }
 
-func (m *Metrics) Sent() {
+func (m *metrics) Sent() {
 	m.Total++
 }
 
-func (m *Metrics) Reset() {
+func (m *metrics) Reset() {
 	m.Total = 0
 	m.Successful = 0
 	m.Failed = 0
@@ -63,4 +90,85 @@ func (m *Metrics) Reset() {
 	m.LastFailTime = time.Time{}
 	m.LastSuccTime = time.Time{}
 	m.LastFailDetail = ""
+	if m.history != nil {
+		m.history.Clear()
+	}
+}
+
+// Implementation of MetricsReader interface
+
+func (m *metrics) GetName() string {
+	return m.Name
+}
+
+func (m *metrics) GetTotal() int {
+	return m.Total
+}
+
+func (m *metrics) GetSuccessful() int {
+	return m.Successful
+}
+
+func (m *metrics) GetFailed() int {
+	return m.Failed
+}
+
+func (m *metrics) GetLoss() float64 {
+	return m.Loss
+}
+
+func (m *metrics) GetLastRTT() time.Duration {
+	return m.LastRTT
+}
+
+func (m *metrics) GetAverageRTT() time.Duration {
+	return m.AverageRTT
+}
+
+func (m *metrics) GetMinimumRTT() time.Duration {
+	return m.MinimumRTT
+}
+
+func (m *metrics) GetMaximumRTT() time.Duration {
+	return m.MaximumRTT
+}
+
+func (m *metrics) GetLastSuccTime() time.Time {
+	return m.LastSuccTime
+}
+
+func (m *metrics) GetLastFailTime() time.Time {
+	return m.LastFailTime
+}
+
+func (m *metrics) GetLastFailDetail() string {
+	return m.LastFailDetail
+}
+
+func (m *metrics) GetRecentHistory(n int) []HistoryEntry {
+	if m.history == nil {
+		return []HistoryEntry{}
+	}
+	return m.history.GetRecentEntries(n)
+}
+
+func (m *metrics) GetConsecutiveFailures() int {
+	if m.history == nil {
+		return 0
+	}
+	return m.history.GetConsecutiveFailures()
+}
+
+func (m *metrics) GetConsecutiveSuccesses() int {
+	if m.history == nil {
+		return 0
+	}
+	return m.history.GetConsecutiveSuccesses()
+}
+
+func (m *metrics) GetSuccessRateInPeriod(duration time.Duration) float64 {
+	if m.history == nil {
+		return 0.0
+	}
+	return m.history.GetSuccessRateInPeriod(duration)
 }

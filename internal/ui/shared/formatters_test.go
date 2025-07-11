@@ -95,37 +95,39 @@ func TestTimeFormater(t *testing.T) {
 
 func TestFormatHostDetail(t *testing.T) {
 	testTime := time.Date(2024, 1, 1, 15, 30, 45, 0, time.UTC)
-	
-	metric := stats.Metrics{
-		Name:           "example.com",
-		Total:          100,
-		Successful:     95,
-		Failed:         5,
-		Loss:           5.0,
-		LastRTT:        25 * time.Millisecond,
-		AverageRTT:     30 * time.Millisecond,
-		MinimumRTT:     20 * time.Millisecond,
-		MaximumRTT:     40 * time.Millisecond,
-		LastSuccTime:   testTime,
-		LastFailTime:   testTime.Add(time.Second),
-		LastFailDetail: "timeout",
-	}
+
+	metric := stats.NewMetricsForTest(
+		"example.com",
+		1,
+		100,
+		95,
+		5,
+		5.0,
+		25*time.Millisecond,
+		30*time.Millisecond,
+		20*time.Millisecond,
+		40*time.Millisecond,
+		25*time.Millisecond,
+		testTime,
+		testTime.Add(time.Second),
+		"timeout",
+	)
 
 	result := FormatHostDetail(metric)
 
 	expectedContents := []string{
-		"Host Details: example.com",
-		"Total Probes: 100",
-		"Successful: 95",
-		"Failed: 5",
-		"Loss Rate: 5.0%",
-		"Last RTT:  25ms",
-		"Average RTT:  30ms",
-		"Minimum RTT:  20ms",
-		"Maximum RTT:  40ms",
-		"Last Success: 15:30:45",
-		"Last Failure: 15:30:46",
-		"Last Error: timeout",
+		"Total Probes:[white] 100",
+		"Successful:[white] 95",
+		"Failed:[white] 5",
+		"Loss Rate:[white]",
+		"5.0%",
+		"Last RTT:[white]  25ms",
+		"Average RTT:[white]  30ms",
+		"Minimum RTT:[white]  20ms",
+		"Maximum RTT:[white]  40ms",
+		"Last Success:[white] 15:30:45",
+		"Last Failure:[white] 15:30:46",
+		"Last Error:[white] timeout",
 	}
 
 	for _, expected := range expectedContents {
@@ -136,36 +138,38 @@ func TestFormatHostDetail(t *testing.T) {
 }
 
 func TestFormatHostDetailWithZeroValues(t *testing.T) {
-	metric := stats.Metrics{
-		Name:           "test.com",
-		Total:          0,
-		Successful:     0,
-		Failed:         0,
-		Loss:           0.0,
-		LastRTT:        0,
-		AverageRTT:     0,
-		MinimumRTT:     0,
-		MaximumRTT:     0,
-		LastSuccTime:   time.Time{},
-		LastFailTime:   time.Time{},
-		LastFailDetail: "",
-	}
+	metric := stats.NewMetricsForTest(
+		"test.com",
+		1,
+		0,
+		0,
+		0,
+		0.0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		time.Time{},
+		time.Time{},
+		"",
+	)
 
 	result := FormatHostDetail(metric)
 
 	expectedContents := []string{
-		"Host Details: test.com",
-		"Total Probes: 0",
-		"Successful: 0",
-		"Failed: 0",
-		"Loss Rate: 0.0%",
-		"Last RTT: -",
-		"Average RTT: -",
-		"Minimum RTT: -",
-		"Maximum RTT: -",
-		"Last Success: -",
-		"Last Failure: -",
-		"Last Error: ",
+		"Total Probes:[white] 0",
+		"Successful:[white] 0",
+		"Failed:[white] 0",
+		"Loss Rate:[white]",
+		"0.0%",
+		"Last RTT:[white] -",
+		"Average RTT:[white] -",
+		"Minimum RTT:[white] -",
+		"Maximum RTT:[white] -",
+		"Last Success:[white] -",
+		"Last Failure:[white] -",
+		"Last Error:[white] ",
 	}
 
 	for _, expected := range expectedContents {
