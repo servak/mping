@@ -16,6 +16,7 @@ type HostListPanel struct {
 	renderState       state.RenderState
 	selectionState    state.SelectionState
 	mm                stats.MetricsProvider
+	config            *shared.Config
 	onSelectionChange func(metrics stats.Metrics) // Callback when selection changes
 }
 
@@ -25,7 +26,7 @@ type HostListParams interface {
 }
 
 // NewHostListPanel creates a new HostListPanel
-func NewHostListPanel(state HostListParams, mm stats.MetricsProvider) *HostListPanel {
+func NewHostListPanel(state HostListParams, mm stats.MetricsProvider, config *shared.Config) *HostListPanel {
 	table := tview.NewTable().
 		SetSelectable(true, false)
 
@@ -43,6 +44,7 @@ func NewHostListPanel(state HostListParams, mm stats.MetricsProvider) *HostListP
 		renderState:    state,
 		selectionState: state,
 		mm:             mm,
+		config:         config,
 	}
 
 	return panel
@@ -57,15 +59,16 @@ func (h *HostListPanel) Update() {
 	// Clear existing content and repopulate
 	h.table.Clear()
 
-	// Configure table settings
+	// Configure table settings with theme-aware colors
+	theme := h.config.GetTheme()
 	h.table.
 		SetBorders(false).
 		SetSeparator(' ').
 		SetFixed(1, 0).
 		SetSelectable(true, false).
 		SetSelectedStyle(tcell.StyleDefault.
-			Background(tcell.ColorDarkGreen).
-			Foreground(tcell.ColorWhite))
+			Background(tcell.GetColor(theme.SelectionBg)).
+			Foreground(tcell.GetColor(theme.SelectionFg)))
 
 	// Use TableData's logic but populate our existing table
 	h.populateTableFromData(tableData)
@@ -214,6 +217,9 @@ func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 		tview.AlignLeft,   // FAIL Reason
 	}
 
+	// Get theme for theme-aware colors
+	theme := h.config.GetTheme()
+
 	// Set headers
 	for col, header := range tableData.Headers {
 		alignment := tview.AlignLeft
@@ -223,7 +229,7 @@ func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 
 		h.table.SetCell(0, col, &tview.TableCell{
 			Text:          "  " + header + "  ",
-			Color:         tcell.ColorYellow,
+			Color:         tcell.GetColor(theme.TableHeader),
 			Align:         alignment,
 			NotSelectable: true,
 		})
@@ -239,7 +245,7 @@ func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 
 			h.table.SetCell(row+1, col, &tview.TableCell{
 				Text:  "  " + cellData + "  ",
-				Color: tcell.ColorWhite,
+				Color: tcell.GetColor(theme.Primary),
 				Align: alignment,
 			})
 		}

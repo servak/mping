@@ -47,16 +47,17 @@ func (h *HeaderPanel) generateHeaderContent() string {
 	filterText := h.renderState.GetFilter()
 	
 	var parts []string
-	if h.config.EnableColors && h.config.Colors.Header != "" {
-		parts = append(parts, fmt.Sprintf("[%s]Sort: %s[-]", h.config.Colors.Header, sortDisplay))
-		parts = append(parts, fmt.Sprintf("[%s]Interval: %dms[-]", h.config.Colors.Header, h.interval.Milliseconds()))
-		parts = append(parts, fmt.Sprintf("[%s]Timeout: %dms[-]", h.config.Colors.Header, h.timeout.Milliseconds()))
+	if h.config.EnableColors {
+		theme := h.config.GetTheme()
+		parts = append(parts, fmt.Sprintf("[%s]Sort: %s[-]", theme.Accent, sortDisplay))
+		parts = append(parts, fmt.Sprintf("[%s]Interval: %dms[-]", theme.Accent, h.interval.Milliseconds()))
+		parts = append(parts, fmt.Sprintf("[%s]Timeout: %dms[-]", theme.Accent, h.timeout.Milliseconds()))
 		
 		if filterText != "" {
-			parts = append(parts, fmt.Sprintf("[%s]Filter: %s[-]", h.config.Colors.Warning, filterText))
+			parts = append(parts, fmt.Sprintf("[%s]Filter: %s[-]", theme.Warning, filterText))
 		}
 		
-		parts = append(parts, fmt.Sprintf("[%s]%s[-]", h.config.Colors.Header, h.config.Title))
+		parts = append(parts, fmt.Sprintf("[%s]%s[-]", theme.Accent, h.config.Title))
 	} else {
 		parts = append(parts, fmt.Sprintf("Sort: %s", sortDisplay))
 		parts = append(parts, fmt.Sprintf("Interval: %dms", h.interval.Milliseconds()))
@@ -103,14 +104,15 @@ func (f *FooterPanel) Update() {
 
 // generateFooterContent generates footer text
 func (f *FooterPanel) generateFooterContent() string {
-	if f.config.EnableColors && f.config.Colors.Footer != "" {
-		helpText := fmt.Sprintf("[%s]h:help[-]", f.config.Colors.Footer)
-		quitText := fmt.Sprintf("[%s]q:quit[-]", f.config.Colors.Footer)
-		sortText := fmt.Sprintf("[%s]s:sort[-]", f.config.Colors.Footer)
-		reverseText := fmt.Sprintf("[%s]r:reverse[-]", f.config.Colors.Footer)
-		resetText := fmt.Sprintf("[%s]R:reset[-]", f.config.Colors.Footer)
-		filterText := fmt.Sprintf("[%s]/:filter[-]", f.config.Colors.Footer)
-		moveText := fmt.Sprintf("[%s]j/k/g/G/u/d:move[-]", f.config.Colors.Footer)
+	if f.config.EnableColors {
+		theme := f.config.GetTheme()
+		helpText := fmt.Sprintf("[%s]h:help[-]", theme.Secondary)
+		quitText := fmt.Sprintf("[%s]q:quit[-]", theme.Secondary)
+		sortText := fmt.Sprintf("[%s]s:sort[-]", theme.Secondary)
+		reverseText := fmt.Sprintf("[%s]r:reverse[-]", theme.Secondary)
+		resetText := fmt.Sprintf("[%s]R:reset[-]", theme.Secondary)
+		filterText := fmt.Sprintf("[%s]/:filter[-]", theme.Secondary)
+		moveText := fmt.Sprintf("[%s]j/k/g/G/u/d:move[-]", theme.Secondary)
 		return fmt.Sprintf("%s  %s  %s  %s  %s  %s  %s", helpText, quitText, sortText, reverseText, resetText, filterText, moveText)
 	} else {
 		return "h:help  q:quit  s:sort  r:reverse  R:reset  /:filter  j/k/g/G/u/d:move"

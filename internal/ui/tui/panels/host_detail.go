@@ -13,10 +13,11 @@ type HostDetailPanel struct {
 	container      *tview.Flex // Container with border
 	currentHost    string
 	currentMetrics stats.Metrics
+	config         *shared.Config
 }
 
 // NewHostDetailPanel creates a new HostDetailPanel
-func NewHostDetailPanel() *HostDetailPanel {
+func NewHostDetailPanel(config *shared.Config) *HostDetailPanel {
 	view := tview.NewTextView()
 	view.SetDynamicColors(true).
 		SetScrollable(true)
@@ -32,6 +33,7 @@ func NewHostDetailPanel() *HostDetailPanel {
 	return &HostDetailPanel{
 		view:      view,
 		container: container,
+		config:    config,
 	}
 }
 
@@ -43,7 +45,7 @@ func (h *HostDetailPanel) Update() {
 	}
 
 	// Format and display the host details with history
-	content := shared.FormatHostDetail(h.currentMetrics)
+	content := shared.FormatHostDetail(h.currentMetrics, h.config.GetTheme())
 	h.view.SetText(content)
 }
 

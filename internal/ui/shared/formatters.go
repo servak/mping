@@ -29,52 +29,52 @@ func TimeFormater(t time.Time) string {
 }
 
 // FormatHostDetail generates detailed information for a host
-func FormatHostDetail(metric stats.Metrics) string {
+func FormatHostDetail(metric stats.Metrics, theme *Theme) string {
 	// Color-coded basic statistics
 	lossRate := metric.GetLoss()
-	lossColor := "green"
+	lossColor := theme.Success
 	if lossRate > 50 {
-		lossColor = "red"
+		lossColor = theme.Error
 	} else if lossRate > 10 {
-		lossColor = "yellow"
+		lossColor = theme.Warning
 	}
 
-	successColor := "green"
+	successColor := theme.Success
 	if metric.GetSuccessful() == 0 {
-		successColor = "red"
+		successColor = theme.Error
 	}
 
-	failColor := "white"
+	failColor := theme.Primary
 	if metric.GetFailed() > 0 {
-		failColor = "red"
+		failColor = theme.Error
 	}
 
-	basicInfo := fmt.Sprintf(`[cyan]Total Probes:[white] %d
-[%s]Successful:[white] %d
-[%s]Failed:[white] %d
-[cyan]Loss Rate:[white] [%s]%.1f%%[white]
-[cyan]Last RTT:[white] %s
-[cyan]Average RTT:[white] %s
-[cyan]Minimum RTT:[white] %s
-[cyan]Maximum RTT:[white] %s
-[cyan]Last Success:[white] %s
-[cyan]Last Failure:[white] %s
-[cyan]Last Error:[white] %s`,
-		metric.GetTotal(),
-		successColor, metric.GetSuccessful(),
-		failColor, metric.GetFailed(),
-		lossColor, lossRate,
-		DurationFormater(metric.GetLastRTT()),
-		DurationFormater(metric.GetAverageRTT()),
-		DurationFormater(metric.GetMinimumRTT()),
-		DurationFormater(metric.GetMaximumRTT()),
-		TimeFormater(metric.GetLastSuccTime()),
-		TimeFormater(metric.GetLastFailTime()),
-		metric.GetLastFailDetail(),
+	basicInfo := fmt.Sprintf(`[%s]Total Probes:[%s] %d
+[%s]Successful:[%s] %d
+[%s]Failed:[%s] %d
+[%s]Loss Rate:[%s] [%s]%.1f%%[%s]
+[%s]Last RTT:[%s] %s
+[%s]Average RTT:[%s] %s
+[%s]Minimum RTT:[%s] %s
+[%s]Maximum RTT:[%s] %s
+[%s]Last Success:[%s] %s
+[%s]Last Failure:[%s] %s
+[%s]Last Error:[%s] %s`,
+		theme.Accent, theme.Primary, metric.GetTotal(),
+		successColor, theme.Primary, metric.GetSuccessful(),
+		failColor, theme.Primary, metric.GetFailed(),
+		theme.Accent, theme.Primary, lossColor, lossRate, theme.Primary,
+		theme.Accent, theme.Primary, DurationFormater(metric.GetLastRTT()),
+		theme.Accent, theme.Primary, DurationFormater(metric.GetAverageRTT()),
+		theme.Accent, theme.Primary, DurationFormater(metric.GetMinimumRTT()),
+		theme.Accent, theme.Primary, DurationFormater(metric.GetMaximumRTT()),
+		theme.Accent, theme.Primary, TimeFormater(metric.GetLastSuccTime()),
+		theme.Accent, theme.Primary, TimeFormater(metric.GetLastFailTime()),
+		theme.Accent, theme.Primary, metric.GetLastFailDetail(),
 	)
 
 	// Add history section
-	historySection := FormatHistory(metric)
+	historySection := FormatHistory(metric, theme)
 	if historySection != "" {
 		basicInfo += "\n\n" + historySection
 	}
@@ -83,38 +83,38 @@ func FormatHostDetail(metric stats.Metrics) string {
 }
 
 // FormatHistory generates history section for a host
-func FormatHistory(metric stats.Metrics) string {
+func FormatHistory(metric stats.Metrics, theme *Theme) string {
 	history := metric.GetRecentHistory(10)
 	if len(history) == 0 {
 		return ""
 	}
 
 	var sb strings.Builder
-	sb.WriteString("\n[yellow]Recent History (last 10 entries):[white]\n")
-	sb.WriteString("[cyan]Time     Status RTT     Details[white]\n")
-	sb.WriteString("[gray]-------- ------ ------- --------[white]\n")
+	sb.WriteString(fmt.Sprintf("\n[%s]Recent History (last 10 entries):[%s]\n", theme.Warning, theme.Primary))
+	sb.WriteString(fmt.Sprintf("[%s]Time     Status RTT     Details[%s]\n", theme.Accent, theme.Primary))
+	sb.WriteString(fmt.Sprintf("[%s]-------- ------ ------- --------[%s]\n", theme.Separator, theme.Primary))
 
 	for _, entry := range history {
-		statusColor := "green"
+		statusColor := theme.Success
 		status := "OK"
 		details := ""
 
 		if !entry.Success {
 			status = "FAIL"
-			statusColor = "red"
+			statusColor = theme.Error
 			// Show error message for failed entries
 			if entry.Error != "" {
-				details = fmt.Sprintf("[red]%s[white]", entry.Error)
+				details = fmt.Sprintf("[%s]%s[%s]", theme.Error, entry.Error, theme.Primary)
 			}
 		} else {
 			// Show probe-specific details for successful entries
 			details = formatProbeDetails(entry.Details)
 		}
 
-		sb.WriteString(fmt.Sprintf("[gray]%-8s[white] [%s]%-6s[white] %-7s %s\n",
-			entry.Timestamp.Format("15:04:05"),
-			statusColor, status,
-			DurationFormater(entry.RTT),
+		sb.WriteString(fmt.Sprintf("[%s]%-8s[%s] [%s]%-6s[%s] %-7s %s\n",
+			theme.Timestamp, entry.Timestamp.Format("15:04:05"),
+			theme.Primary, statusColor, status,
+			theme.Primary, DurationFormater(entry.RTT),
 			details,
 		))
 	}
