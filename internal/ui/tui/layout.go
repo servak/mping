@@ -67,8 +67,7 @@ func (l *LayoutManager) setupPanels(uiState *state.UIState, mm stats.MetricsProv
 	theme := config.GetTheme()
 	l.filterInput = tview.NewInputField().
 		SetLabel("Filter: ").
-		SetLabelColor(tcell.GetColor(theme.Primary)).
-		SetFieldBackgroundColor(tcell.ColorDefault)
+		SetLabelColor(tcell.GetColor(theme.Primary))
 }
 
 // setupLayout configures the main layout structure

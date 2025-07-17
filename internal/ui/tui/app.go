@@ -34,6 +34,7 @@ func NewTUIApp(mm stats.MetricsManager, cfg *shared.Config, interval, timeout ti
 	ctx, cancel := context.WithCancel(context.Background())
 
 	app := tview.NewApplication()
+	app.EnableMouse(true)
 	uiState := state.NewUIState()
 	layout := NewLayoutManager(uiState, mm, cfg, interval, timeout)
 
@@ -153,6 +154,9 @@ func (a *TUIApp) setupKeyBindings() {
 		case '/':
 			a.showFilter()
 			return nil
+		case 't':
+			a.cycleTheme()
+			return nil
 		}
 
 		// Delegate navigation to layout
@@ -183,6 +187,7 @@ NAVIGATION:
   R            Reset all metrics      
   v            Toggle detail view     
   /            Filter hosts           
+  t            Cycle theme            
   h            Show/hide this help    
   q, Ctrl+C    Quit application       
 
@@ -301,4 +306,9 @@ func (a *TUIApp) handleRowSelection(row, col int) {
 func (a *TUIApp) getFilteredMetrics() []stats.Metrics {
 	metrics := a.mm.SortBy(a.state.GetSortKey(), a.state.IsAscending())
 	return shared.FilterMetrics(metrics, a.state.GetFilter())
+}
+
+// Theme-related methods
+func (a *TUIApp) cycleTheme() {
+	a.config.CycleTheme()
 }

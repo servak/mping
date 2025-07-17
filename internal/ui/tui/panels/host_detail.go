@@ -1,6 +1,9 @@
 package panels
 
 import (
+	"fmt"
+
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"github.com/servak/mping/internal/stats"
@@ -27,9 +30,6 @@ func NewHostDetailPanel(config *shared.Config) *HostDetailPanel {
 		SetDirection(tview.FlexRow).
 		AddItem(view, 0, 1, false)
 
-	container.SetBorder(true).
-		SetTitle(" Host Details ")
-
 	return &HostDetailPanel{
 		view:      view,
 		container: container,
@@ -43,9 +43,16 @@ func (h *HostDetailPanel) Update() {
 		h.view.SetText("Select a host to view details")
 		return
 	}
+	theme := h.config.GetTheme()
+	h.container.
+		SetBorder(true).
+		SetTitle(fmt.Sprintf(" [%s]Host Details ", theme.Primary)).
+		SetBackgroundColor(tcell.GetColor(theme.Background)).
+		SetBorderColor(tcell.GetColor(theme.Primary))
 
 	// Format and display the host details with history
-	content := shared.FormatHostDetail(h.currentMetrics, h.config.GetTheme())
+	content := shared.FormatHostDetail(h.currentMetrics, theme)
+	h.view.SetBackgroundColor(tcell.GetColor(theme.Background))
 	h.view.SetText(content)
 }
 

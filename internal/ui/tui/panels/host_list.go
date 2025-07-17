@@ -1,6 +1,8 @@
 package panels
 
 import (
+	"fmt"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
@@ -35,9 +37,6 @@ func NewHostListPanel(state HostListParams, mm stats.MetricsProvider, config *sh
 		SetDirection(tview.FlexRow).
 		AddItem(table, 0, 1, true)
 
-	container.SetBorder(true).
-		SetTitle(" Host List ")
-
 	panel := &HostListPanel{
 		table:          table,
 		container:      container,
@@ -61,6 +60,12 @@ func (h *HostListPanel) Update() {
 
 	// Configure table settings with theme-aware colors
 	theme := h.config.GetTheme()
+	h.container.
+		SetBorder(true).
+		SetTitle(fmt.Sprintf(" [%s]Host List ", theme.Primary)).
+		SetBackgroundColor(tcell.GetColor(theme.Background)).
+		SetBorderColor(tcell.GetColor(theme.Primary))
+
 	h.table.
 		SetBorders(false).
 		SetSeparator(' ').
@@ -68,7 +73,8 @@ func (h *HostListPanel) Update() {
 		SetSelectable(true, false).
 		SetSelectedStyle(tcell.StyleDefault.
 			Background(tcell.GetColor(theme.SelectionBg)).
-			Foreground(tcell.GetColor(theme.SelectionFg)))
+			Foreground(tcell.GetColor(theme.SelectionFg))).
+		SetBackgroundColor(tcell.GetColor(theme.Background))
 
 	// Use TableData's logic but populate our existing table
 	h.populateTableFromData(tableData)
@@ -228,10 +234,11 @@ func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 		}
 
 		h.table.SetCell(0, col, &tview.TableCell{
-			Text:          "  " + header + "  ",
-			Color:         tcell.GetColor(theme.TableHeader),
-			Align:         alignment,
-			NotSelectable: true,
+			Text:            "  " + header + "  ",
+			Color:           tcell.GetColor(theme.TableHeader),
+			BackgroundColor: tcell.GetColor(theme.Background),
+			Align:           alignment,
+			NotSelectable:   true,
 		})
 	}
 
@@ -244,9 +251,10 @@ func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 			}
 
 			h.table.SetCell(row+1, col, &tview.TableCell{
-				Text:  "  " + cellData + "  ",
-				Color: tcell.GetColor(theme.Primary),
-				Align: alignment,
+				Text:            "  " + cellData + "  ",
+				Color:           tcell.GetColor(theme.Primary),
+				BackgroundColor: tcell.GetColor(theme.Background),
+				Align:           alignment,
 			})
 		}
 	}
