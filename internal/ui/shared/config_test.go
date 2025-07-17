@@ -193,7 +193,7 @@ func TestGetThemeList(t *testing.T) {
 
 	// Should contain all predefined themes
 	expectedThemes := []string{
-		"dark", "gruvbox", "light", "monokai", "nord", "xoria256",
+		"dark", "light", "monokai", "nord", "xoria256",
 	}
 
 	if len(themes) != len(expectedThemes) {
@@ -223,7 +223,7 @@ func TestGetAllThemeList(t *testing.T) {
 
 	// Should contain all predefined themes + custom theme
 	expectedThemes := []string{
-		"custom", "dark", "gruvbox", "light", "monokai", "nord", "xoria256",
+		"custom", "dark", "light", "monokai", "nord", "xoria256",
 	}
 
 	if len(themes) != len(expectedThemes) {
