@@ -1,6 +1,9 @@
 package panels
 
 import (
+	"fmt"
+
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"github.com/servak/mping/internal/stats"
@@ -13,10 +16,11 @@ type HostDetailPanel struct {
 	container      *tview.Flex // Container with border
 	currentHost    string
 	currentMetrics stats.Metrics
+	config         *shared.Config
 }
 
 // NewHostDetailPanel creates a new HostDetailPanel
-func NewHostDetailPanel() *HostDetailPanel {
+func NewHostDetailPanel(config *shared.Config) *HostDetailPanel {
 	view := tview.NewTextView()
 	view.SetDynamicColors(true).
 		SetScrollable(true)
@@ -26,12 +30,10 @@ func NewHostDetailPanel() *HostDetailPanel {
 		SetDirection(tview.FlexRow).
 		AddItem(view, 0, 1, false)
 
-	container.SetBorder(true).
-		SetTitle(" Host Details ")
-
 	return &HostDetailPanel{
 		view:      view,
 		container: container,
+		config:    config,
 	}
 }
 
@@ -41,9 +43,16 @@ func (h *HostDetailPanel) Update() {
 		h.view.SetText("Select a host to view details")
 		return
 	}
+	theme := h.config.GetTheme()
+	h.container.
+		SetBorder(true).
+		SetTitle(fmt.Sprintf(" [%s]Host Details ", theme.Primary)).
+		SetBackgroundColor(tcell.GetColor(theme.Background)).
+		SetBorderColor(tcell.GetColor(theme.Primary))
 
 	// Format and display the host details with history
-	content := shared.FormatHostDetail(h.currentMetrics)
+	content := shared.FormatHostDetail(h.currentMetrics, theme)
+	h.view.SetBackgroundColor(tcell.GetColor(theme.Background))
 	h.view.SetText(content)
 }
 

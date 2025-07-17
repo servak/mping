@@ -90,15 +90,19 @@ func (td *TableData) ToGoPrettyTable() table.Writer {
 }
 
 // ToTviewTable converts to interactive tview.Table format (primary UI)
+// Note: This method is deprecated. Use host_list.go panel implementation instead.
 func (td *TableData) ToTviewTable() *tview.Table {
+	// Use default dark theme colors as fallback
+	theme := PredefinedThemes["dark"]
+	
 	t := tview.NewTable().
 		SetFixed(1, 0).
 		SetSelectable(true, false).
 		SetBorders(false). // Disable all borders
 		SetSeparator(' '). // Use space separator instead of lines
 		SetSelectedStyle(tcell.StyleDefault.
-			Background(tcell.ColorDarkBlue).
-			Foreground(tcell.ColorWhite)) // Pattern 1: DarkBlue + White - k9s style
+			Background(tcell.GetColor(theme.SelectionBg)).
+			Foreground(tcell.GetColor(theme.SelectionFg)))
 
 	// Define alignment for each column
 	alignments := []int{
@@ -125,7 +129,7 @@ func (td *TableData) ToTviewTable() *tview.Table {
 
 		t.SetCell(0, col, &tview.TableCell{
 			Text:          "  " + header + "  ",
-			Color:         tcell.ColorYellow,
+			Color:         tcell.GetColor(theme.TableHeader),
 			Align:         alignment,
 			NotSelectable: true,
 		})
@@ -141,7 +145,7 @@ func (td *TableData) ToTviewTable() *tview.Table {
 
 			t.SetCell(row+1, col, &tview.TableCell{
 				Text:  "  " + cellData + "  ",
-				Color: tcell.ColorWhite,
+				Color: tcell.GetColor(theme.Primary),
 				Align: alignment,
 			})
 		}

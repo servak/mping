@@ -59,15 +59,15 @@ func NewLayoutManager(uiState *state.UIState, mm stats.MetricsManager, config *s
 // setupPanels initializes all panels
 func (l *LayoutManager) setupPanels(uiState *state.UIState, mm stats.MetricsProvider, config *shared.Config, interval, timeout time.Duration) {
 	l.header = panels.NewHeaderPanel(uiState, config, interval, timeout)
-	l.hostList = panels.NewHostListPanel(uiState, mm)
+	l.hostList = panels.NewHostListPanel(uiState, mm, config)
 	l.footer = panels.NewFooterPanel(config)
-	l.hostDetail = panels.NewHostDetailPanel()
+	l.hostDetail = panels.NewHostDetailPanel(config)
 
-	// Setup filter input
+	// Setup filter input with theme-aware colors
+	theme := config.GetTheme()
 	l.filterInput = tview.NewInputField().
 		SetLabel("Filter: ").
-		SetLabelColor(tcell.ColorWhite).
-		SetFieldBackgroundColor(tcell.ColorBlack)
+		SetLabelColor(tcell.GetColor(theme.Primary))
 }
 
 // setupLayout configures the main layout structure

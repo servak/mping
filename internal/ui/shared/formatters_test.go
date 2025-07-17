@@ -113,21 +113,31 @@ func TestFormatHostDetail(t *testing.T) {
 		"timeout",
 	)
 
-	result := FormatHostDetail(metric)
+	theme := &Theme{
+		Primary:   "#ffffff",
+		Secondary: "#cccccc",
+		Success:   "#00ff00",
+		Warning:   "#ffff00",
+		Error:     "#ff0000",
+		Accent:    "#00afd7",
+		Separator: "#666666",
+		Timestamp: "#999999",
+	}
+	result := FormatHostDetail(metric, theme)
 
 	expectedContents := []string{
-		"Total Probes:[white] 100",
-		"Successful:[white] 95",
-		"Failed:[white] 5",
-		"Loss Rate:[white]",
-		"5.0%",
-		"Last RTT:[white]  25ms",
-		"Average RTT:[white]  30ms",
-		"Minimum RTT:[white]  20ms",
-		"Maximum RTT:[white]  40ms",
-		"Last Success:[white] 15:30:45",
-		"Last Failure:[white] 15:30:46",
-		"Last Error:[white] timeout",
+		"[#00afd7]Total Probes:[#ffffff] 100",
+		"[#00ff00]Successful:[#ffffff] 95",
+		"[#ff0000]Failed:[#ffffff] 5",
+		"[#00afd7]Loss Rate:[#ffffff]",
+		"[#00ff00]5.0%[#ffffff]",
+		"[#00afd7]Last RTT:[#ffffff]  25ms",
+		"[#00afd7]Average RTT:[#ffffff]  30ms",
+		"[#00afd7]Minimum RTT:[#ffffff]  20ms",
+		"[#00afd7]Maximum RTT:[#ffffff]  40ms",
+		"[#00afd7]Last Success:[#ffffff] 15:30:45",
+		"[#00afd7]Last Failure:[#ffffff] 15:30:46",
+		"[#00afd7]Last Error:[#ffffff] timeout",
 	}
 
 	for _, expected := range expectedContents {
@@ -155,21 +165,31 @@ func TestFormatHostDetailWithZeroValues(t *testing.T) {
 		"",
 	)
 
-	result := FormatHostDetail(metric)
+	theme := &Theme{
+		Primary:   "#ffffff",
+		Secondary: "#cccccc",
+		Success:   "#00ff00",
+		Warning:   "#ffff00",
+		Error:     "#ff0000",
+		Accent:    "#00afd7",
+		Separator: "#666666",
+		Timestamp: "#999999",
+	}
+	result := FormatHostDetail(metric, theme)
 
 	expectedContents := []string{
-		"Total Probes:[white] 0",
-		"Successful:[white] 0",
-		"Failed:[white] 0",
-		"Loss Rate:[white]",
-		"0.0%",
-		"Last RTT:[white] -",
-		"Average RTT:[white] -",
-		"Minimum RTT:[white] -",
-		"Maximum RTT:[white] -",
-		"Last Success:[white] -",
-		"Last Failure:[white] -",
-		"Last Error:[white] ",
+		"[#00afd7]Total Probes:[#ffffff] 0",
+		"[#ff0000]Successful:[#ffffff] 0",
+		"[#ffffff]Failed:[#ffffff] 0",
+		"[#00afd7]Loss Rate:[#ffffff]",
+		"[#00ff00]0.0%[#ffffff]",
+		"[#00afd7]Last RTT:[#ffffff] -",
+		"[#00afd7]Average RTT:[#ffffff] -",
+		"[#00afd7]Minimum RTT:[#ffffff] -",
+		"[#00afd7]Maximum RTT:[#ffffff] -",
+		"[#00afd7]Last Success:[#ffffff] -",
+		"[#00afd7]Last Failure:[#ffffff] -",
+		"[#00afd7]Last Error:[#ffffff] ",
 	}
 
 	for _, expected := range expectedContents {
