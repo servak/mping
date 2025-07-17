@@ -39,7 +39,8 @@ func TestNewHostListPanel(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	state := newMockState()
 
-	panel := NewHostListPanel(state, mm)
+	config := shared.DefaultConfig()
+	panel := NewHostListPanel(state, mm, config)
 
 	if panel == nil {
 		t.Fatal("NewHostListPanel() returned nil")
@@ -65,7 +66,8 @@ func TestNewHostListPanel(t *testing.T) {
 func TestHostListPanelGetView(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	state := newMockState()
-	panel := NewHostListPanel(state, mm)
+	config := shared.DefaultConfig()
+	panel := NewHostListPanel(state, mm, config)
 
 	view := panel.GetView()
 	if view == nil {
@@ -80,7 +82,8 @@ func TestHostListPanelGetView(t *testing.T) {
 func TestHostListPanelUpdate(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	state := newMockState()
-	panel := NewHostListPanel(state, mm)
+	config := shared.DefaultConfig()
+	panel := NewHostListPanel(state, mm, config)
 
 	// Register some test metrics
 	mm.Register("google.com", "google.com")
@@ -107,7 +110,8 @@ func TestHostListPanelUpdate(t *testing.T) {
 func TestHostListPanelUpdateWithFilter(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	state := newMockState()
-	panel := NewHostListPanel(state, mm)
+	config := shared.DefaultConfig()
+	panel := NewHostListPanel(state, mm, config)
 
 	// Register test metrics
 	mm.Register("google.com", "google.com")
@@ -130,7 +134,8 @@ func TestHostListPanelUpdateWithFilter(t *testing.T) {
 func TestHostListPanelUpdateSelectedHost(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	state := newMockState()
-	panel := NewHostListPanel(state, mm)
+	config := shared.DefaultConfig()
+	panel := NewHostListPanel(state, mm, config)
 
 	// Register test metrics
 	mm.Register("test.com", "test.com")
@@ -148,7 +153,8 @@ func TestHostListPanelUpdateSelectedHost(t *testing.T) {
 func TestHostListPanelScrollDown(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	state := newMockState()
-	panel := NewHostListPanel(state, mm)
+	config := shared.DefaultConfig()
+	panel := NewHostListPanel(state, mm, config)
 
 	// Register multiple metrics to enable scrolling
 	for i := 0; i < 10; i++ {
@@ -171,7 +177,8 @@ func TestHostListPanelScrollDown(t *testing.T) {
 func TestHostListPanelScrollUp(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	state := newMockState()
-	panel := NewHostListPanel(state, mm)
+	config := shared.DefaultConfig()
+	panel := NewHostListPanel(state, mm, config)
 
 	// Register multiple metrics
 	for i := 0; i < 10; i++ {
@@ -194,7 +201,8 @@ func TestHostListPanelScrollUp(t *testing.T) {
 func TestHostListPanelScrollToTop(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	state := newMockState()
-	panel := NewHostListPanel(state, mm)
+	config := shared.DefaultConfig()
+	panel := NewHostListPanel(state, mm, config)
 
 	// Register metrics
 	mm.Register("test.com", "test.com")
@@ -213,7 +221,8 @@ func TestHostListPanelScrollToTop(t *testing.T) {
 func TestHostListPanelScrollToBottom(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	state := newMockState()
-	panel := NewHostListPanel(state, mm)
+	config := shared.DefaultConfig()
+	panel := NewHostListPanel(state, mm, config)
 
 	// Register metrics
 	mm.Register("test.com", "test.com")
@@ -232,7 +241,8 @@ func TestHostListPanelScrollToBottom(t *testing.T) {
 func TestHostListPanelPageDown(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	state := newMockState()
-	panel := NewHostListPanel(state, mm)
+	config := shared.DefaultConfig()
+	panel := NewHostListPanel(state, mm, config)
 
 	// Register metrics
 	mm.Register("test.com", "test.com")
@@ -251,7 +261,8 @@ func TestHostListPanelPageDown(t *testing.T) {
 func TestHostListPanelPageUp(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	state := newMockState()
-	panel := NewHostListPanel(state, mm)
+	config := shared.DefaultConfig()
+	panel := NewHostListPanel(state, mm, config)
 
 	// Register metrics
 	mm.Register("test.com", "test.com")
@@ -270,7 +281,8 @@ func TestHostListPanelPageUp(t *testing.T) {
 func TestHostListPanelRestoreSelection(t *testing.T) {
 	mm := stats.NewMetricsManager()
 	state := newMockState()
-	panel := NewHostListPanel(state, mm)
+	config := shared.DefaultConfig()
+	panel := NewHostListPanel(state, mm, config)
 
 	// Register test metrics
 	mm.Register("google.com", "google.com")
