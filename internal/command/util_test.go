@@ -1,6 +1,8 @@
 package command
 
 import (
+	"net"
+	"os"
 	"reflect"
 	"testing"
 )
@@ -209,5 +211,290 @@ func TestExpandList(t *testing.T) {
 				t.Errorf("expandList() = %v, expected %v", result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestParseCidr(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []string
+		expected []string
+	}{
+		{
+			name:     "no CIDR notation",
+			input:    []string{"example.com", "8.8.8.8"},
+			expected: []string{"example.com", "8.8.8.8"},
+		},
+		{
+			name:     "single host /32",
+			input:    []string{"192.168.1.1/32"},
+			expected: []string{"192.168.1.1"},
+		},
+		{
+			name:     "small subnet /30",
+			input:    []string{"192.168.1.0/30"},
+			expected: []string{"192.168.1.0", "192.168.1.1", "192.168.1.2", "192.168.1.3"},
+		},
+		{
+			name:     "IPv6 single host /128",
+			input:    []string{"2001:db8::1/128"},
+			expected: []string{"2001:db8::1"},
+		},
+		{
+			name:     "mixed input with and without CIDR",
+			input:    []string{"example.com", "192.168.1.0/31", "8.8.8.8"},
+			expected: []string{"example.com", "192.168.1.0", "192.168.1.1", "8.8.8.8"},
+		},
+		{
+			name:     "invalid CIDR notation",
+			input:    []string{"192.168.1.0/33", "invalid/cidr"},
+			expected: []string{"192.168.1.0/33", "invalid/cidr"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseCidr(tt.input)
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("parseCidr() = %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIpInc(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "IPv4 increment",
+			input:    "192.168.1.1",
+			expected: "192.168.1.2",
+		},
+		{
+			name:     "IPv4 overflow to next octet",
+			input:    "192.168.1.255",
+			expected: "192.168.2.0",
+		},
+		{
+			name:     "IPv6 increment",
+			input:    "2001:db8::1",
+			expected: "2001:db8::2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip := net.ParseIP(tt.input)
+			if ip == nil {
+				t.Fatalf("Invalid IP address: %s", tt.input)
+			}
+			ipInc(ip)
+			if ip.String() != tt.expected {
+				t.Errorf("ipInc() = %v, expected %v", ip.String(), tt.expected)
+			}
+		})
+	}
+}
+
+func TestFile2hostnames(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		expected []string
+	}{
+		{
+			name:     "simple hostnames",
+			content:  "example.com\ngoogle.com\n8.8.8.8",
+			expected: []string{"example.com", "google.com", "8.8.8.8"},
+		},
+		{
+			name:     "with comments",
+			content:  "# This is a comment\nexample.com  # inline comment\n; semicolon comment\ngoogle.com",
+			expected: []string{"example.com", "google.com"},
+		},
+		{
+			name:     "with empty lines and whitespace",
+			content:  "\n  example.com  \n\n\tgoogle.com\t\n\n",
+			expected: []string{"example.com", "google.com"},
+		},
+		{
+			name:     "URLs with # in them",
+			content:  "http://example.com#anchor\nhttps://test.com/path#hash",
+			expected: []string{"http://example.com#anchor", "https://test.com/path#hash"},
+		},
+		{
+			name:     "mixed comments and URLs",
+			content:  "# Configuration file\nhttp://api.example.com  # API endpoint\n; Another comment\nhttps://web.example.com#main",
+			expected: []string{"http://api.example.com", "https://web.example.com#main"},
+		},
+		{
+			name:     "protocol prefixes",
+			content:  "icmpv4://example.com\nhttps://api.example.com\ntcp://db.example.com:5432",
+			expected: []string{"icmpv4://example.com", "https://api.example.com", "tcp://db.example.com:5432"},
+		},
+		{
+			name:     "CIDR notation",
+			content:  "192.168.1.0/24\n10.0.0.0/16  # Internal network",
+			expected: []string{"192.168.1.0/24", "10.0.0.0/16"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a temporary file with test content
+			tmpfile, err := os.CreateTemp("", "test_hostnames_*.txt")
+			if err != nil {
+				t.Fatalf("Failed to create temp file: %v", err)
+			}
+			defer os.Remove(tmpfile.Name())
+			defer tmpfile.Close()
+
+			if _, err := tmpfile.WriteString(tt.content); err != nil {
+				t.Fatalf("Failed to write to temp file: %v", err)
+			}
+
+			// Reset file pointer to beginning
+			if _, err := tmpfile.Seek(0, 0); err != nil {
+				t.Fatalf("Failed to seek temp file: %v", err)
+			}
+
+			result := file2hostnames(tmpfile)
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("file2hostnames() = %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParseHostnames(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		fileContent string
+		expected    []string
+	}{
+		{
+			name:     "args only",
+			args:     []string{"example.com", "google.com"},
+			expected: []string{"example.com", "google.com"},
+		},
+		{
+			name:        "file only",
+			args:        []string{},
+			fileContent: "example.com\ngoogle.com",
+			expected:    []string{"example.com", "google.com"},
+		},
+		{
+			name:        "args and file combined",
+			args:        []string{"cli-host.com"},
+			fileContent: "file-host.com",
+			expected:    []string{"file-host.com", "cli-host.com"},
+		},
+		{
+			name:        "with bracket expansion",
+			args:        []string{"server[1-2].example.com"},
+			fileContent: "web[01-02].example.com",
+			expected:    []string{"web01.example.com", "web02.example.com", "server1.example.com", "server2.example.com"},
+		},
+		{
+			name:        "with CIDR expansion",
+			args:        []string{"192.168.1.0/30"},
+			fileContent: "10.0.0.0/31",
+			expected:    []string{"10.0.0.0", "10.0.0.1", "192.168.1.0", "192.168.1.1", "192.168.1.2", "192.168.1.3"},
+		},
+		{
+			name:        "combined bracket and CIDR expansion",
+			args:        []string{"server[1-2].example.com", "192.168.1.0/30"},
+			fileContent: "web[a-b].example.com",
+			expected:    []string{"weba.example.com", "webb.example.com", "server1.example.com", "server2.example.com", "192.168.1.0", "192.168.1.1", "192.168.1.2", "192.168.1.3"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var fpath string
+			if tt.fileContent != "" {
+				// Create temporary file
+				tmpfile, err := os.CreateTemp("", "test_parse_*.txt")
+				if err != nil {
+					t.Fatalf("Failed to create temp file: %v", err)
+				}
+				defer os.Remove(tmpfile.Name())
+
+				if _, err := tmpfile.WriteString(tt.fileContent); err != nil {
+					t.Fatalf("Failed to write to temp file: %v", err)
+				}
+				tmpfile.Close()
+				fpath = tmpfile.Name()
+			}
+
+			result := parseHostnames(tt.args, fpath)
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("parseHostnames() = %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParseHostnamesIntegration(t *testing.T) {
+	// Test the complete flow: file reading -> bracket expansion -> CIDR expansion
+	fileContent := `# Test configuration
+# Web servers with bracket expansion
+web[01-02].prod.example.com
+
+# Database subnet
+10.0.1.0/30  # DB cluster IPs
+
+# Mixed protocols
+https://api[1-2].example.com
+icmpv4://monitor.example.com
+`
+
+	tmpfile, err := os.CreateTemp("", "test_integration_*.txt")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpfile.Name())
+
+	if _, err := tmpfile.WriteString(fileContent); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
+	}
+	tmpfile.Close()
+
+	args := []string{"server[a-b].test.com", "192.168.1.0/31"}
+	result := parseHostnames(args, tmpfile.Name())
+
+	expected := []string{
+		// From file: bracket expansion
+		"web01.prod.example.com", "web02.prod.example.com",
+		// From file: CIDR expansion
+		"10.0.1.0", "10.0.1.1", "10.0.1.2", "10.0.1.3",
+		// From file: protocols with bracket expansion
+		"https://api1.example.com", "https://api2.example.com",
+		// From file: plain hostname
+		"icmpv4://monitor.example.com",
+		// From args: bracket expansion
+		"servera.test.com", "serverb.test.com",
+		// From args: CIDR expansion
+		"192.168.1.0", "192.168.1.1",
+	}
+
+	if !reflect.DeepEqual(result, expected) {
+		t.Errorf("Integration test failed.\nGot: %v\nExpected: %v", result, expected)
+
+		// Helper debug output
+		t.Logf("Result length: %d, Expected length: %d", len(result), len(expected))
+		for i, item := range result {
+			if i < len(expected) {
+				if item != expected[i] {
+					t.Logf("  [%d] Got: %q, Expected: %q", i, item, expected[i])
+				}
+			} else {
+				t.Logf("  [%d] Extra item: %q", i, item)
+			}
+		}
 	}
 }
