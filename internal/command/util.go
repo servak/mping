@@ -45,7 +45,7 @@ func expandHost(host string, matches [][]string) []string {
 			// Range expansion: [1-10], [01-05]
 			expansions = expandRange(content)
 			// Check if expansion was successful (not just returning original content)
-			isValidExpansion = !(len(expansions) == 1 && expansions[0] == content)
+			isValidExpansion = len(expansions) != 1 || expansions[0] != content
 		} else if strings.Contains(content, ",") {
 			// List expansion: [web,db,cache]
 			expansions = expandList(content)
