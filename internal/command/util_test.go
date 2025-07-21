@@ -254,7 +254,7 @@ func TestParseCidr(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parseCidr(tt.input)
+			result := parseCIDR(tt.input)
 			if !reflect.DeepEqual(result, tt.expected) {
 				t.Errorf("parseCidr() = %v, expected %v", result, tt.expected)
 			}
@@ -369,7 +369,7 @@ func TestFile2hostnames(t *testing.T) {
 	}
 }
 
-func TestParseHostnames(t *testing.T) {
+func TestProcessTargets(t *testing.T) {
 	tests := []struct {
 		name        string
 		args        []string
@@ -431,15 +431,15 @@ func TestParseHostnames(t *testing.T) {
 				fpath = tmpfile.Name()
 			}
 
-			result := parseHostnames(tt.args, fpath)
+			result := ExpandTargets(tt.args, fpath)
 			if !reflect.DeepEqual(result, tt.expected) {
-				t.Errorf("parseHostnames() = %v, expected %v", result, tt.expected)
+				t.Errorf("ProcessTargets() = %v, expected %v", result, tt.expected)
 			}
 		})
 	}
 }
 
-func TestParseHostnamesIntegration(t *testing.T) {
+func TestProcessTargetsIntegration(t *testing.T) {
 	// Test the complete flow: file reading -> bracket expansion -> CIDR expansion
 	fileContent := `# Test configuration
 # Web servers with bracket expansion
@@ -465,7 +465,7 @@ icmpv4://monitor.example.com
 	tmpfile.Close()
 
 	args := []string{"server[a-b].test.com", "192.168.1.0/31"}
-	result := parseHostnames(args, tmpfile.Name())
+	result := ExpandTargets(args, tmpfile.Name())
 
 	expected := []string{
 		// From file: bracket expansion
@@ -496,5 +496,62 @@ icmpv4://monitor.example.com
 				t.Logf("  [%d] Extra item: %q", i, item)
 			}
 		}
+	}
+}
+
+func TestCollectTargets(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		fileContent string
+		expected    []string
+	}{
+		{
+			name:     "args only",
+			args:     []string{"server1.com", "server2.com"},
+			expected: []string{"server1.com", "server2.com"},
+		},
+		{
+			name:        "file only",
+			args:        []string{},
+			fileContent: "file1.com\nfile2.com",
+			expected:    []string{"file1.com", "file2.com"},
+		},
+		{
+			name:        "file and args combined",
+			args:        []string{"arg.com"},
+			fileContent: "file.com",
+			expected:    []string{"file.com", "arg.com"},
+		},
+		{
+			name:        "file with comments",
+			args:        []string{},
+			fileContent: "# Comment\nserver.com  # inline\n; another comment\nvalid.com",
+			expected:    []string{"server.com", "valid.com"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var filePath string
+			if tt.fileContent != "" {
+				tmpfile, err := os.CreateTemp("", "test_collect_*.txt")
+				if err != nil {
+					t.Fatalf("Failed to create temp file: %v", err)
+				}
+				defer os.Remove(tmpfile.Name())
+
+				if _, err := tmpfile.WriteString(tt.fileContent); err != nil {
+					t.Fatalf("Failed to write to temp file: %v", err)
+				}
+				tmpfile.Close()
+				filePath = tmpfile.Name()
+			}
+
+			result := collectTargets(tt.args, filePath)
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("CollectTargets() = %v, expected %v", result, tt.expected)
+			}
+		})
 	}
 }

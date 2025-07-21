@@ -54,7 +54,7 @@ mping batch dns://8.8.8.8/google.com`,
 				return err
 			}
 
-			hosts := parseHostnames(args, filename)
+			hosts := ExpandTargets(args, filename)
 			if len(hosts) == 0 {
 				cmd.Println("Please set hostname or ip.")
 				cmd.Help()
@@ -68,34 +68,34 @@ mping batch dns://8.8.8.8/google.com`,
 			// Create ProbeManager and MetricsManager
 			probeManager := prober.NewProbeManager(cfg.Prober, cfg.Default)
 			metricsManager := stats.NewMetricsManager()
-			
+
 			// Add targets
 			err = probeManager.AddTargets(hosts...)
 			if err != nil {
 				return fmt.Errorf("failed to add targets: %w", err)
 			}
-			
+
 			// Subscribe to events for metrics collection
 			metricsManager.Subscribe(probeManager.Events())
-			
+
 			// Start probing with timeout context
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(counter)*_interval)
 			defer cancel()
-			
+
 			cmd.Print("probe")
 			go func() {
 				if err := probeManager.Run(ctx, _interval, _timeout); err != nil {
 					fmt.Printf("ProbeManager error: %v\n", err)
 				}
 			}()
-			
+
 			// Wait for specified duration
 			for counter > 0 {
 				counter--
 				cmd.Print(".")
 				time.Sleep(_interval)
 			}
-			
+
 			// Stop probing
 			probeManager.Stop()
 			cmd.Print("\r")

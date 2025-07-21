@@ -12,6 +12,14 @@ import (
 	"strings"
 )
 
+// ExpandTargets processes target specifications through a pipeline of expansions
+func ExpandTargets(args []string, filePath string) []string {
+	targets := collectTargets(args, filePath)
+	targets = parseBrackets(targets)
+	targets = parseCIDR(targets)
+	return targets
+}
+
 func parseBrackets(_hosts []string) []string {
 	hosts := []string{}
 	bracketRegex := regexp.MustCompile(`\[([^\]]+)\]`)
@@ -138,7 +146,7 @@ func expandList(content string) []string {
 	return result
 }
 
-func parseCidr(_hosts []string) []string {
+func parseCIDR(_hosts []string) []string {
 	hosts := []string{}
 	for _, h := range _hosts {
 		ip, ipnet, err := net.ParseCIDR(h)
@@ -188,19 +196,20 @@ func file2hostnames(fp *os.File) []string {
 	return hosts
 }
 
-func parseHostnames(args []string, fpath string) []string {
-	hosts := []string{}
+// collectTargets gathers targets from command-line arguments and optional file
+func collectTargets(args []string, filePath string) []string {
+	targets := []string{}
 
-	// Only attempt to open file if path is not empty
-	if fpath != "" {
-		fp, err := os.Open(fpath)
+	// Load targets from file if specified
+	if filePath != "" {
+		fp, err := os.Open(filePath)
 		if err == nil {
-			hosts = file2hostnames(fp)
+			targets = file2hostnames(fp)
 			fp.Close() // Critical fix: close file to prevent resource leak
 		}
 	}
 
-	hosts = append(hosts, args...)
-	hosts = parseBrackets(hosts)
-	return parseCidr(hosts)
+	// Append command-line arguments
+	targets = append(targets, args...)
+	return targets
 }

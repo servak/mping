@@ -61,7 +61,7 @@ mping dns://8.8.8.8/google.com`,
 				return err
 			}
 
-			hosts := parseHostnames(args, filename)
+			hosts := ExpandTargets(args, filename)
 			if len(hosts) == 0 {
 				cmd.Println("Please set hostname or ip.")
 				cmd.Help()
