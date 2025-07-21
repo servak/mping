@@ -267,7 +267,7 @@ func (p *DNSProber) success(result chan *Event, target *DNSTarget, sentTime time
 	for _, ans := range resp.Answer {
 		answers = append(answers, ans.String())
 	}
-	
+
 	details := &ProbeDetails{
 		ProbeType: "dns",
 		DNS: &DNSDetails{
@@ -281,7 +281,7 @@ func (p *DNSProber) success(result chan *Event, target *DNSTarget, sentTime time
 			UseTCP:       target.UseTCP,
 		},
 	}
-	
+
 	result <- &Event{
 		Key:         target.OriginalTarget,
 		DisplayName: target.OriginalTarget,

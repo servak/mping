@@ -105,7 +105,7 @@ func TestHTTPProberAccept(t *testing.T) {
 			prefix: "my-https",
 			config: &HTTPConfig{
 				ExpectCodes: "200",
-				TLS:        &TLSConfig{SkipVerify: true},
+				TLS:         &TLSConfig{SkipVerify: true},
 			},
 			target: "my-https://secure.example.com",
 		},

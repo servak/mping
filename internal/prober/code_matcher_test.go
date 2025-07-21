@@ -185,9 +185,9 @@ func TestMatchCode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := MatchCode(tt.code, tt.pattern)
-			
+
 			if result != tt.expected {
-				t.Errorf("Pattern %q with code %d: expected %v, got %v", 
+				t.Errorf("Pattern %q with code %d: expected %v, got %v",
 					tt.pattern, tt.code, tt.expected, result)
 			}
 		})
@@ -220,12 +220,11 @@ func TestIsValidCodePattern(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := IsValidCodePattern(tt.pattern)
-			
+
 			if result != tt.expected {
-				t.Errorf("Pattern %q validation: expected %v, got %v", 
+				t.Errorf("Pattern %q validation: expected %v, got %v",
 					tt.pattern, tt.expected, result)
 			}
 		})
 	}
 }
-

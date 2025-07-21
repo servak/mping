@@ -185,7 +185,7 @@ func TestProbeManagerIntegration(t *testing.T) {
 			Probe: HTTP,
 			HTTP: &HTTPConfig{
 				ExpectCodes: "200",
-				TLS:        &TLSConfig{SkipVerify: true},
+				TLS:         &TLSConfig{SkipVerify: true},
 			},
 		},
 	}
@@ -250,7 +250,7 @@ func TestHTTPProberTLSConfig(t *testing.T) {
 			name: "HTTPS with TLS config",
 			config: &HTTPConfig{
 				ExpectCodes: "200",
-				TLS:        &TLSConfig{SkipVerify: true},
+				TLS:         &TLSConfig{SkipVerify: true},
 			},
 			target:      "my-https://secure.example.com",
 			expectedURL: "https://secure.example.com",

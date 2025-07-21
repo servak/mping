@@ -190,7 +190,7 @@ func (p *ICMPProber) success(r chan *Event, runCnt int, addr string, payload icm
 
 		// Extract detailed packet information
 		icmpDetails := p.extractICMPDetails(runCnt, addr, payload, packetData, packetSize)
-		
+
 		// Create ICMP detail information
 		details := &ProbeDetails{
 			ProbeType: string(p.version),
@@ -213,21 +213,20 @@ func (p *ICMPProber) success(r chan *Event, runCnt int, addr string, payload icm
 func (p *ICMPProber) extractICMPDetails(runCnt int, addr string, payload icmp.Message, packetData []byte, packetSize int) *ICMPDetails {
 	var payloadContent string
 	var checksum uint16
-	
+
 	// Extract echo data if available
 	if echoBody, ok := payload.Body.(*icmp.Echo); ok {
-		
+
 		// Format payload content with length limit
 		payloadContent = formatPayloadContent(echoBody.Data)
 	}
-	
+
 	// Extract checksum from raw packet data if available
 	// ICMP checksum is at offset 2-3 in the ICMP header
 	if len(packetData) >= 4 {
 		checksum = binary.BigEndian.Uint16(packetData[2:4])
 	}
-	
-	
+
 	// Convert ICMP type to int safely
 	var icmpType int
 	switch payload.Type {
@@ -243,7 +242,7 @@ func (p *ICMPProber) extractICMPDetails(runCnt int, addr string, payload icmp.Me
 			icmpType = -1 // Unknown type
 		}
 	}
-	
+
 	details := &ICMPDetails{
 		Sequence:   runCnt,
 		PacketSize: packetSize,
@@ -252,20 +251,18 @@ func (p *ICMPProber) extractICMPDetails(runCnt int, addr string, payload icmp.Me
 		Checksum:   checksum,
 		Payload:    payloadContent,
 	}
-	
+
 	return details
 }
-
-
 
 // formatPayloadContent formats payload bytes for display with length limit
 func formatPayloadContent(data []byte) string {
 	const maxDisplayLength = 32 // Maximum characters to display
-	
+
 	if len(data) == 0 {
 		return ""
 	}
-	
+
 	// Convert to string, replacing non-printable characters
 	var result strings.Builder
 	for _, b := range data {
@@ -275,14 +272,14 @@ func formatPayloadContent(data []byte) string {
 			result.WriteString(fmt.Sprintf("\\x%02x", b))
 		}
 	}
-	
+
 	payloadStr := result.String()
-	
+
 	// Truncate if too long
 	if len(payloadStr) > maxDisplayLength {
 		payloadStr = payloadStr[:maxDisplayLength-3] + "..."
 	}
-	
+
 	return payloadStr
 }
 

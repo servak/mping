@@ -75,7 +75,7 @@ func TestICMPConfigValidate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.config.Validate()
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Error("Expected validation error but got none")
@@ -155,7 +155,7 @@ func TestHTTPConfigValidate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.config.Validate()
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Error("Expected validation error but got none")
@@ -177,7 +177,7 @@ func TestTCPConfigValidate(t *testing.T) {
 		config *TCPConfig
 	}{
 		{
-			name: "valid config - empty",
+			name:   "valid config - empty",
 			config: &TCPConfig{},
 		},
 		{
@@ -308,7 +308,7 @@ func TestDNSConfigValidate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.config.Validate()
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Error("Expected validation error but got none")
@@ -488,7 +488,7 @@ func TestProberConfigValidate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.config.Validate()
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Error("Expected validation error but got none")

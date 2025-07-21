@@ -14,7 +14,7 @@ func TestProbeManagerDetailedScenarios(t *testing.T) {
 			Probe: HTTP,
 			HTTP: &HTTPConfig{
 				ExpectCodes: "200",
-				TLS:        &TLSConfig{SkipVerify: true},
+				TLS:         &TLSConfig{SkipVerify: true},
 			},
 		},
 	}
@@ -106,7 +106,7 @@ func TestGetOrCreateProber(t *testing.T) {
 			Probe: HTTP,
 			HTTP: &HTTPConfig{
 				ExpectCodes: "200",
-				TLS:        &TLSConfig{SkipVerify: true},
+				TLS:         &TLSConfig{SkipVerify: true},
 			},
 		},
 		"tcp": {

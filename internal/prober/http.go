@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	
 )
 
 const (
@@ -189,19 +188,19 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 				headers[key] = values[0] // Get only the first value
 			}
 		}
-		
+
 		var redirects []string
 		if resp.Request.URL.String() != target {
 			redirects = append(redirects, resp.Request.URL.String())
 		}
-		
+
 		var probeType string
 		if strings.HasPrefix(target, "https://") {
 			probeType = "https"
 		} else {
 			probeType = "http"
 		}
-		
+
 		details := &ProbeDetails{
 			ProbeType: probeType,
 			HTTP: &HTTPDetails{
@@ -211,7 +210,7 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 				Redirects:    redirects,
 			},
 		}
-		
+
 		r <- &Event{
 			Key:         target,
 			DisplayName: target,

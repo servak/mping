@@ -95,6 +95,114 @@ mping batch --count 5 192.168.1.0/29
 mping batch -f hosts.txt --count 5
 ```
 
+## Target Expansion
+
+mping supports powerful target expansion syntax for monitoring large numbers of hosts efficiently:
+
+### Bracket Expansion
+Use square brackets `[]` to specify multiple targets with patterns:
+
+#### Numeric Ranges
+```bash
+# Basic numeric range
+mping server[1-5].example.com
+# Expands to: server1.example.com, server2.example.com, ..., server5.example.com
+
+# Zero-padded ranges (auto-detected from start format)
+mping web[01-10].example.com
+# Expands to: web01.example.com, web02.example.com, ..., web10.example.com
+
+# Three-digit padding
+mping host[001-100].datacenter.com
+# Expands to: host001.datacenter.com, host002.datacenter.com, ..., host100.datacenter.com
+```
+
+#### Character Ranges
+```bash
+# Lowercase letters
+mping server[a-d].example.com
+# Expands to: servera.example.com, serverb.example.com, serverc.example.com, serverd.example.com
+
+# Uppercase letters
+mping db[A-C].cluster.internal
+# Expands to: dbA.cluster.internal, dbB.cluster.internal, dbC.cluster.internal
+```
+
+#### List Expansion
+```bash
+# Comma-separated lists
+mping service[web,api,db].example.com
+# Expands to: serviceweb.example.com, serviceapi.example.com, servicedb.example.com
+
+# Mixed environments
+mping app[dev,staging,prod].company.com
+# Expands to: appdev.company.com, appstaging.company.com, appprod.company.com
+```
+
+#### Multiple Brackets (Combinations)
+```bash
+# Multiple expansion points
+mping server[1-2].[dev,prod].example.com
+# Expands to: server1.dev.example.com, server1.prod.example.com, 
+#            server2.dev.example.com, server2.prod.example.com
+
+# Protocol-specific monitoring
+mping https://api[1-3].[us,eu].service.com/health
+```
+
+#### Advanced Use Cases
+```bash
+# Infrastructure monitoring
+mping db[01-05].cluster[a-c].datacenter.com
+
+# Multi-region web services
+mping https://[web,api,cdn][1-3].[us-west,eu-central].example.com
+
+# Network equipment
+mping switch[01-24].rack[a-f].datacenter.internal
+```
+
+### File-based Expansion
+Bracket expansion also works in target files (`-f` option):
+
+```bash
+# Create targets.txt
+cat > targets.txt << EOF
+# Web tier
+web[01-05].prod.example.com
+api[1-3].prod.example.com
+
+# Database tier  
+db[01-02].[master,slave].prod.example.com
+
+# Monitoring endpoints
+https://health[1-5].prod.example.com/status
+EOF
+
+# Monitor all expanded targets
+mping -f targets.txt
+```
+
+### Combination with CIDR Ranges
+Bracket expansion works alongside CIDR notation:
+
+```bash
+# Mix bracket expansion with subnet ranges
+mping server[1-3].example.com 192.168.1.0/29
+
+# In files
+echo "web[01-03].prod.example.com" >> targets.txt
+echo "10.0.1.0/28" >> targets.txt
+mping -f targets.txt
+```
+
+### Key Features
+- **Cross-platform**: Works on Windows, macOS, and Linux
+- **Shell-independent**: Unlike bash `{}` expansion, works in files and non-bash environments  
+- **Zero-padding intelligence**: Automatically detects and maintains padding format
+- **Error handling**: Invalid patterns are preserved as-is (e.g., `[5-1]` stays `[5-1]`)
+- **Protocol support**: Works with all protocol prefixes (`https://`, `tcp://`, `dns://`, etc.)
+
 ## DNS Monitoring Details
 
 ### DNS Target Format
