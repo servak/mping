@@ -22,7 +22,7 @@ func TestValidationErrors(t *testing.T) {
 	t.Run("single validation error", func(t *testing.T) {
 		ve := &ValidationErrors{}
 		ve.Add(fmt.Errorf("test error"))
-		
+
 		if !ve.HasErrors() {
 			t.Error("Expected errors")
 		}
@@ -35,11 +35,11 @@ func TestValidationErrors(t *testing.T) {
 		ve := &ValidationErrors{}
 		ve.Add(fmt.Errorf("error 1"))
 		ve.Add(fmt.Errorf("error 2"))
-		
+
 		if !ve.HasErrors() {
 			t.Error("Expected errors")
 		}
-		
+
 		expected := "multiple validation errors: error 1; error 2"
 		if ve.Error() != expected {
 			t.Errorf("Expected '%s', got %s", expected, ve.Error())
@@ -49,7 +49,7 @@ func TestValidationErrors(t *testing.T) {
 	t.Run("add nil error should be ignored", func(t *testing.T) {
 		ve := &ValidationErrors{}
 		ve.Add(nil)
-		
+
 		if ve.HasErrors() {
 			t.Error("Expected no errors when adding nil")
 		}
@@ -67,12 +67,12 @@ func TestConfigValidate(t *testing.T) {
 	t.Run("invalid default prober", func(t *testing.T) {
 		cfg := DefaultConfig()
 		cfg.Default = "nonexistent"
-		
+
 		err := cfg.Validate()
 		if err == nil {
 			t.Error("Expected validation error for invalid default prober")
 		}
-		
+
 		if !strings.Contains(err.Error(), "default prober 'nonexistent' not found") {
 			t.Errorf("Expected error about nonexistent default prober, got: %v", err)
 		}
@@ -86,12 +86,12 @@ func TestConfigValidate(t *testing.T) {
 				ExpectCodes: "invalid-pattern",
 			},
 		}
-		
+
 		err := cfg.Validate()
 		if err == nil {
 			t.Error("Expected validation error for invalid prober config")
 		}
-		
+
 		if !strings.Contains(err.Error(), "prober 'invalid'") {
 			t.Errorf("Expected error about invalid prober, got: %v", err)
 		}
@@ -114,12 +114,12 @@ func TestConfigValidate(t *testing.T) {
 				Port:       53,
 			},
 		}
-		
+
 		err := cfg.Validate()
 		if err == nil {
 			t.Error("Expected validation errors")
 		}
-		
+
 		errMsg := err.Error()
 		if !strings.Contains(errMsg, "multiple validation errors") {
 			t.Errorf("Expected multiple validation errors message, got: %v", err)
@@ -132,7 +132,7 @@ func TestConfigValidate(t *testing.T) {
 	t.Run("empty default prober should be valid", func(t *testing.T) {
 		cfg := DefaultConfig()
 		cfg.Default = ""
-		
+
 		if err := cfg.Validate(); err != nil {
 			t.Errorf("Empty default prober should be valid: %v", err)
 		}
@@ -182,7 +182,7 @@ prober:
 		if err == nil {
 			t.Error("Invalid config should fail validation")
 		}
-		
+
 		if !strings.Contains(err.Error(), "invalid TOS value") {
 			t.Errorf("Expected TOS validation error, got: %v", err)
 		}
@@ -201,7 +201,7 @@ prober:
 		if err == nil {
 			t.Error("Invalid HTTP config should fail validation")
 		}
-		
+
 		if !strings.Contains(err.Error(), "invalid expect_codes pattern") {
 			t.Errorf("Expected expect_codes validation error, got: %v", err)
 		}
@@ -222,7 +222,7 @@ prober:
 		if err == nil {
 			t.Error("Invalid DNS config should fail validation")
 		}
-		
+
 		if !strings.Contains(err.Error(), "DNS server is required") {
 			t.Errorf("Expected DNS server validation error, got: %v", err)
 		}

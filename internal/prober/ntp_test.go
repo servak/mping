@@ -71,7 +71,7 @@ func TestNTPConfigValidate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.config.Validate()
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Error("Expected validation error but got none")
@@ -143,7 +143,7 @@ func TestNTPProberAccept(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := prober.Accept(tt.target)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Error("Expected error but got none")
@@ -226,7 +226,7 @@ func TestNTPProberParseTarget(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server, port, err := prober.parseTarget(tt.target)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Error("Expected error but got none")
@@ -251,11 +251,11 @@ func TestNTPProberParseTarget(t *testing.T) {
 func TestNTPTimeConversion(t *testing.T) {
 	// Test time conversion functions
 	now := time.Now()
-	
+
 	// Convert to NTP format and back
 	sec, frac := ntpTimeFromTime(now)
 	converted := ntpTimeToTime(sec, frac)
-	
+
 	// Allow small difference due to precision loss
 	diff := converted.Sub(now).Abs()
 	if diff > time.Microsecond {

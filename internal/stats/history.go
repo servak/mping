@@ -2,16 +2,16 @@ package stats
 
 import (
 	"time"
-	
+
 	"github.com/servak/mping/internal/prober"
 )
 
 // History entry
 type HistoryEntry struct {
-	Timestamp time.Time     `json:"timestamp"`
-	RTT       time.Duration `json:"rtt"`
-	Success   bool          `json:"success"`
-	Error     string        `json:"error,omitempty"`
+	Timestamp time.Time            `json:"timestamp"`
+	RTT       time.Duration        `json:"rtt"`
+	Success   bool                 `json:"success"`
+	Error     string               `json:"error,omitempty"`
 	Details   *prober.ProbeDetails `json:"details,omitempty"`
 }
 
@@ -130,7 +130,7 @@ func (th *TargetHistory) GetSuccessRateInPeriod(duration time.Duration) float64 
 
 	since := time.Now().Add(-duration)
 	entries := th.GetEntriesSince(since)
-	
+
 	if len(entries) == 0 {
 		return 0.0
 	}

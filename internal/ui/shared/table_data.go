@@ -94,7 +94,7 @@ func (td *TableData) ToGoPrettyTable() table.Writer {
 func (td *TableData) ToTviewTable() *tview.Table {
 	// Use default dark theme colors as fallback
 	theme := PredefinedThemes["dark"]
-	
+
 	t := tview.NewTable().
 		SetFixed(1, 0).
 		SetSelectable(true, false).

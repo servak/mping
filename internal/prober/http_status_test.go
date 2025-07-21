@@ -178,12 +178,11 @@ func TestHTTPStatusCodeMatching(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			prober := NewHTTPProber(tt.config, "test")
 			result := prober.isExpectedStatusCode(tt.statusCode)
-			
+
 			if result != tt.expected {
-				t.Errorf("Expected %v, got %v for status code %d with config %+v", 
+				t.Errorf("Expected %v, got %v for status code %d with config %+v",
 					tt.expected, result, tt.statusCode, tt.config)
 			}
 		})
 	}
 }
-

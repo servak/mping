@@ -191,7 +191,7 @@ func (p *TCPProber) sent(result chan *Event, target string, sentTime time.Time) 
 
 func (p *TCPProber) success(result chan *Event, target string, sentTime time.Time, rtt time.Duration) {
 	displayName := p.targets[target] // Get displayName from targets map
-	
+
 	// TCP only checks connectivity, so no detailed information
 	result <- &Event{
 		Key:         target,

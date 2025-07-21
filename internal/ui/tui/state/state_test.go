@@ -195,4 +195,3 @@ func TestUIStateInterfaces(t *testing.T) {
 	var _ RenderState = state
 	var _ FullUIState = state
 }
-

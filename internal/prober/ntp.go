@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	
 )
 
 const (
@@ -260,7 +259,7 @@ func (p *NTPProber) success(result chan *Event, serverAddr, displayName string, 
 			port = p
 		}
 	}
-	
+
 	details := &ProbeDetails{
 		ProbeType: "ntp",
 		NTP: &NTPDetails{
@@ -271,7 +270,7 @@ func (p *NTPProber) success(result chan *Event, serverAddr, displayName string, 
 			Precision: int(resp.Precision),
 		},
 	}
-	
+
 	result <- &Event{
 		Key:         serverAddr,
 		DisplayName: displayName,
