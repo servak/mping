@@ -35,6 +35,8 @@ type MetricsProvider interface {
 // MetricsSystemManager provides system-level operations
 type MetricsSystemManager interface {
 	ResetAllMetrics()
+	ToggleBeep()
+	IsBeepEnabled() bool
 }
 
 // MetricsEventRecorder handles internal event recording
