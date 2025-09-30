@@ -105,3 +105,10 @@ func (b *Beeper) SetDebounceInterval(interval time.Duration) {
 	defer b.mu.Unlock()
 	b.debounceTime = interval
 }
+
+// GetLastBeepTime returns the last beep time (for testing)
+func (b *Beeper) GetLastBeepTime() time.Time {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.lastBeepTime
+}

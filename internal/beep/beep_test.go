@@ -68,7 +68,7 @@ func TestDebounce(t *testing.T) {
 	beeper.Beep()
 	time.Sleep(10 * time.Millisecond) // Wait for goroutine to execute
 
-	firstBeepTime := beeper.lastBeepTime
+	firstBeepTime := beeper.GetLastBeepTime()
 	if firstBeepTime.IsZero() {
 		t.Error("Expected first beep to set lastBeepTime")
 	}
@@ -77,7 +77,7 @@ func TestDebounce(t *testing.T) {
 	beeper.Beep()
 	time.Sleep(10 * time.Millisecond)
 
-	if beeper.lastBeepTime != firstBeepTime {
+	if !beeper.GetLastBeepTime().Equal(firstBeepTime) {
 		t.Error("Expected second beep to be debounced")
 	}
 
@@ -86,7 +86,7 @@ func TestDebounce(t *testing.T) {
 	beeper.Beep()
 	time.Sleep(10 * time.Millisecond)
 
-	if beeper.lastBeepTime == firstBeepTime {
+	if beeper.GetLastBeepTime().Equal(firstBeepTime) {
 		t.Error("Expected beep to work after debounce period")
 	}
 }
@@ -99,7 +99,7 @@ func TestBeepWhenDisabled(t *testing.T) {
 	beeper.Beep()
 	time.Sleep(10 * time.Millisecond)
 
-	if !beeper.lastBeepTime.IsZero() {
+	if !beeper.GetLastBeepTime().IsZero() {
 		t.Error("Expected lastBeepTime to remain zero when disabled")
 	}
 }
