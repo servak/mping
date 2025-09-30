@@ -157,6 +157,9 @@ func (a *TUIApp) setupKeyBindings() {
 		case 't':
 			a.cycleTheme()
 			return nil
+		case 'b':
+			a.toggleBeep()
+			return nil
 		}
 
 		// Delegate navigation to layout
@@ -172,29 +175,30 @@ func (a *TUIApp) setupHelpModal() {
 
 // createHelpModal creates help modal content
 func (a *TUIApp) createHelpModal() *tview.Modal {
-	helpText := `mping - Multi-target Ping Tool      
+	helpText := `mping - Multi-target Ping Tool
 
-NAVIGATION:                          
-  j, ↓         Move down              
-  k, ↑         Move up                
-  g            Go to top              
-  G            Go to bottom           
-  u, Page Up   Page up                
-  d, Page Down Page down              
-  s            Next sort key          
-  S            Previous sort key      
-  r            Reverse sort order     
-  R            Reset all metrics      
-  v            Toggle detail view     
-  /            Filter hosts           
-  t            Cycle theme            
-  h            Show/hide this help    
-  q, Ctrl+C    Quit application       
+NAVIGATION:
+  j, ↓         Move down
+  k, ↑         Move up
+  g            Go to top
+  G            Go to bottom
+  u, Page Up   Page up
+  d, Page Down Page down
+  s            Next sort key
+  S            Previous sort key
+  r            Reverse sort order
+  R            Reset all metrics
+  v            Toggle detail view
+  /            Filter hosts
+  t            Cycle theme
+  b            Toggle beep sound
+  h            Show/hide this help
+  q, Ctrl+C    Quit application
 
-FILTER:                              
-  /            Start filter input     
-  Enter        Apply filter           
-  Esc          Cancel/Clear filter    
+FILTER:
+  /            Start filter input
+  Enter        Apply filter
+  Esc          Cancel/Clear filter
 
 Press 'h' or Esc to close           `
 
@@ -311,4 +315,9 @@ func (a *TUIApp) getFilteredMetrics() []stats.Metrics {
 // Theme-related methods
 func (a *TUIApp) cycleTheme() {
 	a.config.CycleTheme()
+}
+
+// Beep-related methods
+func (a *TUIApp) toggleBeep() {
+	a.mm.ToggleBeep()
 }

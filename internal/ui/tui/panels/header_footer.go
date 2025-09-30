@@ -14,11 +14,17 @@ import (
 
 // HeaderPanel manages header display
 type HeaderPanel struct {
-	view        *tview.TextView
-	renderState state.RenderState
-	config      *shared.Config
-	interval    time.Duration
-	timeout     time.Duration
+	view         *tview.TextView
+	renderState  state.RenderState
+	config       *shared.Config
+	interval     time.Duration
+	timeout      time.Duration
+	beepProvider BeepStateProvider
+}
+
+// BeepStateProvider provides access to beep state
+type BeepStateProvider interface {
+	IsBeepEnabled() bool
 }
 
 // NewHeaderPanel creates a new HeaderPanel
@@ -34,6 +40,11 @@ func NewHeaderPanel(renderState state.RenderState, config *shared.Config, interv
 		interval:    interval,
 		timeout:     timeout,
 	}
+}
+
+// SetBeepProvider sets the beep state provider
+func (h *HeaderPanel) SetBeepProvider(provider BeepStateProvider) {
+	h.beepProvider = provider
 }
 
 // Update refreshes header display based on current state
@@ -62,6 +73,16 @@ func (h *HeaderPanel) generateHeaderContent() string {
 	if filterText != "" {
 		parts = append(parts, fmt.Sprintf("[%s]Filter: %s[-]", theme.Warning, filterText))
 	}
+
+	// Add beep state
+	if h.beepProvider != nil {
+		beepState := "OFF"
+		if h.beepProvider.IsBeepEnabled() {
+			beepState = "ON"
+		}
+		parts = append(parts, fmt.Sprintf("[%s]Beep: %s[-]", theme.Accent, beepState))
+	}
+
 	parts = append(parts, fmt.Sprintf("[%s]Theme: %s[-]", theme.Secondary, h.config.Theme))
 	sep := fmt.Sprintf("[%s] | [-]", theme.Separator)
 	return strings.Join(parts, sep)
@@ -108,8 +129,9 @@ func (f *FooterPanel) generateFooterContent() string {
 	resetText := fmt.Sprintf("[%s]R:reset[-]", theme.Secondary)
 	filterText := fmt.Sprintf("[%s]/:filter[-]", theme.Secondary)
 	themeText := fmt.Sprintf("[%s]t:theme[-]", theme.Secondary)
+	beepText := fmt.Sprintf("[%s]b:beep[-]", theme.Secondary)
 	moveText := fmt.Sprintf("[%s]j/k/g/G/u/d:move[-]", theme.Secondary)
-	return fmt.Sprintf("%s  %s  %s  %s  %s  %s  %s  %s", helpText, quitText, sortText, reverseText, resetText, filterText, themeText, moveText)
+	return fmt.Sprintf("%s  %s  %s  %s  %s  %s  %s  %s  %s", helpText, quitText, sortText, reverseText, resetText, filterText, themeText, beepText, moveText)
 }
 
 // GetView returns the underlying tview component

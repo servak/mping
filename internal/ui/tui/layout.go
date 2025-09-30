@@ -59,6 +59,12 @@ func NewLayoutManager(uiState *state.UIState, mm stats.MetricsManager, config *s
 // setupPanels initializes all panels
 func (l *LayoutManager) setupPanels(uiState *state.UIState, mm stats.MetricsProvider, config *shared.Config, interval, timeout time.Duration) {
 	l.header = panels.NewHeaderPanel(uiState, config, interval, timeout)
+
+	// Set beep state provider if mm implements the interface
+	if beepProvider, ok := mm.(panels.BeepStateProvider); ok {
+		l.header.SetBeepProvider(beepProvider)
+	}
+
 	l.hostList = panels.NewHostListPanel(uiState, mm, config)
 	l.footer = panels.NewFooterPanel(config)
 	l.hostDetail = panels.NewHostDetailPanel(config)

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/servak/mping/internal/beep"
 	"github.com/servak/mping/internal/prober"
 )
 
@@ -15,6 +16,7 @@ const (
 type metricsManager struct {
 	metrics     map[string]*metrics
 	historySize int // Number of history entries to keep
+	beeper      *beep.Beeper
 	mu          sync.Mutex
 }
 
@@ -28,6 +30,7 @@ func NewMetricsManagerWithHistorySize(historySize int) MetricsManager {
 	return &metricsManager{
 		metrics:     make(map[string]*metrics),
 		historySize: historySize,
+		beeper:      beep.NewBeeper(),
 	}
 }
 
@@ -109,6 +112,11 @@ func (mm *metricsManager) Failed(host string, sentTime time.Time, msg string) {
 		})
 	}
 	mm.mu.Unlock()
+
+	// Play beep sound on failure (non-blocking)
+	if mm.beeper != nil {
+		mm.beeper.Beep()
+	}
 }
 
 func (mm *metricsManager) Sent(host string) {
@@ -208,6 +216,21 @@ func (mm *metricsManager) SortBy(k Key, ascending bool) []Metrics {
 // GetMetricsAsReader retrieves as Metrics interface
 func (mm *metricsManager) GetMetricsAsReader(target string) Metrics {
 	return mm.getMetrics(target)
+}
+
+// ToggleBeep toggles beep sound on/off
+func (mm *metricsManager) ToggleBeep() {
+	if mm.beeper != nil {
+		mm.beeper.Toggle()
+	}
+}
+
+// IsBeepEnabled returns current beep sound state
+func (mm *metricsManager) IsBeepEnabled() bool {
+	if mm.beeper != nil {
+		return mm.beeper.IsEnabled()
+	}
+	return false
 }
 
 // rejectLessAscending is RTT comparison function for ascending sort
