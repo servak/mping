@@ -90,9 +90,9 @@ func FormatHistory(metric stats.Metrics, theme *Theme) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("\n[%s]Recent History (last 10 entries):[%s]\n", theme.Warning, theme.Primary))
-	sb.WriteString(fmt.Sprintf("[%s]Time     Status RTT     Details[%s]\n", theme.Accent, theme.Primary))
-	sb.WriteString(fmt.Sprintf("[%s]-------- ------ ------- --------[%s]\n", theme.Separator, theme.Primary))
+	fmt.Fprintf(&sb, "\n[%s]Recent History (last 10 entries):[%s]\n", theme.Warning, theme.Primary)
+	fmt.Fprintf(&sb, "[%s]Time     Status RTT     Details[%s]\n", theme.Accent, theme.Primary)
+	fmt.Fprintf(&sb, "[%s]-------- ------ ------- --------[%s]\n", theme.Separator, theme.Primary)
 
 	for _, entry := range history {
 		statusColor := theme.Success
@@ -111,12 +111,12 @@ func FormatHistory(metric stats.Metrics, theme *Theme) string {
 			details = formatProbeDetails(entry.Details)
 		}
 
-		sb.WriteString(fmt.Sprintf("[%s]%-8s[%s] [%s]%-6s[%s] %-7s %s\n",
+		fmt.Fprintf(&sb, "[%s]%-8s[%s] [%s]%-6s[%s] %-7s %s\n",
 			theme.Timestamp, entry.Timestamp.Format("15:04:05"),
 			theme.Primary, statusColor, status,
 			theme.Primary, DurationFormater(entry.RTT),
 			details,
-		))
+		)
 	}
 
 	return sb.String()
