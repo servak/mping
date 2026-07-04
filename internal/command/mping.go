@@ -85,7 +85,7 @@ mping dns://8.8.8.8/google.com`,
 			}
 
 			// Subscribe to events for metrics collection
-			metricsManager.Subscribe(probeManager.Events())
+			done := metricsManager.Subscribe(probeManager.Events())
 
 			// Start probing in background
 			ctx, cancel := context.WithCancel(context.Background())
@@ -102,6 +102,7 @@ mping dns://8.8.8.8/google.com`,
 
 			// Stop probing when TUI exits
 			probeManager.Stop()
+			<-done // wait for in-flight metric updates to settle
 
 			// Final results
 			metrics := metricsManager.SortBy(stats.Fail, false)

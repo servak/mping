@@ -42,7 +42,11 @@ type MetricsSystemManager interface {
 // MetricsEventRecorder handles internal event recording
 type MetricsEventRecorder interface {
 	Register(target, name string)
-	Subscribe(<-chan *prober.Event)
+	// Subscribe processes events from the channel until it is closed and
+	// drained. The returned channel is closed once processing has finished,
+	// so callers can wait for in-flight metric updates to settle before
+	// reading final results.
+	Subscribe(<-chan *prober.Event) <-chan struct{}
 }
 
 // MetricsManager provides comprehensive metrics management (for backward compatibility)

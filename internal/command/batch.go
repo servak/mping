@@ -76,7 +76,7 @@ mping batch dns://8.8.8.8/google.com`,
 			}
 
 			// Subscribe to events for metrics collection
-			metricsManager.Subscribe(probeManager.Events())
+			done := metricsManager.Subscribe(probeManager.Events())
 
 			// Start probing with timeout context
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(counter)*_interval)
@@ -98,6 +98,7 @@ mping batch dns://8.8.8.8/google.com`,
 
 			// Stop probing
 			probeManager.Stop()
+			<-done // wait for in-flight metric updates to settle
 			cmd.Print("\r")
 			metrics := metricsManager.SortBy(stats.Success, true)
 			tableData := shared.NewTableData(metrics, stats.Success, true)

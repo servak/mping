@@ -153,7 +153,6 @@ func (p *HTTPProber) failed(r chan *Event, target string, now time.Time, err err
 }
 
 func (p *HTTPProber) probe(r chan *Event, target string) {
-	p.wg.Add(1)
 	defer p.wg.Done()
 	now := time.Now()
 	p.sent(r, target)
@@ -240,6 +239,7 @@ func (p *HTTPProber) Start(r chan *Event, interval, timeout time.Duration) error
 	go func() {
 		defer p.wg.Done()
 		for _, target := range p.targets {
+			p.wg.Add(1)
 			go p.probe(r, target)
 		}
 		for {
@@ -248,6 +248,7 @@ func (p *HTTPProber) Start(r chan *Event, interval, timeout time.Duration) error
 				return
 			case <-ticker.C:
 				for _, target := range p.targets {
+					p.wg.Add(1)
 					go p.probe(r, target)
 				}
 			}

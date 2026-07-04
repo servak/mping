@@ -84,6 +84,7 @@ func (p *TCPProber) Start(result chan *Event, interval, timeout time.Duration) e
 	go func() {
 		defer p.wg.Done()
 		for target := range p.targets {
+			p.wg.Add(1)
 			go p.sendProbe(result, target, timeout)
 		}
 		for {
@@ -93,6 +94,7 @@ func (p *TCPProber) Start(result chan *Event, interval, timeout time.Duration) e
 				return
 			case <-ticker.C:
 				for target := range p.targets {
+					p.wg.Add(1)
 					go p.sendProbe(result, target, timeout)
 				}
 			}
@@ -108,6 +110,8 @@ func (p *TCPProber) Stop() {
 }
 
 func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Duration) {
+	defer p.wg.Done()
+
 	// target is already in "ip:port" format from Accept method
 	now := time.Now()
 	p.sent(result, target, now)

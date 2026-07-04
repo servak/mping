@@ -149,9 +149,11 @@ func (h *HostListPanel) SetSelectionChangeCallback(fn func(metrics stats.Metrics
 // Navigation methods
 func (h *HostListPanel) ScrollDown() {
 	row, _ := h.table.GetSelection()
-	h.table.Select(row+1, 0)
-	// Update selection state directly
-	h.updateSelectedHost()
+	if row+1 < h.table.GetRowCount() {
+		h.table.Select(row+1, 0)
+		// Update selection state directly
+		h.updateSelectedHost()
+	}
 }
 
 func (h *HostListPanel) ScrollUp() {
