@@ -31,9 +31,12 @@ func NewPrintConfigCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flags := cmd.Flags()
 			path, err := flags.GetString("config")
-			cfg, _ := config.LoadFile(path)
 			if err != nil {
 				return err
+			}
+			cfg, err := config.LoadFile(path)
+			if cfg == nil {
+				return fmt.Errorf("failed to load config %q: %w", path, err)
 			}
 			cmd.Print(config.Marshal(cfg))
 			return nil
