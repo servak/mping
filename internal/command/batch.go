@@ -61,7 +61,10 @@ mping batch dns://8.8.8.8/google.com`,
 				return nil
 			}
 
-			cfg, _ := config.LoadFile(path)
+			cfg, err := config.LoadFile(path)
+			if cfg == nil {
+				return fmt.Errorf("failed to load config %q: %w", path, err)
+			}
 			_interval := time.Duration(interval) * time.Millisecond
 			_timeout := time.Duration(timeout) * time.Millisecond
 
@@ -76,7 +79,7 @@ mping batch dns://8.8.8.8/google.com`,
 			}
 
 			// Subscribe to events for metrics collection
-			metricsManager.Subscribe(probeManager.Events())
+			done := metricsManager.Subscribe(probeManager.Events())
 
 			// Start probing with timeout context
 			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(counter)*_interval)
@@ -98,6 +101,7 @@ mping batch dns://8.8.8.8/google.com`,
 
 			// Stop probing
 			probeManager.Stop()
+			<-done // wait for in-flight metric updates to settle
 			cmd.Print("\r")
 			metrics := metricsManager.SortBy(stats.Success, true)
 			tableData := shared.NewTableData(metrics, stats.Success, true)

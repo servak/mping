@@ -30,11 +30,11 @@ type (
 	}
 
 	HTTPConfig struct {
-		Header      http.Header `yaml:"headers,omitempty"`
-		ExpectCodes string      `yaml:"expect_codes"` // Range/list: "200,201,202", "200-299"
-		ExpectBody  string      `yaml:"expect_body,omitempty"`
-		TLS         *TLSConfig  `yaml:"tls,omitempty"`
-		RedirectOFF bool        `yaml:"redirect_off,omitempty"`
+		Header      map[string]string `yaml:"headers,omitempty"`
+		ExpectCodes string            `yaml:"expect_codes"` // Range/list: "200,201,202", "200-299"
+		ExpectBody  string            `yaml:"expect_body,omitempty"`
+		TLS         *TLSConfig        `yaml:"tls,omitempty"`
+		RedirectOFF bool              `yaml:"redirect_off,omitempty"`
 	}
 
 	TLSConfig struct {
@@ -43,7 +43,7 @@ type (
 
 	customTransport struct {
 		transport http.RoundTripper
-		headers   http.Header
+		headers   map[string]string
 	}
 )
 
@@ -153,7 +153,6 @@ func (p *HTTPProber) failed(r chan *Event, target string, now time.Time, err err
 }
 
 func (p *HTTPProber) probe(r chan *Event, target string) {
-	p.wg.Add(1)
 	defer p.wg.Done()
 	now := time.Now()
 	p.sent(r, target)
@@ -240,6 +239,7 @@ func (p *HTTPProber) Start(r chan *Event, interval, timeout time.Duration) error
 	go func() {
 		defer p.wg.Done()
 		for _, target := range p.targets {
+			p.wg.Add(1)
 			go p.probe(r, target)
 		}
 		for {
@@ -248,6 +248,7 @@ func (p *HTTPProber) Start(r chan *Event, interval, timeout time.Duration) error
 				return
 			case <-ticker.C:
 				for _, target := range p.targets {
+					p.wg.Add(1)
 					go p.probe(r, target)
 				}
 			}
@@ -263,7 +264,7 @@ func (p *HTTPProber) Stop() {
 
 func (c *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	for k, v := range c.headers {
-		req.Header[k] = v
+		req.Header.Set(k, v)
 	}
 	return c.transport.RoundTrip(req)
 }

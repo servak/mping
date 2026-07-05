@@ -269,7 +269,7 @@ func formatPayloadContent(data []byte) string {
 		if b >= 32 && b <= 126 { // Printable ASCII characters
 			result.WriteByte(b)
 		} else {
-			result.WriteString(fmt.Sprintf("\\x%02x", b))
+			fmt.Fprintf(&result, "\\x%02x", b)
 		}
 	}
 

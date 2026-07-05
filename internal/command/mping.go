@@ -68,7 +68,10 @@ mping dns://8.8.8.8/google.com`,
 				return nil
 			}
 
-			cfg, _ := config.LoadFile(path)
+			cfg, err := config.LoadFile(path)
+			if cfg == nil {
+				return fmt.Errorf("failed to load config %q: %w", path, err)
+			}
 			cfg.SetTitle(title)
 			cfg.SetSourceInterface(sourceInterface)
 			_interval := time.Duration(interval) * time.Millisecond
@@ -85,7 +88,7 @@ mping dns://8.8.8.8/google.com`,
 			}
 
 			// Subscribe to events for metrics collection
-			metricsManager.Subscribe(probeManager.Events())
+			done := metricsManager.Subscribe(probeManager.Events())
 
 			// Start probing in background
 			ctx, cancel := context.WithCancel(context.Background())
@@ -102,6 +105,7 @@ mping dns://8.8.8.8/google.com`,
 
 			// Stop probing when TUI exits
 			probeManager.Stop()
+			<-done // wait for in-flight metric updates to settle
 
 			// Final results
 			metrics := metricsManager.SortBy(stats.Fail, false)

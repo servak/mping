@@ -184,6 +184,7 @@ func (p *DNSProber) Start(result chan *Event, interval, timeout time.Duration) e
 	go func() {
 		defer p.wg.Done()
 		for _, target := range p.targets {
+			p.wg.Add(1)
 			go p.sendProbe(result, target, timeout)
 		}
 		for {
@@ -193,6 +194,7 @@ func (p *DNSProber) Start(result chan *Event, interval, timeout time.Duration) e
 				return
 			case <-ticker.C:
 				for _, target := range p.targets {
+					p.wg.Add(1)
 					go p.sendProbe(result, target, timeout)
 				}
 			}
@@ -208,7 +210,6 @@ func (p *DNSProber) Stop() {
 }
 
 func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout time.Duration) {
-	p.wg.Add(1)
 	defer p.wg.Done()
 
 	now := time.Now()

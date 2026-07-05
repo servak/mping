@@ -3,10 +3,13 @@ mping
 
 ![CI](https://github.com/servak/mping/actions/workflows/ci.yml/badge.svg)
 
-**mping** is a multi-target, multi-protocol network monitoring tool that extends traditional ping functionality. Monitor multiple hosts and services simultaneously with real-time statistics and an interactive terminal UI.
+**mping** is a `ping` built for network operators: sweep entire subnets, mix ICMP/HTTP/TCP/DNS/NTP checks in a single command, and watch live pass/fail stats in a terminal dashboard — right from the SSH session you're already in.
+
+![Demo](demo/mping.gif)
 
 ## Features
 
+- 🧰 **Built for network ops**: CIDR subnet sweeps, mixed-protocol checks, and a terminal-native dashboard for SSH sessions and jump hosts
 - 🎯 **Multi-target monitoring**: Monitor dozens of hosts simultaneously
 - 🌐 **Multi-protocol support**: ICMP, HTTP/HTTPS, TCP, DNS, and NTP monitoring
 - 📊 **Real-time statistics**: Live success rates, response times, and packet loss
@@ -24,10 +27,6 @@ mping
 | **TCP** | `tcp://host:port` | `tcp://google.com:443` | Port connectivity testing |
 | **DNS** | `dns://[server[:port]]/domain[/record_type]` | `dns://8.8.8.8/google.com/A`, `dns:///google.com` | DNS query monitoring |
 | **NTP** | `ntp://[server[:port]]` | `ntp://pool.ntp.org`, `ntp://time.google.com:123` | Network Time Protocol monitoring |
-
-## Demo
-
-![Demo](mping.gif)
 
 ## Install
 

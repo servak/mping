@@ -35,6 +35,9 @@ func NewMetricsManagerWithHistorySize(historySize int) MetricsManager {
 }
 
 func (mm *metricsManager) Register(target, name string) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+
 	v, ok := mm.metrics[target]
 	if ok && v.Name != target {
 		return
@@ -127,8 +130,10 @@ func (mm *metricsManager) Sent(host string) {
 	mm.mu.Unlock()
 }
 
-func (mm *metricsManager) Subscribe(res <-chan *prober.Event) {
+func (mm *metricsManager) Subscribe(res <-chan *prober.Event) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		for r := range res {
 			switch r.Result {
 			case prober.REGISTER:
@@ -144,6 +149,7 @@ func (mm *metricsManager) Subscribe(res <-chan *prober.Event) {
 			}
 		}
 	}()
+	return done
 }
 
 // autoRegister automatically registers target if not already registered
@@ -162,11 +168,11 @@ func (mm *metricsManager) autoRegister(key, displayName string) {
 // SortBy sorts metrics by specified key and returns Metrics slice
 func (mm *metricsManager) SortBy(k Key, ascending bool) []Metrics {
 	mm.mu.Lock()
+	defer mm.mu.Unlock()
 	var res []Metrics
 	for _, m := range mm.metrics {
 		res = append(res, m)
 	}
-	mm.mu.Unlock()
 
 	if k != Host {
 		sort.SliceStable(res, func(i, j int) bool {

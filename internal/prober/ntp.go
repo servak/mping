@@ -150,6 +150,7 @@ func (p *NTPProber) Start(result chan *Event, interval, timeout time.Duration) e
 	go func() {
 		defer p.wg.Done()
 		for serverAddr := range p.targets {
+			p.wg.Add(1)
 			go p.sendProbe(result, serverAddr, timeout)
 		}
 		for {
@@ -159,6 +160,7 @@ func (p *NTPProber) Start(result chan *Event, interval, timeout time.Duration) e
 				return
 			case <-ticker.C:
 				for serverAddr := range p.targets {
+					p.wg.Add(1)
 					go p.sendProbe(result, serverAddr, timeout)
 				}
 			}
@@ -174,7 +176,6 @@ func (p *NTPProber) Stop() {
 }
 
 func (p *NTPProber) sendProbe(result chan *Event, serverAddr string, timeout time.Duration) {
-	p.wg.Add(1)
 	defer p.wg.Done()
 
 	now := time.Now()
