@@ -60,8 +60,6 @@ nfpms:
     formats:
       - deb
       - rpm
-    dependencies:
-      - iproute2
     bindir: /usr/local/bin
     scripts:
       postinstall: ./packaging/postinstall.sh
@@ -71,6 +69,13 @@ nfpms:
     deb:
       fields:
         Priority: optional
+    overrides:
+      deb:
+        dependencies:
+          - libcap2-bin
+      rpm:
+        dependencies:
+          - libcap
 
 release:
   prerelease: auto
