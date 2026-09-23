@@ -18,6 +18,7 @@ type DisplayMode int
 const (
 	ListOnly DisplayMode = iota
 	ListWithDetail
+	ListWithPath
 )
 
 // LayoutManager manages screen layout and panel arrangement
@@ -31,6 +32,10 @@ type LayoutManager struct {
 	hostList   *panels.HostListPanel
 	footer     *panels.FooterPanel
 	hostDetail *panels.HostDetailPanel
+	path       *panels.PathPanel
+
+	// Background path trace for the selected host (ListWithPath mode)
+	pathTracer *pathTracer
 
 	// Filter input
 	filterInput *tview.InputField
@@ -68,6 +73,8 @@ func (l *LayoutManager) setupPanels(uiState *state.UIState, mm stats.MetricsProv
 	l.hostList = panels.NewHostListPanel(uiState, mm, config)
 	l.footer = panels.NewFooterPanel(config)
 	l.hostDetail = panels.NewHostDetailPanel(config)
+	l.path = panels.NewPathPanel(config)
+	l.pathTracer = newPathTracer(interval, timeout)
 
 	// Setup filter input with theme-aware colors
 	theme := config.GetTheme()
@@ -117,45 +124,58 @@ func (l *LayoutManager) SetSelectedMetrics(metrics stats.Metrics) {
 	l.hostDetail.SetMetrics(metrics)
 }
 
-// ToggleDetailView switches between single and dual pane layout
+// ToggleDetailView switches between single pane and list+detail layout
 func (l *LayoutManager) ToggleDetailView() {
-	if l.mode == ListOnly {
-		l.showDetailView()
+	if l.mode == ListWithDetail {
+		l.setMode(ListOnly)
 	} else {
-		l.hideDetailView()
+		l.setMode(ListWithDetail)
 	}
 }
 
-// showDetailView switches to dual pane layout
-func (l *LayoutManager) showDetailView() {
-	l.mode = ListWithDetail
-
-	// Get currently selected metrics and set them in the detail panel
-	if m, ok := l.hostList.CurrentSelectedMetric(); ok {
-		l.hostDetail.SetMetrics(m)
+// TogglePathView switches between single pane and list+path layout
+func (l *LayoutManager) TogglePathView() {
+	if l.mode == ListWithPath {
+		l.setMode(ListOnly)
+	} else {
+		l.setMode(ListWithPath)
 	}
-
-	// Create horizontal layout for host list and detail
-	mainContent := tview.NewFlex().
-		SetDirection(tview.FlexColumn).
-		AddItem(l.hostList.GetView(), 0, 2, true).   // Host list takes 2/3
-		AddItem(l.hostDetail.GetView(), 0, 1, false) // Detail takes 1/3
-
-	// Rebuild root layout with dual pane
-	l.root.Clear()
-	l.root.AddItem(l.header.GetView(), 1, 0, false).
-		AddItem(mainContent, 0, 1, true).
-		AddItem(l.footer.GetView(), 1, 0, false)
 }
 
-// hideDetailView switches to single pane layout
-func (l *LayoutManager) hideDetailView() {
-	l.mode = ListOnly
+// StopPathTrace stops any background path trace
+func (l *LayoutManager) StopPathTrace() {
+	l.pathTracer.Stop()
+}
 
-	// Rebuild root layout with single pane
+// setMode rebuilds the root layout for the given display mode
+func (l *LayoutManager) setMode(mode DisplayMode) {
+	l.mode = mode
+	if mode != ListWithPath {
+		l.pathTracer.Stop()
+	}
+
+	content := l.hostList.GetView()
+	switch mode {
+	case ListWithDetail:
+		// Get currently selected metrics and set them in the detail panel
+		if m, ok := l.hostList.CurrentSelectedMetric(); ok {
+			l.hostDetail.SetMetrics(m)
+		}
+		content = tview.NewFlex().
+			SetDirection(tview.FlexColumn).
+			AddItem(l.hostList.GetView(), 0, 2, true).   // Host list takes 2/3
+			AddItem(l.hostDetail.GetView(), 0, 1, false) // Detail takes 1/3
+	case ListWithPath:
+		// The hop table needs more width than host details
+		content = tview.NewFlex().
+			SetDirection(tview.FlexColumn).
+			AddItem(l.hostList.GetView(), 0, 1, true).
+			AddItem(l.path.GetView(), 0, 1, false)
+	}
+
 	l.root.Clear()
 	l.root.AddItem(l.header.GetView(), 1, 0, false).
-		AddItem(l.hostList.GetView(), 0, 1, true).
+		AddItem(content, 0, 1, true).
 		AddItem(l.footer.GetView(), 1, 0, false)
 }
 
@@ -165,13 +185,21 @@ func (l *LayoutManager) UpdateAll() {
 	l.footer.Update()
 	l.hostList.Update()
 
-	// Only update detail panel when it's visible
-	if l.mode == ListWithDetail {
-		// Metrics are snapshots; hand the detail panel the fresh one
-		if m, ok := l.hostList.CurrentSelectedMetric(); ok {
+	// Metrics are snapshots; hand the visible side panel the fresh one
+	m, ok := l.hostList.CurrentSelectedMetric()
+	switch l.mode {
+	case ListWithDetail:
+		if ok {
 			l.hostDetail.SetMetrics(m)
 		}
 		l.hostDetail.Update()
+	case ListWithPath:
+		target := ""
+		if ok {
+			target = m.GetName()
+		}
+		l.pathTracer.Follow(target)
+		l.path.Update(l.pathTracer.State())
 	}
 }
 

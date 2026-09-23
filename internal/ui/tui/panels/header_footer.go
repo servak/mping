@@ -130,8 +130,9 @@ func (f *FooterPanel) generateFooterContent() string {
 	filterText := fmt.Sprintf("[%s]/:filter[-]", theme.Secondary)
 	themeText := fmt.Sprintf("[%s]t:theme[-]", theme.Secondary)
 	beepText := fmt.Sprintf("[%s]b:beep[-]", theme.Secondary)
+	viewText := fmt.Sprintf("[%s]v:detail p:path[-]", theme.Secondary)
 	moveText := fmt.Sprintf("[%s]j/k/g/G/u/d:move[-]", theme.Secondary)
-	return fmt.Sprintf("%s  %s  %s  %s  %s  %s  %s  %s  %s", helpText, quitText, sortText, reverseText, resetText, filterText, themeText, beepText, moveText)
+	return fmt.Sprintf("%s  %s  %s  %s  %s  %s  %s  %s  %s  %s", helpText, quitText, viewText, sortText, reverseText, resetText, filterText, themeText, beepText, moveText)
 }
 
 // GetView returns the underlying tview component
