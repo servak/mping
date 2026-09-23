@@ -92,7 +92,21 @@ mping batch --count 5 192.168.1.0/29
 
 # Use with external host lists
 mping batch -f hosts.txt --count 5
+
+# Machine-readable output (json / csv) for scripts and dashboards
+mping batch -o json --count 5 10.0.0.0/29 | jq '.[] | select(.loss_percent > 0) | .host'
+mping batch -o csv --count 10 -f hosts.txt > result.csv
+
+# Health check: exit with status 2 if any target's loss exceeds 20%
+mping batch --max-loss 20 -f hosts.txt || alert "some targets are unhealthy"
 ```
+
+Batch mode details:
+- `--count N` sends exactly N probes per target.
+- `-o, --output` selects `table` (default), `json`, or `csv`. RTT fields are in milliseconds and include `jitter_ms` (standard deviation of RTT, same as `mdev` in iputils ping).
+- `--max-loss PCT` turns batch into a health check. Exit codes: `0` = OK, `1` = usage/config error, `2` = at least one target exceeded the threshold (violating targets are listed on stderr).
+- Progress dots are written to stderr only when it is a terminal, so stdout stays clean for pipes. The failure beep is disabled in batch mode.
+- `-I, --interface` selects the source interface, same as the interactive mode.
 
 ## Target Expansion
 

@@ -57,6 +57,7 @@ func FormatHostDetail(metric stats.Metrics, theme *Theme) string {
 [%s]Average RTT:[%s] %s
 [%s]Minimum RTT:[%s] %s
 [%s]Maximum RTT:[%s] %s
+[%s]Jitter (stddev):[%s] %s
 [%s]Last Success:[%s] %s
 [%s]Last Failure:[%s] %s
 [%s]Last Error:[%s] %s`,
@@ -68,6 +69,7 @@ func FormatHostDetail(metric stats.Metrics, theme *Theme) string {
 		theme.Accent, theme.Primary, DurationFormater(metric.GetAverageRTT()),
 		theme.Accent, theme.Primary, DurationFormater(metric.GetMinimumRTT()),
 		theme.Accent, theme.Primary, DurationFormater(metric.GetMaximumRTT()),
+		theme.Accent, theme.Primary, DurationFormater(metric.GetJitter()),
 		theme.Accent, theme.Primary, TimeFormater(metric.GetLastSuccTime()),
 		theme.Accent, theme.Primary, TimeFormater(metric.GetLastFailTime()),
 		theme.Accent, theme.Primary, metric.GetLastFailDetail(),
