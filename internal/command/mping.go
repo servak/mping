@@ -78,7 +78,9 @@ mping dns://8.8.8.8/google.com`,
 
 			// Create ProbeManager and MetricsManager
 			probeManager := prober.NewProbeManager(cfg.Prober, cfg.Default)
-			metricsManager := stats.NewMetricsManager()
+			metricsManager := stats.NewMetricsManagerWithOptions(stats.Options{
+				SettleTime: stats.SettleTimeFor(_interval, _timeout),
+			})
 
 			// Add targets
 			err = probeManager.AddTargets(hosts...)

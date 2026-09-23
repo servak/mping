@@ -26,6 +26,12 @@ type Metrics interface {
 	GetConsecutiveFailures() int
 	GetConsecutiveSuccesses() int
 	GetSuccessRateInPeriod(duration time.Duration) float64
+	GetRTTPercentiles(ps ...float64) []time.Duration
+
+	// Outage tracking
+	GetOutages() []Outage
+	GetLastOutage() (Outage, bool)
+	GetOutageSummary() OutageSummary
 }
 
 // MetricsProvider provides external API for metrics access
@@ -37,7 +43,6 @@ type MetricsProvider interface {
 type MetricsSystemManager interface {
 	ResetAllMetrics()
 	ToggleBeep()
-	SetBeepEnabled(enabled bool)
 	IsBeepEnabled() bool
 }
 

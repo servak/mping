@@ -145,6 +145,13 @@ func (th *TargetHistory) GetSuccessRateInPeriod(duration time.Duration) float64 
 	return float64(successCount) / float64(len(entries)) * 100.0
 }
 
+// clone returns a deep copy of the history
+func (th *TargetHistory) clone() *TargetHistory {
+	c := *th
+	c.entries = append([]HistoryEntry(nil), th.entries...)
+	return &c
+}
+
 // Clear clears the history
 func (th *TargetHistory) Clear() {
 	th.index = 0
