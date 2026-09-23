@@ -15,7 +15,10 @@ mping
 - 📊 **Real-time statistics**: Live success rates, response times, and packet loss
 - 🖥️ **Interactive TUI**: Clean terminal interface with sortable results
 - ⚡ **High performance**: Concurrent probing with configurable intervals
-- 📁 **Batch mode**: Non-interactive mode for scripting and automation
+- 📁 **Batch mode**: Non-interactive mode for scripting and automation, with JSON/CSV output and exit codes
+- ⏱️ **Outage measurement**: Records every outage with start/end time and duration — ideal for failover and maintenance tests
+- 🛣️ **Path trace (MTR)**: Press `p` in the TUI to see per-hop loss and latency to the selected host
+- 📈 **History at a glance**: Sparkline of recent probes and RTT p50/p95/p99 per host
 
 ## Supported Protocols
 
@@ -107,6 +110,52 @@ Batch mode details:
 - `--max-loss PCT` turns batch into a health check. Exit codes: `0` = OK, `1` = usage/config error, `2` = at least one target exceeded the threshold (violating targets are listed on stderr).
 - Progress dots are written to stderr only when it is a terminal, so stdout stays clean for pipes. The failure beep is disabled in batch mode.
 - `-I, --interface` selects the source interface, same as the interactive mode.
+
+## Outage Measurement
+
+mping turns consecutive failures into **outages** and records when each one started and ended. This answers the question that matters during failover tests and maintenance windows: *how long was it down?*
+
+- An outage starts when **3 or more consecutive probes** are lost (shorter runs count as isolated packet loss) and ends at the next successful probe. Its start is the send time of the first lost probe.
+- Duration is `lost probes × interval`, so use a short interval (e.g. `-i 100`) for sub-second precision.
+- The host list's **LastFailTime** column also shows the outage duration: `16:44:20 (DOWN 5.20s)` (red, counting up) while a host is down, and `16:44:15 (0.50s)` (yellow) once it has recovered.
+- The TUI host detail panel (`v`) shows the outage count, total downtime, the longest outage, and the most recent outages.
+- When you quit the TUI (and in `mping batch`), a timeline of all outages across targets is printed:
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│ Outages (2)                                                                      │
+├──────────────┬──────────────┬──────────┬──────┬─────────────────────┬────────────┤
+│ START        │ END          │ DURATION │ LOST │ HOST                │ LAST ERROR │
+├──────────────┼──────────────┼──────────┼──────┼─────────────────────┼────────────┤
+│ 14:03:05.120 │ 14:03:41.870 │  36.750s │  368 │ core-sw1(10.0.0.1)  │ timeout    │
+│ 14:03:06.002 │ (ongoing)    │   1.010s │   10 │ 10.0.0.254          │ timeout    │
+└──────────────┴──────────────┴──────────┴──────┴─────────────────────┴────────────┘
+```
+
+- `mping batch -o json` includes `outages[]`, `outage_count`, `total_downtime_ms`, and `longest_outage_ms` per target.
+- Probe results can arrive out of order (a timeout is reported after a later probe already succeeded), so results are applied in send order after `timeout + interval`. Outages therefore appear in the TUI with that delay.
+
+## Path Trace (MTR)
+
+Press `p` in the TUI to show a live, MTR-style trace of the path to the selected host. The trace follows the selection. Any target works — for `tcp://`, `https://`, `dns://`, … the host part is traced.
+
+Notes:
+- Loss at an intermediate hop that does not continue to the destination is usually ICMP rate limiting on that router, not real loss; the path view points this out.
+- Raw sockets are used when available (root / `cap_net_raw`). Otherwise mping falls back to unprivileged ICMP sockets: on macOS this works fully, on Linux only the destination may be visible.
+- In the TUI, path probing runs at most once per second so that router rate limiting does not show up as fake loss.
+
+## History and Percentiles
+
+The host list has a **History** column with the last 20 probes (oldest on the left). The bar height shows how much slower than usual a probe was: the RTT increase over the host's median, on a fixed millisecond scale. So +20ms looks the same on a 10ms LAN host and on a 150ms overseas host.
+
+| Mark | Meaning |
+|------|---------|
+| green `▁` | within +5ms of the median |
+| green `▂▃▄▅` | +5ms / +10ms / +20ms / +50ms slower |
+| yellow `▆▇█` | +100ms / +200ms / +500ms slower |
+| red `×` | no reply (timeout / connection failure) |
+
+Latency spikes and loss bursts are visible at a glance. The host details and JSON/CSV output include RTT p50/p95/p99 over the last 100 probes.
 
 ## Target Expansion
 
@@ -270,6 +319,7 @@ mping tcp://google.com:443 https://google.com ntp://time.google.com 8.8.8.8
 
 Available Commands:
   batch       Disables TUI and performs probing for a set number of iterations
+  config      management config
   help        Help about any command
 
 Flags:
