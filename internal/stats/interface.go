@@ -37,6 +37,7 @@ type MetricsProvider interface {
 type MetricsSystemManager interface {
 	ResetAllMetrics()
 	ToggleBeep()
+	SetBeepEnabled(enabled bool)
 	IsBeepEnabled() bool
 }
 

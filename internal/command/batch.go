@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
@@ -69,8 +68,8 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 			if err != nil {
 				return err
 			}
-			if !slices.Contains(shared.OutputFormats, output) {
-				return fmt.Errorf("unsupported output format %q (supported: %s)", output, strings.Join(shared.OutputFormats, ", "))
+			if err := shared.ValidateOutputFormat(output); err != nil {
+				return err
 			}
 			maxLoss := -1.0 // disabled unless explicitly set
 			if flags.Changed("max-loss") {
@@ -102,9 +101,7 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 			metricsManager := stats.NewMetricsManager()
 			// The terminal bell would corrupt machine-readable output and is
 			// pointless in non-interactive runs.
-			if metricsManager.IsBeepEnabled() {
-				metricsManager.ToggleBeep()
-			}
+			metricsManager.SetBeepEnabled(false)
 
 			// Add targets
 			err = probeManager.AddTargets(hosts...)
@@ -132,15 +129,17 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 			// interval, so round N goes out at (N-1)*interval. Stopping half an
 			// interval after the last round yields exactly `count` probes without
 			// racing the next tick. Stop waits for in-flight probes to finish.
+			// Deadlines are measured from a fixed start so sleep overshoot does
+			// not accumulate across rounds (the prober's ticker does not drift).
+			start := time.Now()
 			fmt.Fprint(progress, ".")
 			for i := 1; i < counter; i++ {
-				time.Sleep(_interval)
+				time.Sleep(time.Until(start.Add(time.Duration(i) * _interval)))
 				fmt.Fprint(progress, ".")
 			}
-			time.Sleep(_interval / 2)
+			time.Sleep(time.Until(start.Add(time.Duration(counter-1)*_interval + _interval/2)))
 
 			// Stop probing
-			cancel()
 			probeManager.Stop()
 			<-done // wait for in-flight metric updates to settle
 			fmt.Fprint(progress, "\r\033[K")
