@@ -84,3 +84,29 @@ func TestHasRateLimitedHops(t *testing.T) {
 		}
 	}
 }
+
+func TestProbeLimit(t *testing.T) {
+	withReplies := func(ttls ...int) *Tracer {
+		tr := &Tracer{hops: make([]hopStats, maxHops), maxTTL: maxHops}
+		for _, ttl := range ttls {
+			tr.hops[ttl-1].recv = 1
+		}
+		return tr
+	}
+
+	if got := withReplies().probeLimitLocked(); got != maxUnknownHops {
+		t.Errorf("no replies yet: limit = %d, want %d", got, maxUnknownHops)
+	}
+	if got := withReplies(1, 7).probeLimitLocked(); got != 7+maxUnknownHops {
+		t.Errorf("farthest reply at 7: limit = %d, want %d", got, 7+maxUnknownHops)
+	}
+	if got := withReplies(25).probeLimitLocked(); got != maxHops {
+		t.Errorf("limit must not exceed maxHops, got %d", got)
+	}
+
+	reached := withReplies(1, 3)
+	reached.reached, reached.maxTTL = true, 12
+	if got := reached.probeLimitLocked(); got != 12 {
+		t.Errorf("destination at 12: limit = %d, want 12", got)
+	}
+}

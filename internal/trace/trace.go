@@ -24,6 +24,13 @@ const (
 
 	maxHops       = 30
 	maxPacketSize = 1500
+
+	// maxUnknownHops is how many TTLs past the farthest hop that has replied
+	// are probed while the destination is unknown. Home routers treat a
+	// burst of probes up to maxHops every round as an ICMP flood and drop
+	// ICMP for every host behind them. mtr stops after 5 unknown hops; this
+	// allows more because many routers only answer occasionally.
+	maxUnknownHops = 8
 )
 
 // idCounter makes echo IDs unique per tracer within the process, and distinct
@@ -248,7 +255,7 @@ func (t *Tracer) Run(ctx context.Context, rounds int) error {
 			case <-ticker.C:
 			}
 		}
-		if err := t.sendRound(); err != nil {
+		if err := t.sendRound(ctx); err != nil {
 			sendErr = err
 			break
 		}
@@ -271,15 +278,25 @@ func (t *Tracer) drain(recvDone <-chan struct{}, err error) error {
 	return err
 }
 
-func (t *Tracer) sendRound() error {
+// sendRound probes TTL 1..probeLimit, spread evenly over the interval (like
+// mtr) so that a round never reaches routers as a burst.
+func (t *Tracer) sendRound(ctx context.Context) error {
 	t.mu.Lock()
 	t.expire(time.Now())
-	maxTTL := t.maxTTL
+	maxTTL := t.probeLimitLocked()
 	t.rounds++
 	round := t.rounds
 	t.mu.Unlock()
 
+	gap := t.cfg.Interval / time.Duration(maxTTL)
 	for ttl := 1; ttl <= maxTTL; ttl++ {
+		if ttl > 1 {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(gap):
+			}
+		}
 		t.mu.Lock()
 		t.seq++
 		seq := t.seq
@@ -378,6 +395,27 @@ func (t *Tracer) handle(r reply, addr string, now time.Time) {
 	}
 }
 
+// farthestResponderLocked returns the highest TTL that has replied (0 if none)
+func (t *Tracer) farthestResponderLocked() int {
+	last := 0
+	for i := 0; i < t.maxTTL; i++ {
+		if t.hops[i].recv > 0 {
+			last = i + 1
+		}
+	}
+	return last
+}
+
+// probeLimitLocked returns the highest TTL to probe this round: the
+// destination once it is known, otherwise maxUnknownHops past the farthest
+// hop that has replied.
+func (t *Tracer) probeLimitLocked() int {
+	if t.reached {
+		return t.maxTTL
+	}
+	return min(t.maxTTL, t.farthestResponderLocked()+maxUnknownHops)
+}
+
 // expire counts pending probes sent before now-Timeout as lost
 func (t *Tracer) expire(now time.Time) {
 	for seq, p := range t.pending {
@@ -418,12 +456,7 @@ func (t *Tracer) Snapshot() Result {
 	t.expire(time.Now())
 
 	// Show hops up to the destination, or up to the farthest responder
-	last := 0
-	for i := 0; i < t.maxTTL; i++ {
-		if t.hops[i].recv > 0 {
-			last = i + 1
-		}
-	}
+	last := t.farthestResponderLocked()
 	if t.reached {
 		last = t.maxTTL
 	}

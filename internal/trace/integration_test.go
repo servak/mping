@@ -107,11 +107,16 @@ func checkInvariants(t *testing.T, res Result, log *traceLog) {
 	t.Helper()
 	for _, h := range res.Hops {
 		// Every probe sent to a displayed hop must be resolved exactly once.
-		// Hops are probed every round (maxTTL only shrinks to the destination).
-		if h.Sent != res.Rounds {
-			t.Errorf("hop %d: sent=%d, want %d (one settled probe per round)", h.TTL, h.Sent, res.Rounds)
+		// A hop is probed every round from the first round that reached it
+		// (the probe limit grows as farther hops reply).
+		first := 1
+		for first <= res.Rounds && len(log.results[probeKey{first, h.TTL}]) == 0 {
+			first++
 		}
-		for r := 1; r <= res.Rounds; r++ {
+		if want := res.Rounds - first + 1; h.Sent != want {
+			t.Errorf("hop %d: sent=%d, want %d (one settled probe per round from round %d)", h.TTL, h.Sent, want, first)
+		}
+		for r := first; r <= res.Rounds; r++ {
 			if n := len(log.results[probeKey{r, h.TTL}]); n != 1 {
 				t.Errorf("hop %d round %d: resolved %d times, want 1", h.TTL, r, n)
 			}
