@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -31,6 +32,10 @@ func Execute() {
 		cmd.SetOut(os.Stderr)
 		cmd.SetErr(os.Stderr)
 		cmd.Println(err)
+		var exitErr *command.ExitError
+		if errors.As(err, &exitErr) {
+			os.Exit(exitErr.Code)
+		}
 		os.Exit(1)
 	}
 }
