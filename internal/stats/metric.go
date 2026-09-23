@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"math"
 	"time"
 )
 
@@ -41,6 +42,7 @@ type metrics struct {
 	MinimumRTT     time.Duration
 	MaximumRTT     time.Duration
 	LastRTT        time.Duration
+	sumSquaredRTT  float64 // sum of rtt^2 in ns^2, used to derive jitter
 	LastFailTime   time.Time
 	LastSuccTime   time.Time
 	LastFailDetail string
@@ -52,6 +54,7 @@ func (m *metrics) Success(rtt time.Duration, sentTime time.Time) {
 	m.LastSuccTime = sentTime
 	m.LastRTT = rtt
 	m.TotalRTT += rtt
+	m.sumSquaredRTT += float64(rtt) * float64(rtt)
 	m.AverageRTT = m.TotalRTT / time.Duration(m.Successful)
 	if m.MinimumRTT == 0 || rtt < m.MinimumRTT {
 		m.MinimumRTT = rtt
@@ -87,6 +90,7 @@ func (m *metrics) Reset() {
 	m.MinimumRTT = time.Duration(0)
 	m.MaximumRTT = time.Duration(0)
 	m.LastRTT = time.Duration(0)
+	m.sumSquaredRTT = 0
 	m.LastFailTime = time.Time{}
 	m.LastSuccTime = time.Time{}
 	m.LastFailDetail = ""
@@ -131,6 +135,21 @@ func (m *metrics) GetMinimumRTT() time.Duration {
 
 func (m *metrics) GetMaximumRTT() time.Duration {
 	return m.MaximumRTT
+}
+
+// GetJitter returns the standard deviation of successful RTTs
+// (equivalent to "mdev" reported by iputils ping).
+func (m *metrics) GetJitter() time.Duration {
+	if m.Successful < 2 {
+		return 0
+	}
+	n := float64(m.Successful)
+	mean := float64(m.TotalRTT) / n
+	variance := m.sumSquaredRTT/n - mean*mean
+	if variance <= 0 {
+		return 0
+	}
+	return time.Duration(math.Sqrt(variance))
 }
 
 func (m *metrics) GetLastSuccTime() time.Time {

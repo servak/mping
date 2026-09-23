@@ -49,3 +49,31 @@ func TestMetrics(t *testing.T) {
 		t.Errorf("Invalid loss calculation: Loss = %f", m.GetLoss())
 	}
 }
+
+func TestMetricsJitter(t *testing.T) {
+	m := NewMetrics("", 1)
+	impl := m.(*metrics)
+	now := time.Now()
+
+	impl.Success(10*time.Millisecond, now)
+	if got := m.GetJitter(); got != 0 {
+		t.Errorf("jitter with a single sample should be 0, got %v", got)
+	}
+
+	// Samples: 10, 20, 30, 40ms -> population stddev = sqrt(125)ms ≈ 11.18ms
+	impl.Success(20*time.Millisecond, now)
+	impl.Success(30*time.Millisecond, now)
+	impl.Success(40*time.Millisecond, now)
+	// Failures must not affect jitter
+	impl.Fail(now, "timeout")
+
+	want := 11180339 * time.Nanosecond
+	if diff := m.GetJitter() - want; diff < -time.Microsecond || diff > time.Microsecond {
+		t.Errorf("GetJitter() = %v, want ~%v", m.GetJitter(), want)
+	}
+
+	impl.Reset()
+	if got := m.GetJitter(); got != 0 {
+		t.Errorf("jitter after reset should be 0, got %v", got)
+	}
+}
