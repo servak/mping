@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -23,6 +25,14 @@ const (
 
 // OutputFormats lists all supported output formats
 var OutputFormats = []string{FormatTable, FormatJSON, FormatCSV}
+
+// ValidateOutputFormat reports an error if format is not one of OutputFormats
+func ValidateOutputFormat(format string) error {
+	if slices.Contains(OutputFormats, format) {
+		return nil
+	}
+	return fmt.Errorf("unsupported output format %q (supported: %s)", format, strings.Join(OutputFormats, ", "))
+}
 
 // TargetReport is the machine-readable representation of a target's statistics.
 // RTT values are expressed in milliseconds so they can be consumed directly by
@@ -41,6 +51,32 @@ type TargetReport struct {
 	LastSuccessAt  *time.Time `json:"last_success_at,omitempty"`
 	LastFailAt     *time.Time `json:"last_fail_at,omitempty"`
 	LastFailReason string     `json:"last_fail_reason,omitempty"`
+}
+
+// csvHeader lists CSV columns; it must stay in sync with TargetReport.csvRecord
+var csvHeader = []string{
+	"host", "sent", "success", "fail", "loss_percent",
+	"last_rtt_ms", "avg_rtt_ms", "min_rtt_ms", "max_rtt_ms", "jitter_ms",
+	"last_success_at", "last_fail_at", "last_fail_reason",
+}
+
+// csvRecord renders the report as a CSV row matching csvHeader
+func (r TargetReport) csvRecord() []string {
+	return []string{
+		r.Host,
+		strconv.Itoa(r.Sent),
+		strconv.Itoa(r.Success),
+		strconv.Itoa(r.Fail),
+		formatFloat(r.LossPercent),
+		formatFloat(r.LastRTTMs),
+		formatFloat(r.AvgRTTMs),
+		formatFloat(r.MinRTTMs),
+		formatFloat(r.MaxRTTMs),
+		formatFloat(r.JitterMs),
+		formatRFC3339(r.LastSuccessAt),
+		formatRFC3339(r.LastFailAt),
+		r.LastFailReason,
+	}
 }
 
 // NewTargetReport converts metrics into a TargetReport
@@ -65,7 +101,7 @@ func NewTargetReport(m stats.Metrics) TargetReport {
 // WriteReport renders metrics to w in the given format
 func WriteReport(w io.Writer, format string, metrics []stats.Metrics, sortKey stats.Key, ascending bool) error {
 	switch format {
-	case FormatTable, "":
+	case FormatTable:
 		t := NewTableData(metrics, sortKey, ascending).ToGoPrettyTable()
 		t.SetStyle(table.StyleLight)
 		_, err := fmt.Fprintln(w, t.Render())
@@ -75,7 +111,7 @@ func WriteReport(w io.Writer, format string, metrics []stats.Metrics, sortKey st
 	case FormatCSV:
 		return writeCSV(w, metrics)
 	default:
-		return fmt.Errorf("unsupported output format %q (supported: %v)", format, OutputFormats)
+		return ValidateOutputFormat(format)
 	}
 }
 
@@ -91,32 +127,11 @@ func writeJSON(w io.Writer, metrics []stats.Metrics) error {
 
 func writeCSV(w io.Writer, metrics []stats.Metrics) error {
 	cw := csv.NewWriter(w)
-	header := []string{
-		"host", "sent", "success", "fail", "loss_percent",
-		"last_rtt_ms", "avg_rtt_ms", "min_rtt_ms", "max_rtt_ms", "jitter_ms",
-		"last_success_at", "last_fail_at", "last_fail_reason",
-	}
-	if err := cw.Write(header); err != nil {
+	if err := cw.Write(csvHeader); err != nil {
 		return err
 	}
 	for _, m := range metrics {
-		r := NewTargetReport(m)
-		record := []string{
-			r.Host,
-			strconv.Itoa(r.Sent),
-			strconv.Itoa(r.Success),
-			strconv.Itoa(r.Fail),
-			formatFloat(r.LossPercent),
-			formatFloat(r.LastRTTMs),
-			formatFloat(r.AvgRTTMs),
-			formatFloat(r.MinRTTMs),
-			formatFloat(r.MaxRTTMs),
-			formatFloat(r.JitterMs),
-			formatRFC3339(r.LastSuccessAt),
-			formatRFC3339(r.LastFailAt),
-			r.LastFailReason,
-		}
-		if err := cw.Write(record); err != nil {
+		if err := cw.Write(NewTargetReport(m).csvRecord()); err != nil {
 			return err
 		}
 	}

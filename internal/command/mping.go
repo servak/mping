@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/spf13/cobra"
 
 	"github.com/servak/mping/internal/config"
@@ -109,11 +108,7 @@ mping dns://8.8.8.8/google.com`,
 
 			// Final results
 			metrics := metricsManager.SortBy(stats.Fail, false)
-			tableData := shared.NewTableData(metrics, stats.Fail, false)
-			t := tableData.ToGoPrettyTable()
-			t.SetStyle(table.StyleLight)
-			cmd.Println(t.Render())
-			return nil
+			return shared.WriteReport(cmd.OutOrStderr(), shared.FormatTable, metrics, stats.Fail, false)
 		},
 	}
 

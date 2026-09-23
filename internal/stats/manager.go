@@ -231,6 +231,18 @@ func (mm *metricsManager) ToggleBeep() {
 	}
 }
 
+// SetBeepEnabled turns beep sound on or off
+func (mm *metricsManager) SetBeepEnabled(enabled bool) {
+	if mm.beeper == nil {
+		return
+	}
+	if enabled {
+		mm.beeper.Enable()
+	} else {
+		mm.beeper.Disable()
+	}
+}
+
 // IsBeepEnabled returns current beep sound state
 func (mm *metricsManager) IsBeepEnabled() bool {
 	if mm.beeper != nil {

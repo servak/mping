@@ -93,3 +93,9 @@ func TestWriteReportUnknownFormat(t *testing.T) {
 		t.Error("expected error for unsupported format")
 	}
 }
+
+func TestCSVHeaderMatchesRecord(t *testing.T) {
+	if got, want := len(TargetReport{}.csvRecord()), len(csvHeader); got != want {
+		t.Errorf("csvRecord has %d columns, header has %d", got, want)
+	}
+}
