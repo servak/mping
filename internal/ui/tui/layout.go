@@ -131,9 +131,8 @@ func (l *LayoutManager) showDetailView() {
 	l.mode = ListWithDetail
 
 	// Get currently selected metrics and set them in the detail panel
-	selectedMetrics := l.hostList.GetSelectedMetrics()
-	if selectedMetrics != nil {
-		l.hostDetail.SetMetrics(selectedMetrics)
+	if m, ok := l.hostList.CurrentSelectedMetric(); ok {
+		l.hostDetail.SetMetrics(m)
 	}
 
 	// Create horizontal layout for host list and detail
@@ -168,6 +167,10 @@ func (l *LayoutManager) UpdateAll() {
 
 	// Only update detail panel when it's visible
 	if l.mode == ListWithDetail {
+		// Metrics are snapshots; hand the detail panel the fresh one
+		if m, ok := l.hostList.CurrentSelectedMetric(); ok {
+			l.hostDetail.SetMetrics(m)
+		}
 		l.hostDetail.Update()
 	}
 }
