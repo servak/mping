@@ -11,6 +11,9 @@ import (
 	"github.com/servak/mping/internal/stats"
 )
 
+// ColumnLastFailTime is the index of the LastFailTime column in TableData
+const ColumnLastFailTime = 10
+
 // TableData represents table data optimized for tview.Table with go-pretty fallback
 type TableData struct {
 	Headers []string

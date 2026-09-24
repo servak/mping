@@ -60,6 +60,7 @@ func NewTUIApp(mm stats.MetricsManager, cfg *shared.Config, interval, timeout ti
 // Run starts the application
 func (a *TUIApp) Run() error {
 	a.app.SetRoot(a.layout.GetRoot(), true).SetFocus(a.layout.GetRoot())
+	defer a.layout.StopPathTrace()
 	return a.app.Run()
 }
 
@@ -139,6 +140,9 @@ func (a *TUIApp) setupKeyBindings() {
 		case 'v':
 			a.toggleDetailView()
 			return nil
+		case 'p':
+			a.layout.TogglePathView()
+			return nil
 		case 's':
 			a.nextSort()
 			return nil
@@ -189,6 +193,7 @@ NAVIGATION:
   r            Reverse sort order
   R            Reset all metrics
   v            Toggle detail view
+  p            Toggle path (MTR) view
   /            Filter hosts
   t            Cycle theme
   b            Toggle beep sound

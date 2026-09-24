@@ -98,10 +98,12 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 
 			// Create ProbeManager and MetricsManager
 			probeManager := prober.NewProbeManager(cfg.Prober, cfg.Default)
-			metricsManager := stats.NewMetricsManager()
-			// The terminal bell would corrupt machine-readable output and is
-			// pointless in non-interactive runs.
-			metricsManager.SetBeepEnabled(false)
+			metricsManager := stats.NewMetricsManagerWithOptions(stats.Options{
+				SettleTime: stats.SettleTimeFor(_interval, _timeout),
+				// The terminal bell would corrupt machine-readable output and
+				// is pointless in non-interactive runs.
+				DisableBeep: true,
+			})
 
 			// Add targets
 			err = probeManager.AddTargets(hosts...)

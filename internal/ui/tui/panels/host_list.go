@@ -2,6 +2,8 @@ package panels
 
 import (
 	"fmt"
+	"slices"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -20,6 +22,8 @@ type HostListPanel struct {
 	mm                stats.MetricsProvider
 	config            *shared.Config
 	onSelectionChange func(metrics stats.Metrics) // Callback when selection changes
+	lastTableData     *shared.TableData           // Data rendered by the last Update
+	keepSelectedHost  bool                        // Select() moves the cursor without changing the selected host
 }
 
 type HostListParams interface {
@@ -45,6 +49,11 @@ func NewHostListPanel(state HostListParams, mm stats.MetricsProvider, config *sh
 		mm:             mm,
 		config:         config,
 	}
+	// Every selection change (keys, mouse clicks, programmatic Select) goes
+	// through here so the selection follows the host, not the row index.
+	table.SetSelectionChangedFunc(func(row, _ int) {
+		panel.onTableSelectionChanged(row)
+	})
 
 	return panel
 }
@@ -78,6 +87,7 @@ func (h *HostListPanel) Update() {
 
 	// Use TableData's logic but populate our existing table
 	h.populateTableFromData(tableData)
+	h.lastTableData = tableData
 
 	// Restore selection if specified
 	selectedHost := h.renderState.GetSelectedHost()
@@ -97,21 +107,34 @@ func (h *HostListPanel) getFilteredMetrics() []stats.Metrics {
 	return shared.FilterMetrics(metrics, h.renderState.GetFilter())
 }
 
-// updateSelectedHost updates the selection state based on current table selection
-func (h *HostListPanel) updateSelectedHost() {
-	metrics := h.getFilteredMetrics()
-	tableData := shared.NewTableData(metrics, h.renderState.GetSortKey(), h.renderState.IsAscending())
-	selectedHost := h.GetSelectedHost(tableData)
-
-	// Only update if the selection actually changed to avoid loops
-	if h.selectionState.GetSelectedHost() != selectedHost {
-		h.selectionState.SetSelectedHost(selectedHost)
-
-		// Call the callback to update detail panel with metrics object
-		if metric, ok := h.GetSelectedMetric(tableData); ok && h.onSelectionChange != nil {
-			h.onSelectionChange(metric)
-		}
+// onTableSelectionChanged records the host at the selected row as the
+// selection, so later updates keep selecting that host even when sorting
+// moves it to another row.
+func (h *HostListPanel) onTableSelectionChanged(row int) {
+	if h.keepSelectedHost || h.lastTableData == nil {
+		return
 	}
+	metric, ok := h.lastTableData.GetMetricAtRow(row - 1) // Subtract 1 for header
+	if !ok {
+		return
+	}
+	if h.selectionState.GetSelectedHost() == metric.GetName() {
+		return
+	}
+	h.selectionState.SetSelectedHost(metric.GetName())
+	if h.onSelectionChange != nil {
+		h.onSelectionChange(metric)
+	}
+}
+
+// CurrentSelectedMetric returns the selected host's metrics from the last
+// Update. Metrics are snapshots, so this is how other panels get fresh data
+// without querying the MetricsProvider again.
+func (h *HostListPanel) CurrentSelectedMetric() (stats.Metrics, bool) {
+	if h.lastTableData == nil {
+		return nil, false
+	}
+	return h.GetSelectedMetric(h.lastTableData)
 }
 
 // GetView returns the underlying tview component
@@ -126,14 +149,6 @@ func (h *HostListPanel) GetSelectedMetric(tableData *shared.TableData) (stats.Me
 		return nil, false
 	}
 	return tableData.GetMetricAtRow(row - 1) // Subtract 1 for header
-}
-
-// GetSelectedHost returns the name of the currently selected host
-func (h *HostListPanel) GetSelectedHost(tableData *shared.TableData) string {
-	if metric, ok := h.GetSelectedMetric(tableData); ok {
-		return metric.GetName()
-	}
-	return ""
 }
 
 // SetSelectedFunc sets the function to call when a row is selected
@@ -151,8 +166,6 @@ func (h *HostListPanel) ScrollDown() {
 	row, _ := h.table.GetSelection()
 	if row+1 < h.table.GetRowCount() {
 		h.table.Select(row+1, 0)
-		// Update selection state directly
-		h.updateSelectedHost()
 	}
 }
 
@@ -160,23 +173,17 @@ func (h *HostListPanel) ScrollUp() {
 	row, _ := h.table.GetSelection()
 	if row > 1 { // Don't go above first data row (row 0 is header)
 		h.table.Select(row-1, 0)
-		// Update selection state directly
-		h.updateSelectedHost()
 	}
 }
 
 func (h *HostListPanel) ScrollToTop() {
 	h.table.Select(1, 0) // Select first data row (row 0 is header)
-	// Update selection state directly
-	h.updateSelectedHost()
 }
 
 func (h *HostListPanel) ScrollToBottom() {
 	rowCount := h.table.GetRowCount()
 	if rowCount > 1 {
 		h.table.Select(rowCount-1, 0)
-		// Update selection state directly
-		h.updateSelectedHost()
 	}
 }
 
@@ -190,8 +197,6 @@ func (h *HostListPanel) PageDown() {
 		newRow = rowCount - 1
 	}
 	h.table.Select(newRow, 0)
-	// Update selection state directly
-	h.updateSelectedHost()
 }
 
 func (h *HostListPanel) PageUp() {
@@ -203,11 +208,14 @@ func (h *HostListPanel) PageUp() {
 		newRow = 1
 	}
 	h.table.Select(newRow, 0)
-	// Update selection state directly
-	h.updateSelectedHost()
 }
 
-// populateTableFromData populates our table using TableData content
+// historyColumn is where the TUI-only History column is inserted (after Loss)
+const historyColumn = 5
+
+// populateTableFromData populates our table using TableData content.
+// A TUI-only History sparkline column is inserted after Loss, and the
+// LastFailTime cell also shows the duration of the related outage.
 func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 	// Define alignment for each column (same as in shared/table_data.go)
 	alignments := []int{
@@ -216,6 +224,7 @@ func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 		tview.AlignRight,  // Succ
 		tview.AlignRight,  // Fail
 		tview.AlignRight,  // Loss
+		tview.AlignLeft,   // History
 		tview.AlignRight,  // Last
 		tview.AlignRight,  // Avg
 		tview.AlignRight,  // Best
@@ -228,36 +237,38 @@ func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 	// Get theme for theme-aware colors
 	theme := h.config.GetTheme()
 
-	// Set headers
-	for col, header := range tableData.Headers {
+	setCell := func(row, col int, text, color string, header bool) {
 		alignment := tview.AlignLeft
 		if col < len(alignments) {
 			alignment = alignments[col]
 		}
-
-		h.table.SetCell(0, col, &tview.TableCell{
-			Text:            "  " + header + "  ",
-			Color:           tcell.GetColor(theme.TableHeader),
+		h.table.SetCell(row, col, &tview.TableCell{
+			Text:            "  " + text + "  ",
+			Color:           tcell.GetColor(color),
 			BackgroundColor: tcell.GetColor(theme.Background),
 			Align:           alignment,
-			NotSelectable:   true,
+			NotSelectable:   header,
 		})
 	}
 
-	// Set data rows
-	for row, rowData := range tableData.Rows {
-		for col, cellData := range rowData {
-			alignment := tview.AlignLeft
-			if col < len(alignments) {
-				alignment = alignments[col]
-			}
+	// Set headers
+	headers := slices.Insert(slices.Clone(tableData.Headers), historyColumn, "History")
+	for col, header := range headers {
+		setCell(0, col, header, theme.TableHeader, true)
+	}
 
-			h.table.SetCell(row+1, col, &tview.TableCell{
-				Text:            "  " + cellData + "  ",
-				Color:           tcell.GetColor(theme.Primary),
-				BackgroundColor: tcell.GetColor(theme.Background),
-				Align:           alignment,
-			})
+	// Set data rows
+	now := time.Now()
+	for row, rowData := range tableData.Rows {
+		cells := slices.Clone(rowData)
+		sparkline := ""
+		if m, ok := tableData.GetMetricAtRow(row); ok {
+			sparkline = shared.FormatSparkline(m.GetRecentHistory(stats.DefaultHistorySize), shared.HistoryWidth, theme)
+			cells[shared.ColumnLastFailTime] = shared.FormatLastFailCell(m, now, theme)
+		}
+		cells = slices.Insert(cells, historyColumn, sparkline)
+		for col, cellData := range cells {
+			setCell(row+1, col, cellData, theme.Primary, false)
 		}
 	}
 }
@@ -271,24 +282,11 @@ func (h *HostListPanel) restoreSelection(tableData *shared.TableData, selectedHo
 		}
 	}
 
-	// If host not found, select first row
+	// If host not found (e.g. hidden by a filter), show the first row but
+	// keep the selected host so it is selected again once it reappears
 	if h.table.GetRowCount() > 1 {
+		h.keepSelectedHost = true
 		h.table.Select(1, 0)
+		h.keepSelectedHost = false
 	}
-}
-
-// GetSelectedMetrics returns the currently selected metrics
-func (h *HostListPanel) GetSelectedMetrics() stats.Metrics {
-	metrics := h.getFilteredMetrics()
-	if len(metrics) == 0 {
-		return nil
-	}
-
-	row, _ := h.table.GetSelection()
-	// row 0 is header, so data starts from row 1
-	if row >= 1 && row-1 < len(metrics) {
-		return metrics[row-1]
-	}
-
-	return nil
 }

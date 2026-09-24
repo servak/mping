@@ -2,10 +2,14 @@ package panels
 
 import (
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/ui/shared"
+	"github.com/servak/mping/internal/ui/tui/state"
 )
 
 // mockState implements the required interfaces for testing
@@ -131,23 +135,85 @@ func TestHostListPanelUpdateWithFilter(t *testing.T) {
 	panel.Update()
 }
 
-func TestHostListPanelUpdateSelectedHost(t *testing.T) {
+// feedEvents sends events through the public API and waits until processed
+func feedEvents(t *testing.T, mm stats.MetricsManager, events ...*prober.Event) {
+	t.Helper()
+	ch := make(chan *prober.Event, len(events))
+	for _, e := range events {
+		ch <- e
+	}
+	close(ch)
+	<-mm.Subscribe(ch)
+}
+
+func selectedName(t *testing.T, p *HostListPanel) string {
+	t.Helper()
+	m, ok := p.CurrentSelectedMetric()
+	if !ok {
+		t.Fatal("no host selected")
+	}
+	return m.GetName()
+}
+
+// Regression: with no explicit selection the panel used to always select
+// row 1, so a sort change (e.g. another host failing once) silently moved
+// the selection - and restarted the path trace - to a different host.
+func TestHostListPanelSelectionFollowsHostAcrossSortChanges(t *testing.T) {
 	mm := stats.NewMetricsManager()
-	state := newMockState()
-	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	mm.ToggleBeep()
+	st := state.NewUIState() // default sort: Fail, descending
+	panel := NewHostListPanel(st, mm, shared.DefaultConfig())
 
-	// Register test metrics
-	mm.Register("test.com", "test.com")
+	now := time.Now()
+	var events []*prober.Event
+	for _, h := range []string{"8.8.8.8", "1.1.1.1", "192.168.1.1"} {
+		events = append(events,
+			&prober.Event{Key: h, DisplayName: h, Result: prober.REGISTER},
+			&prober.Event{Key: h, Result: prober.SUCCESS, SentTime: now, Rtt: time.Millisecond})
+	}
+	feedEvents(t, mm, events...)
 
-	// Test updateSelectedHost doesn't panic
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("updateSelectedHost() panicked: %v", r)
-		}
-	}()
+	panel.Update()
+	if got := selectedName(t, panel); got != "1.1.1.1" {
+		t.Fatalf("initial selection = %s, want 1.1.1.1 (first by name)", got)
+	}
+	if got := st.GetSelectedHost(); got != "1.1.1.1" {
+		t.Fatalf("default selection must be recorded in state, got %q", got)
+	}
 
-	panel.updateSelectedHost()
+	// 8.8.8.8 times out once and jumps to the top of the Fail-sorted list
+	feedEvents(t, mm, &prober.Event{Key: "8.8.8.8", Result: prober.TIMEOUT, SentTime: now, Message: "timeout"})
+	panel.Update()
+	if got := selectedName(t, panel); got != "1.1.1.1" {
+		t.Errorf("selection moved to %s after a sort change, want it to stay on 1.1.1.1", got)
+	}
+	if row, _ := panel.table.GetSelection(); row == 1 {
+		t.Errorf("1.1.1.1 should no longer be on row 1 (8.8.8.8 sorts first)")
+	}
+}
+
+// Mouse clicks select rows through Table.Select; the selection must stick
+// on the next Update instead of snapping back.
+func TestHostListPanelClickSelectionSticks(t *testing.T) {
+	mm := stats.NewMetricsManager()
+	st := state.NewUIState()
+	panel := NewHostListPanel(st, mm, shared.DefaultConfig())
+	mm.Register("a.example", "a.example")
+	mm.Register("b.example", "b.example")
+
+	var notified string
+	panel.SetSelectionChangeCallback(func(m stats.Metrics) { notified = m.GetName() })
+
+	panel.Update()
+	panel.table.Select(2, 0) // what tview does on a mouse click
+	panel.Update()
+
+	if got := selectedName(t, panel); got != "b.example" {
+		t.Errorf("selection after click = %s, want b.example", got)
+	}
+	if notified != "b.example" {
+		t.Errorf("selection change callback got %q, want b.example", notified)
+	}
 }
 
 func TestHostListPanelScrollDown(t *testing.T) {
@@ -303,4 +369,105 @@ func TestHostListPanelRestoreSelection(t *testing.T) {
 
 	panel.restoreSelection(tableData, "google.com")
 	panel.restoreSelection(tableData, "nonexistent.com")
+}
+
+func TestHostListPanelCurrentSelectedMetricIsFresh(t *testing.T) {
+	mm := stats.NewMetricsManager()
+	mm.ToggleBeep()
+	events := make(chan *prober.Event, 10)
+	done := mm.Subscribe(events)
+	events <- &prober.Event{Key: "h", DisplayName: "host", Result: prober.REGISTER}
+
+	panel := NewHostListPanel(state.NewUIState(), mm, shared.DefaultConfig())
+	waitFor := func(total int) {
+		t.Helper()
+		for i := 0; i < 100; i++ {
+			panel.Update()
+			if m, ok := panel.CurrentSelectedMetric(); ok && m.GetTotal() == total {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("selected metric never reached total=%d", total)
+	}
+
+	waitFor(0)
+	events <- &prober.Event{Key: "h", Result: prober.SENT}
+	waitFor(1) // a later Update must expose the new data, not the old snapshot
+	close(events)
+	<-done
+}
+
+func TestHostListPanelLastFailTimeShowsOutage(t *testing.T) {
+	mm := stats.NewMetricsManager()
+	mm.ToggleBeep()
+	panel := NewHostListPanel(state.NewUIState(), mm, shared.DefaultConfig())
+
+	now := time.Now()
+	feedEvents(t, mm,
+		&prober.Event{Key: "down", DisplayName: "down.example", Result: prober.REGISTER},
+		&prober.Event{Key: "up", DisplayName: "up.example", Result: prober.REGISTER},
+		&prober.Event{Key: "down", Result: prober.SUCCESS, SentTime: now.Add(-3 * time.Second)},
+		&prober.Event{Key: "down", Result: prober.TIMEOUT, SentTime: now.Add(-2 * time.Second), Message: "timeout"},
+		&prober.Event{Key: "down", Result: prober.TIMEOUT, SentTime: now.Add(-1 * time.Second), Message: "timeout"},
+		&prober.Event{Key: "down", Result: prober.TIMEOUT, SentTime: now, Message: "timeout"},
+		&prober.Event{Key: "up", Result: prober.SUCCESS, SentTime: now},
+	)
+	panel.Update()
+
+	col := shared.ColumnLastFailTime + 1 // shifted by the History column
+	if got := panel.table.GetCell(0, col).Text; !strings.Contains(got, "LastFailTime") {
+		t.Fatalf("header at column %d = %q, want LastFailTime", col, got)
+	}
+	for row := 0; row < panel.table.GetRowCount(); row++ {
+		for c := 0; c < panel.table.GetColumnCount(); c++ {
+			if strings.Contains(panel.table.GetCell(row, c).Text, "Outage") {
+				t.Errorf("there must be no separate Outage column (row %d col %d)", row, c)
+			}
+		}
+	}
+	cells := map[string]string{}
+	for row := 1; row < panel.table.GetRowCount(); row++ {
+		name := strings.TrimSpace(panel.table.GetCell(row, 0).Text)
+		cells[name] = panel.table.GetCell(row, col).Text
+	}
+	if !strings.Contains(cells["down.example"], "(DOWN 2.") {
+		t.Errorf("down host LastFailTime = %q, want time with (DOWN ~2s)", cells["down.example"])
+	}
+	if strings.TrimSpace(cells["up.example"]) != "-" {
+		t.Errorf("healthy host LastFailTime = %q, want -", cells["up.example"])
+	}
+}
+
+// A filter that hides the selected host shows the first row meanwhile, but
+// the selection must return to the host once the filter is cleared.
+func TestHostListPanelSelectionSurvivesFilter(t *testing.T) {
+	mm := stats.NewMetricsManager()
+	mm.ToggleBeep()
+	st := state.NewUIState()
+	panel := NewHostListPanel(st, mm, shared.DefaultConfig())
+
+	now := time.Now()
+	var events []*prober.Event
+	for _, h := range []string{"8.8.8.8", "1.1.1.1", "192.168.1.1"} {
+		events = append(events,
+			&prober.Event{Key: h, DisplayName: h, Result: prober.REGISTER},
+			&prober.Event{Key: h, Result: prober.SUCCESS, SentTime: now, Rtt: time.Millisecond})
+	}
+	feedEvents(t, mm, events...)
+
+	st.SetSelectedHost("192.168.1.1")
+	panel.Update()
+
+	st.SetFilter("8.8")
+	panel.Update()
+	if got := selectedName(t, panel); got != "8.8.8.8" {
+		t.Fatalf("filtered selection = %s, want 8.8.8.8 (only row)", got)
+	}
+
+	st.SetFilter("")
+	panel.Update()
+	if got := selectedName(t, panel); got != "192.168.1.1" {
+		t.Errorf("selection after clearing the filter = %s, want 192.168.1.1", got)
+	}
 }

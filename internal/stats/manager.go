@@ -16,22 +16,51 @@ const (
 type metricsManager struct {
 	metrics     map[string]*metrics
 	historySize int // Number of history entries to keep
+	settle      time.Duration
 	beeper      *beep.Beeper
 	mu          sync.Mutex
 }
 
-// Create a new MetricsManager
-func NewMetricsManager() MetricsManager {
-	return NewMetricsManagerWithHistorySize(DefaultHistorySize)
+// Options configures a MetricsManager
+type Options struct {
+	HistorySize int
+	// SettleTime is how long results are buffered before outage detection so
+	// that out-of-order results can be applied in send order. It should cover
+	// the latest a result can be reported: timeout plus one interval (ICMP
+	// timeouts are checked on the interval ticker).
+	SettleTime time.Duration
+	// DisableBeep turns off the failure beep, e.g. for non-interactive runs
+	DisableBeep bool
 }
 
-// Create MetricsManager with specified history size
-func NewMetricsManagerWithHistorySize(historySize int) MetricsManager {
-	return &metricsManager{
-		metrics:     make(map[string]*metrics),
-		historySize: historySize,
-		beeper:      beep.NewBeeper(),
+// SettleTimeFor returns the recommended SettleTime for the probe timing
+func SettleTimeFor(interval, timeout time.Duration) time.Duration {
+	return interval + timeout + 100*time.Millisecond
+}
+
+// Create a new MetricsManager
+func NewMetricsManager() MetricsManager {
+	return NewMetricsManagerWithOptions(Options{})
+}
+
+// NewMetricsManagerWithOptions creates a MetricsManager with custom options
+func NewMetricsManagerWithOptions(opts Options) MetricsManager {
+	if opts.HistorySize <= 0 {
+		opts.HistorySize = DefaultHistorySize
 	}
+	mm := &metricsManager{
+		metrics:     make(map[string]*metrics),
+		historySize: opts.HistorySize,
+		settle:      opts.SettleTime,
+	}
+	if !opts.DisableBeep {
+		mm.beeper = beep.NewBeeper()
+	}
+	return mm
+}
+
+func (mm *metricsManager) newMetrics(name string) *metrics {
+	return newMetrics(name, mm.historySize, mm.settle)
 }
 
 func (mm *metricsManager) Register(target, name string) {
@@ -42,10 +71,7 @@ func (mm *metricsManager) Register(target, name string) {
 	if ok && v.Name != target {
 		return
 	}
-	mm.metrics[target] = &metrics{
-		Name:    name,
-		history: NewTargetHistory(mm.historySize),
-	}
+	mm.metrics[target] = mm.newMetrics(name)
 }
 
 // 指定されたホストのMetricsを取得（内部用）
@@ -55,10 +81,7 @@ func (mm *metricsManager) getMetrics(host string) *metrics {
 
 	m, ok := mm.metrics[host]
 	if !ok {
-		m = &metrics{
-			Name:    host,
-			history: NewTargetHistory(mm.historySize),
-		}
+		m = mm.newMetrics(host)
 		// Register the new metrics for the host
 		mm.metrics[host] = m
 	}
@@ -66,7 +89,10 @@ func (mm *metricsManager) getMetrics(host string) *metrics {
 }
 
 func (mm *metricsManager) GetMetrics(host string) Metrics {
-	return mm.getMetrics(host)
+	m := mm.getMetrics(host)
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	return m.settledSnapshot(time.Now())
 }
 
 func (mm *metricsManager) ResetAllMetrics() {
@@ -97,6 +123,7 @@ func (mm *metricsManager) SuccessWithDetails(host string, rtt time.Duration, sen
 			Details:   details,
 		})
 	}
+	m.outage.add(sentTime, true, "", time.Now())
 	mm.mu.Unlock()
 }
 
@@ -114,6 +141,7 @@ func (mm *metricsManager) Failed(host string, sentTime time.Time, msg string) {
 			Error:     msg,
 		})
 	}
+	m.outage.add(sentTime, false, msg, time.Now())
 	mm.mu.Unlock()
 
 	// Play beep sound on failure (non-blocking)
@@ -134,6 +162,9 @@ func (mm *metricsManager) Subscribe(res <-chan *prober.Event) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		// Once the channel is closed no more results can arrive, so every
+		// buffered result can be applied to outage detection.
+		defer mm.flushOutages()
 		for r := range res {
 			switch r.Result {
 			case prober.REGISTER:
@@ -158,20 +189,27 @@ func (mm *metricsManager) autoRegister(key, displayName string) {
 	defer mm.mu.Unlock()
 
 	if _, exists := mm.metrics[key]; !exists {
-		mm.metrics[key] = &metrics{
-			Name:    displayName,
-			history: NewTargetHistory(mm.historySize),
-		}
+		mm.metrics[key] = mm.newMetrics(displayName)
 	}
 }
 
-// SortBy sorts metrics by specified key and returns Metrics slice
+func (mm *metricsManager) flushOutages() {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	for _, m := range mm.metrics {
+		m.outage.flushAll()
+	}
+}
+
+// SortBy sorts metrics by specified key and returns Metrics slice.
+// The returned values are snapshots, safe to read while probing continues.
 func (mm *metricsManager) SortBy(k Key, ascending bool) []Metrics {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
+	now := time.Now()
 	var res []Metrics
 	for _, m := range mm.metrics {
-		res = append(res, m)
+		res = append(res, m.settledSnapshot(now))
 	}
 
 	if k != Host {
@@ -179,67 +217,52 @@ func (mm *metricsManager) SortBy(k Key, ascending bool) []Metrics {
 			return res[i].GetName() < res[j].GetName()
 		})
 	}
-	sort.SliceStable(res, func(i, j int) bool {
-		mi := res[i]
-		mj := res[j]
-		var result bool
+	// less must be a strict ordering: descending order swaps the operands
+	// instead of negating the result, which would make equal elements
+	// "less" than each other and reorder them on every call.
+	less := func(mi, mj Metrics) bool {
 		switch k {
 		case Host:
-			result = mi.GetName() < mj.GetName()
+			return mi.GetName() < mj.GetName()
 		case Sent:
-			result = mi.GetTotal() < mj.GetTotal()
+			return mi.GetTotal() < mj.GetTotal()
 		case Success:
-			result = mi.GetSuccessful() < mj.GetSuccessful()
+			return mi.GetSuccessful() < mj.GetSuccessful()
 		case Loss:
-			result = mi.GetLoss() < mj.GetLoss()
+			return mi.GetLoss() < mj.GetLoss()
 		case Fail:
-			result = mi.GetFailed() < mj.GetFailed()
-		case Last:
-			result = rejectLessAscending(mi.GetLastRTT(), mj.GetLastRTT())
-		case Avg:
-			result = rejectLessAscending(mi.GetAverageRTT(), mj.GetAverageRTT())
-		case Best:
-			result = rejectLessAscending(mi.GetMinimumRTT(), mj.GetMinimumRTT())
-		case Worst:
-			result = rejectLessAscending(mi.GetMaximumRTT(), mj.GetMaximumRTT())
+			return mi.GetFailed() < mj.GetFailed()
+		case Last, Avg, Best, Worst:
+			return rttFor(k, mi) < rttFor(k, mj)
 		case LastSuccTime:
-			result = mi.GetLastSuccTime().Before(mj.GetLastSuccTime())
+			return mi.GetLastSuccTime().Before(mj.GetLastSuccTime())
 		case LastFailTime:
-			result = mi.GetLastFailTime().Before(mj.GetLastFailTime())
-		default:
-			return false
+			return mi.GetLastFailTime().Before(mj.GetLastFailTime())
 		}
-
+		return false
+	}
+	sort.SliceStable(res, func(i, j int) bool {
+		// Unmeasured RTTs (zero) always go last, whatever the direction
+		if zi, zj := rttFor(k, res[i]) == 0, rttFor(k, res[j]) == 0; zi != zj {
+			return zj
+		}
 		if ascending {
-			return result
-		} else {
-			return !result
+			return less(res[i], res[j])
 		}
+		return less(res[j], res[i])
 	})
 	return res
 }
 
 // GetMetricsAsReader retrieves as Metrics interface
 func (mm *metricsManager) GetMetricsAsReader(target string) Metrics {
-	return mm.getMetrics(target)
+	return mm.GetMetrics(target)
 }
 
 // ToggleBeep toggles beep sound on/off
 func (mm *metricsManager) ToggleBeep() {
 	if mm.beeper != nil {
 		mm.beeper.Toggle()
-	}
-}
-
-// SetBeepEnabled turns beep sound on or off
-func (mm *metricsManager) SetBeepEnabled(enabled bool) {
-	if mm.beeper == nil {
-		return
-	}
-	if enabled {
-		mm.beeper.Enable()
-	} else {
-		mm.beeper.Disable()
 	}
 }
 
@@ -251,14 +274,17 @@ func (mm *metricsManager) IsBeepEnabled() bool {
 	return false
 }
 
-// rejectLessAscending is RTT comparison function for ascending sort
-// Zero values (unmeasured) are always placed at the end
-func rejectLessAscending(i, j time.Duration) bool {
-	if i == 0 {
-		return false // If i is 0, put j first
+// rttFor returns the RTT a sort key refers to, or -1 for non-RTT keys
+func rttFor(k Key, m Metrics) time.Duration {
+	switch k {
+	case Last:
+		return m.GetLastRTT()
+	case Avg:
+		return m.GetAverageRTT()
+	case Best:
+		return m.GetMinimumRTT()
+	case Worst:
+		return m.GetMaximumRTT()
 	}
-	if j == 0 {
-		return true // If j is 0, put i first
-	}
-	return i < j // If both are non-zero, put the smaller one first
+	return -1
 }

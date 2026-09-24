@@ -130,7 +130,8 @@ func TestMetricsWithHistory(t *testing.T) {
 	// Record failure
 	mm.Failed(host, time.Now(), "timeout")
 
-	// Test consecutive failures
+	// GetMetrics returns a snapshot, so fetch again to observe the failure
+	metrics = mm.GetMetrics(host)
 	if metrics.GetConsecutiveFailures() != 1 {
 		t.Errorf("Expected 1 consecutive failure, got %d", metrics.GetConsecutiveFailures())
 	}
