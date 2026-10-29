@@ -75,6 +75,10 @@ nfpms:
           - libcap
 
 release:
+  # Published by hand on GitHub, which then creates the tag at this commit.
+  draft: true
+  replace_existing_draft: true
+  target_commitish: "{{ .FullCommit }}"
   prerelease: auto
   name_template: "{{.ProjectName}} v{{.Version}}"
   header: |
