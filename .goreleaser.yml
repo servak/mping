@@ -66,9 +66,6 @@ nfpms:
     rpm:
       group: Applications/Internet
       summary: Multi-protocol network monitoring tool
-    deb:
-      fields:
-        Priority: optional
     overrides:
       deb:
         dependencies:
