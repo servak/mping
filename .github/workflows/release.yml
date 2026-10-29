@@ -1,32 +1,84 @@
 name: release
+# Keep a draft release with all build artifacts up to date on every push to
+# main. Publishing the draft on GitHub creates the tag, so releasing is just
+# pressing "Publish release". The version is derived from Conventional Commits
+# (.github/scripts/next-version.sh) unless given via workflow_dispatch.
 on:
   push:
-    tags:
-    - "v[0-9]+.[0-9]+.[0-9]+"
+    branches: [main]
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: 'Run in dry-run mode (no publish)'
+      version:
+        description: 'Version to draft, e.g. v0.14.0 (empty: derive from commits)'
         required: false
-        default: 'true'
-        type: boolean
+        type: string
+
+concurrency:
+  group: release-draft
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
 jobs:
-  goreleaser:
+  draft:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Determine version
+        id: version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          version=${INPUT_VERSION:-$(.github/scripts/next-version.sh)}
+          if [ -z "$version" ]; then
+            echo "No feat/fix commits since the last release; nothing to draft."
+            exit 0
+          fi
+          if ! printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "Invalid version: $version" >&2
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+            echo "Tag $version already exists" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Drafting $version" >> "$GITHUB_STEP_SUMMARY"
       - name: Setup Go
+        if: steps.version.outputs.version != ''
         uses: actions/setup-go@v5
         with:
           go-version: '1.26'
           cache: true
+      # Only drafts made by this workflow (named by .goreleaser.yml); the
+      # version may have changed since the last run, e.g. patch -> minor.
+      - name: Delete previous drafts
+        if: steps.version.outputs.version != ''
+        run: |
+          gh release list --limit 100 --json name,tagName,isDraft \
+            --jq '.[] | select(.isDraft and (.name | startswith("mping v"))) | .tagName' |
+          while read -r tag; do
+            echo "Deleting draft $tag"
+            gh release delete "$tag" --yes
+          done
+      # The tag only exists locally so GoReleaser can resolve the version;
+      # GitHub creates the real tag when the draft is published.
+      - name: Tag locally
+        if: steps.version.outputs.version != ''
+        run: git tag "${{ steps.version.outputs.version }}"
       - name: Run GoReleaser
+        if: steps.version.outputs.version != ''
         uses: goreleaser/goreleaser-action@v6
         with:
           version: '~> v2'
-          args: release --clean ${{ github.event.inputs.dry_run == 'true' && '--snapshot --skip=publish' || '' }}
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
