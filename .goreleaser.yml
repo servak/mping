@@ -81,10 +81,6 @@ release:
   target_commitish: "{{ .FullCommit }}"
   prerelease: auto
   name_template: "{{.ProjectName}} v{{.Version}}"
-  header: |
-    ## mping {{.Tag}} Release
-
-    Multi-target, multi-protocol network monitoring tool with DNS support.
 
 changelog:
   sort: asc

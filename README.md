@@ -5,7 +5,7 @@ mping
 
 **mping** is a `ping` built for network operators: sweep entire subnets, mix ICMP/HTTP/TCP/DNS/NTP checks in a single command, and watch live pass/fail stats in a terminal dashboard — right from the SSH session you're already in.
 
-![Demo](demo/mping.gif)
+![ICMP demo: history sparklines, a host going DOWN with a live outage timer, and the outage timeline printed on exit](demo/icmp.gif)
 
 ## Features
 
@@ -30,6 +30,10 @@ mping
 | **TCP** | `tcp://host:port` | `tcp://google.com:443` | Port connectivity testing |
 | **DNS** | `dns://[server[:port]]/domain[/record_type]` | `dns://8.8.8.8/google.com/A`, `dns:///google.com` | DNS query monitoring |
 | **NTP** | `ntp://[server[:port]]` | `ntp://pool.ntp.org`, `ntp://time.google.com:123` | Network Time Protocol monitoring |
+
+Mix any of them in a single command and compare them side by side — the gateway, a web service, a TCP port, a DNS resolver and an NTP server:
+
+![Multi-protocol demo: ICMP, HTTPS, TCP, DNS and NTP checks in one dashboard](demo/multi-protocol.gif)
 
 ## Install
 
