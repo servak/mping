@@ -88,7 +88,11 @@ release:
 
 changelog:
   sort: asc
-  use: github
+  # The release workflow passes GitHub-generated notes via --release-notes.
+  # This is the fallback for local runs: it must not use the GitHub compare
+  # API because the tag only exists locally until the draft is published.
+  use: git
+  format: "{{ .SHA }} {{ .Message }} ({{ .AuthorName }})"
   filters:
     exclude:
       - '^docs:'
