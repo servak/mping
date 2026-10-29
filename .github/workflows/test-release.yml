@@ -6,6 +6,7 @@ on:
       - '.goreleaser.yml'
       - 'packaging/**'
       - '.github/workflows/release.yml'
+      - '.github/workflows/test-release.yml'
 
 jobs:
   test-goreleaser:
@@ -39,3 +40,79 @@ jobs:
         with:
           name: goreleaser-artifacts
           path: dist/
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            dist/*_linux_amd64.deb
+            dist/*_linux_amd64.rpm
+
+  # Install the built packages on real distros and check that a non-root user
+  # can send ICMP. The ICMP prober only uses raw sockets, so this passes only
+  # when postinstall.sh has granted cap_net_raw as effective (+ep).
+  test-packages:
+    needs: test-goreleaser
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: debian:12
+            format: deb
+          - image: ubuntu:24.04
+            format: deb
+          - image: rockylinux/rockylinux:9
+            format: rpm
+          - image: fedora:latest
+            format: rpm
+    container:
+      image: ${{ matrix.image }}
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Download Linux packages
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-packages
+          path: pkgs
+      - name: Install package
+        run: |
+          pkg=$(ls pkgs/*.${{ matrix.format }})
+          if [ "${{ matrix.format }}" = deb ]; then
+            apt-get update
+            apt-get install -y "./$pkg"
+          else
+            dnf install -y shadow-utils util-linux
+            dnf install -y "./$pkg"
+          fi
+      - name: Check dependencies and capability
+        run: |
+          if [ "${{ matrix.format }}" = deb ]; then
+            dpkg -s mping | grep '^Depends:.*libcap2-bin'
+          else
+            rpm -qR mping | grep '^libcap'
+          fi
+          getcap /usr/local/bin/mping | grep 'cap_net_raw=ep'
+      - name: Ping as non-root user
+        run: |
+          useradd -m tester
+          runuser -u tester -- mping batch --count 3 --interval 200 127.0.0.1
+      - name: Ping without capability fails (sanity check)
+        run: |
+          cp /usr/local/bin/mping /tmp/mping-nocap
+          chmod 755 /tmp/mping-nocap
+          if runuser -u tester -- /tmp/mping-nocap batch --count 1 127.0.0.1; then
+            echo "expected failure without cap_net_raw" >&2
+            exit 1
+          fi
+      - name: Reinstall keeps capability (postinstall on upgrade path)
+        run: |
+          pkg=$(ls pkgs/*.${{ matrix.format }})
+          if [ "${{ matrix.format }}" = deb ]; then
+            apt-get install -y --reinstall "./$pkg"
+          else
+            dnf reinstall -y "./$pkg"
+          fi
+          getcap /usr/local/bin/mping | grep 'cap_net_raw=ep'
+          runuser -u tester -- mping batch --count 3 --interval 200 127.0.0.1
