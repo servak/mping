@@ -69,6 +69,21 @@ jobs:
             echo "Deleting draft $tag"
             gh release delete "$tag" --yes
           done
+      # GitHub's generated notes credit contributors by @login. The API accepts
+      # a tag that does not exist yet as long as target_commitish is given.
+      # Written outside the checkout so GoReleaser does not see a dirty tree.
+      - name: Generate release notes
+        if: steps.version.outputs.version != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          previous=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+          gh api -X POST "repos/$GH_REPO/releases/generate-notes" \
+            -f tag_name="$VERSION" \
+            -f target_commitish="$(git rev-parse HEAD)" \
+            ${previous:+-f previous_tag_name="$previous"} \
+            --jq .body > "$RUNNER_TEMP/release-notes.md"
+          cat "$RUNNER_TEMP/release-notes.md"
       # The tag only exists locally so GoReleaser can resolve the version;
       # GitHub creates the real tag when the draft is published.
       - name: Tag locally
@@ -79,6 +94,6 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           version: '~> v2'
-          args: release --clean
+          args: release --clean --release-notes ${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
