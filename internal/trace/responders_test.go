@@ -156,3 +156,53 @@ func TestLateReplyIgnored(t *testing.T) {
 		t.Errorf("late reply was counted: %+v", hop)
 	}
 }
+
+func findResponder(hop Hop, addr string) *Responder {
+	for i := range hop.Responders {
+		if hop.Responders[i].Addr == addr {
+			return &hop.Responders[i]
+		}
+	}
+	return nil
+}
+
+func TestSparseReplyHopStaysVisible(t *testing.T) {
+	tr := newTestTracer()
+	tr.inject(1, 1, "gw", ms(4))
+	tr.rounds = 51
+	hop := tr.Snapshot().Hops[0]
+	if hop.Addr != "gw" || len(hop.Responders) != 1 {
+		t.Fatalf("hop = %+v", hop)
+	}
+	if !hop.Responders[0].Stale {
+		t.Errorf("lone silent responder should be stale")
+	}
+}
+
+func TestPathChangeHidesOldResponder(t *testing.T) {
+	tr := newTestTracer()
+	for r := 1; r <= 5; r++ {
+		tr.inject(1, r, "A", ms(1))
+	}
+	for r := 6; r <= 50; r++ {
+		tr.inject(1, r, "B", ms(1))
+	}
+	hop := tr.Snapshot().Hops[0]
+	if findResponder(hop, "A") != nil || findResponder(hop, "B") == nil {
+		t.Errorf("responders = %+v", hop.Responders)
+	}
+}
+
+func TestMostRecentSilentResponderKept(t *testing.T) {
+	tr := newTestTracer()
+	tr.inject(1, 1, "A", ms(1))
+	tr.inject(1, 5, "B", ms(1))
+	tr.rounds = 60
+	hop := tr.Snapshot().Hops[0]
+	if findResponder(hop, "A") != nil {
+		t.Errorf("older responder should be hidden")
+	}
+	if b := findResponder(hop, "B"); b == nil || !b.Stale || hop.Addr != "B" {
+		t.Errorf("hop = %+v", hop)
+	}
+}

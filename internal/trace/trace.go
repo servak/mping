@@ -539,10 +539,20 @@ func (t *Tracer) Snapshot() Result {
 			hop.Avg = time.Duration(h.sum / float64(h.recv))
 		}
 		dominant := -1
+		// The most recently seen responder (earliest seen on ties) is never
+		// hidden, so a rate-limited hop that replies only now and then keeps
+		// its address. Others are hidden once silent for hideAfterRounds and
+		// a more recent responder exists (the path moved).
+		latest := ""
+		for _, addr := range h.order {
+			if latest == "" || h.resp[addr].lastRound > h.resp[latest].lastRound {
+				latest = addr
+			}
+		}
 		for _, addr := range h.order {
 			r := h.resp[addr]
 			age := t.rounds - r.lastRound
-			if age > hideAfterRounds {
+			if age > hideAfterRounds && addr != latest {
 				continue
 			}
 			resp := Responder{

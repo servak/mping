@@ -65,6 +65,11 @@ func pathFixtures() map[string]*trace.Result {
 				resp("203.0.113.1", "", 40, 5, 5, 4, 6, false),
 				resp("192.0.2.9", "", 1, 9, 9, 9, 9, true)),
 			dest),
+		// rate-limited gateway: a lone responder that replies rarely stays
+		// visible, dimmed and marked stale, with Last shown as "-"
+		"sparse": mk(
+			hopOf(1, 42, 5, resp("192.0.2.1", "", 5, 4, 4, 3, 6, true)),
+			dest),
 		"truncated": mk(
 			hopOf(1, 42, 42, many...),
 			dest),
@@ -111,6 +116,10 @@ func TestFormatPathResponderRows(t *testing.T) {
 	got := FormatPath("t", fx["stale"], nil, &theme)
 	if !strings.Contains(got, "["+theme.Secondary+"]") || !strings.Contains(got, "192.0.2.9 (stale)") {
 		t.Errorf("stale row not dimmed/marked:\n%s", got)
+	}
+	got = FormatPath("t", fx["sparse"], nil, &theme)
+	if strings.Contains(got, "???") || !strings.Contains(got, "192.0.2.1 (stale)") {
+		t.Errorf("stale lone responder must keep its address:\n%s", got)
 	}
 	long := &trace.Result{Dst: net.ParseIP("192.0.2.10"), Hops: []trace.Hop{hopOf(1, 5, 5,
 		resp("a", "x", 4, 1, 1, 1, 1, false),
