@@ -114,12 +114,12 @@ func DefaultConfig() *Config {
 				},
 			},
 			string(prober.HTTPS): {
-				Probe: prober.HTTP,
+				Probe: prober.HTTPS,
 				HTTP: &prober.HTTPConfig{
 					ExpectCodes: "200-299",
 					ExpectBody:  "",
 					TLS: &prober.TLSConfig{
-						SkipVerify: true, // Default to skipping SSL verification
+						SkipVerify: prober.BoolPtr(true), // Default to skipping SSL verification
 					},
 				},
 			},
@@ -153,11 +153,36 @@ func DefaultConfig() *Config {
 	}
 }
 
+// Load parses a YAML configuration on top of DefaultConfig().
+//
+// Prober entries whose name matches a built-in default (icmpv4, http, https,
+// dns, ...) are merged field-by-field over that default, so a partial entry
+// such as `https: {http: {expect_codes: "200"}}` keeps the default tls and
+// other settings. If an entry changes the probe family (e.g. `http: {probe: tcp}`)
+// it replaces the default instead. New prober names are decoded as-is.
 func Load(s string) (*Config, error) {
 	cfg := DefaultConfig()
+	defaults := cfg.Prober
+
+	// Decode everything except the prober map normally. yaml.v3 would decode
+	// each prober entry into a fresh struct (dropping defaults), so the map is
+	// decoded separately below.
+	cfg.Prober = nil
 	if err := yaml.Unmarshal([]byte(s), cfg); err != nil {
 		return nil, err
 	}
+
+	var raw struct {
+		Prober map[string]yaml.Node `yaml:"prober"`
+	}
+	if err := yaml.Unmarshal([]byte(s), &raw); err != nil {
+		return nil, err
+	}
+	probers, err := mergeProbers(defaults, raw.Prober)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Prober = probers
 
 	// Validate configuration after loading
 	if err := cfg.Validate(); err != nil {
@@ -165,6 +190,53 @@ func Load(s string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// mergeProbers decodes user prober entries over the given defaults.
+// For keys present in defaults, the YAML node is decoded into the existing
+// pointer: yaml.v3 reuses non-nil pointers and only overwrites fields that
+// appear in the document, so nested structs (e.g. http.tls) are merged too.
+func mergeProbers(defaults map[string]*prober.ProberConfig, user map[string]yaml.Node) (map[string]*prober.ProberConfig, error) {
+	for name, node := range user {
+		if base, ok := defaults[name]; ok && base != nil && sameProbeFamily(base.Probe, probeOf(&node, base.Probe)) {
+			if err := node.Decode(base); err != nil {
+				return nil, fmt.Errorf("prober '%s': %w", name, err)
+			}
+			continue
+		}
+		pc := &prober.ProberConfig{}
+		if err := node.Decode(pc); err != nil {
+			return nil, fmt.Errorf("prober '%s': %w", name, err)
+		}
+		defaults[name] = pc
+	}
+	return defaults, nil
+}
+
+// probeOf returns the "probe" value of a prober YAML node, or fallback if unset.
+func probeOf(node *yaml.Node, fallback prober.ProbeType) prober.ProbeType {
+	var v struct {
+		Probe prober.ProbeType `yaml:"probe"`
+	}
+	if err := node.Decode(&v); err != nil || v.Probe == "" {
+		return fallback
+	}
+	return v.Probe
+}
+
+// sameProbeFamily reports whether two probe types share a config section
+// (http/https share the http section, icmpv4/icmpv6 share the icmp section).
+func sameProbeFamily(a, b prober.ProbeType) bool {
+	family := func(t prober.ProbeType) prober.ProbeType {
+		switch t {
+		case prober.HTTPS:
+			return prober.HTTP
+		case prober.ICMPV6:
+			return prober.ICMPV4
+		}
+		return t
+	}
+	return family(a) == family(b)
 }
 
 func LoadFile(path string) (*Config, error) {

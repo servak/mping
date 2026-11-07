@@ -185,7 +185,7 @@ func TestProbeManagerIntegration(t *testing.T) {
 			Probe: HTTP,
 			HTTP: &HTTPConfig{
 				ExpectCodes: "200",
-				TLS:         &TLSConfig{SkipVerify: true},
+				TLS:         &TLSConfig{SkipVerify: BoolPtr(true)},
 			},
 		},
 	}
@@ -250,7 +250,7 @@ func TestHTTPProberTLSConfig(t *testing.T) {
 			name: "HTTPS with TLS config",
 			config: &HTTPConfig{
 				ExpectCodes: "200",
-				TLS:         &TLSConfig{SkipVerify: true},
+				TLS:         &TLSConfig{SkipVerify: BoolPtr(true)},
 			},
 			target:      "my-https://secure.example.com",
 			expectedURL: "https://secure.example.com",
@@ -261,7 +261,7 @@ func TestHTTPProberTLSConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Extract prefix from target for proper testing
 			prefix := strings.SplitN(tt.target, "://", 2)[0]
-			prober := NewHTTPProber(tt.config, prefix)
+			prober := NewHTTPProber(HTTP, tt.config, prefix)
 			actualURL := prober.convertToActualURL(tt.target)
 
 			if actualURL != tt.expectedURL {

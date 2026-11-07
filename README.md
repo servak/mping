@@ -380,14 +380,14 @@ prober:
   
   # HTTPS configuration
   https:
-    probe: http
+    probe: https
     http:
       expect_codes: "200-299"
       expect_body: ""
       headers: {}
       redirect_off: false
       tls:
-        skip_verify: true         # Skip TLS certificate verification
+        skip_verify: true         # Skip TLS certificate verification (default: true when omitted)
   
   # TCP configuration
   tcp:
@@ -418,6 +418,47 @@ prober:
 ui:
   cui:
     border: true                  # Show border around TUI
+```
+
+### Merging with Defaults
+
+Entries under `prober:` whose name matches a built-in prober (`icmpv4`, `icmpv6`, `http`, `https`, `tcp`, `dns`, `ntp`) are **merged** over the built-in defaults field by field. You only need to write the settings you want to change:
+
+```yaml
+prober:
+  https:
+    http:
+      expect_codes: "200"   # tls.skip_verify etc. keep their defaults
+  dns:
+    dns:
+      server: "1.1.1.1"     # port 53, record_type A, ... are kept
+```
+
+If an entry changes the probe family (e.g. `http: {probe: tcp, tcp: {}}`), it replaces the default instead. Prober entries with new names (custom probers) are used exactly as written.
+
+### HTTP/HTTPS Scheme and TLS Rules
+
+The URL scheme used for HTTP probers is decided as follows:
+
+1. The built-in `https://` prefix always uses HTTPS and `http://` always uses plain HTTP, regardless of `probe:` or `tls:` settings.
+2. A custom prefix may carry an explicit scheme: `api-check://https://api.example.com/health` uses HTTPS, `api-check://http://...` uses HTTP.
+3. Otherwise (`api-check://api.example.com`), the prober config decides: `probe: https` uses HTTPS; a `tls:` block also implies HTTPS (for backward compatibility); otherwise plain HTTP.
+
+TLS certificate verification is skipped by default. `tls: {}` or omitting `skip_verify` keeps that default; set `skip_verify: false` to verify certificates.
+
+Custom headers are sent with every request. A `Host` header (case-insensitive) overrides the HTTP Host, which is useful for probing a virtual host by IP:
+
+```yaml
+prober:
+  vhost:
+    probe: http
+    http:
+      headers:
+        Host: "www.example.com"
+```
+
+```bash
+mping vhost://192.0.2.10/ vhost://https://192.0.2.10/
 ```
 
 ### HTTP Status Code Patterns
@@ -496,7 +537,12 @@ prober:
 Use custom probers with the prefix format:
 ```bash
 mping api-check://api.example.com internal-ping://192.168.1.1 ntp-strict://pool.ntp.org
+
+# HTTP custom probers can specify the scheme explicitly
+mping api-check://https://api.example.com/health
 ```
+
+For HTTP custom probers without an explicit scheme, `probe: https` (or a `tls:` block) selects HTTPS; see [HTTP/HTTPS Scheme and TLS Rules](#httphttps-scheme-and-tls-rules).
 
 ### Configuration Validation
 

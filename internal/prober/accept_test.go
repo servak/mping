@@ -105,7 +105,7 @@ func TestHTTPProberAccept(t *testing.T) {
 			prefix: "my-https",
 			config: &HTTPConfig{
 				ExpectCodes: "200",
-				TLS:         &TLSConfig{SkipVerify: true},
+				TLS:         &TLSConfig{SkipVerify: BoolPtr(true)},
 			},
 			target: "my-https://secure.example.com",
 		},
@@ -135,7 +135,7 @@ func TestHTTPProberAccept(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prober := NewHTTPProber(tt.config, tt.prefix)
+			prober := NewHTTPProber(HTTP, tt.config, tt.prefix)
 			err := prober.Accept(tt.target)
 
 			if tt.shouldErr {
