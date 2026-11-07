@@ -286,7 +286,7 @@ func TestNTPProberRegistration(t *testing.T) {
 	// Test registration events
 	events := make(chan *Event, 10)
 	for serverAddr, name := range prober.targets {
-		register(events, serverAddr, name)
+		register(events, serverAddr, name, NTP)
 	}
 	close(events)
 

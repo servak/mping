@@ -432,7 +432,7 @@ func (p *ICMPProber) Start(r chan *Event, interval, timeout time.Duration) error
 	defer p.loop.finish()
 
 	for _, ipStr := range slices.Sorted(maps.Keys(p.targets)) {
-		register(r, ipStr, p.targets[ipStr])
+		register(r, ipStr, p.targets[ipStr], p.version)
 	}
 	p.timeout = timeout
 

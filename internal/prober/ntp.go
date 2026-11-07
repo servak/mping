@@ -128,7 +128,7 @@ func (p *NTPProber) parseTarget(target string) (string, int, error) {
 }
 
 func (p *NTPProber) Start(result chan *Event, interval, timeout time.Duration) error {
-	return runPeriodic(p.loop, result, interval, slices.Sorted(maps.Keys(p.targets)),
+	return runPeriodic(p.loop, result, NTP, interval, slices.Sorted(maps.Keys(p.targets)),
 		func(serverAddr string) (string, string) { return serverAddr, p.targets[serverAddr] },
 		func(serverAddr string) { p.sendProbe(result, serverAddr, timeout) })
 }

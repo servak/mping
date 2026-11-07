@@ -171,6 +171,10 @@ func checkEventOrder(t *testing.T, events []*Event) {
 		switch e.Result {
 		case REGISTER:
 			registered[e.Key] = true
+			// The TUI path view picks the trace protocol from it
+			if e.ProbeType == "" {
+				t.Errorf("REGISTER for %s without a probe type", e.Key)
+			}
 		case SENT:
 			if !registered[e.Key] {
 				t.Errorf("SENT for %s before REGISTER", e.Key)

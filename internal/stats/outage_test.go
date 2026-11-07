@@ -173,7 +173,7 @@ func TestMetricsManagerFlushesOutagesOnClose(t *testing.T) {
 
 func TestSortByReturnsSnapshots(t *testing.T) {
 	mm := NewMetricsManagerWithOptions(Options{}).(*metricsManager)
-	mm.autoRegister("h", "h")
+	mm.autoRegister("h", "h", "")
 	mm.Failed("h", at(0), "timeout")
 
 	snap := mm.SortBy(Host, true)[0]
@@ -210,7 +210,7 @@ func TestRTTPercentiles(t *testing.T) {
 func TestSortByDescendingIsStableForTies(t *testing.T) {
 	mm := NewMetricsManagerWithOptions(Options{}).(*metricsManager)
 	for _, h := range []string{"c", "a", "d", "b"} {
-		mm.autoRegister(h, h)
+		mm.autoRegister(h, h, "")
 	}
 	mm.Failed("d", at(0), "timeout")
 	mm.SuccessWithDetails("a", 5*time.Millisecond, at(0), nil)

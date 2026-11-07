@@ -215,7 +215,7 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 
 func (p *HTTPProber) Start(r chan *Event, interval, timeout time.Duration) error {
 	p.client.Timeout = timeout
-	return runPeriodic(p.loop, r, interval, p.targets,
+	return runPeriodic(p.loop, r, p.probeType, interval, p.targets,
 		func(target string) (string, string) { return target, target },
 		func(target string) { p.probe(r, target) })
 }

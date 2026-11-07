@@ -73,15 +73,15 @@ func (l *runLoop) stop() bool {
 }
 
 // register announces a target before it is probed.
-func register(r chan<- *Event, key, displayName string) {
-	r <- registerEvent(key, displayName)
+func register(r chan<- *Event, key, displayName string, probeType ProbeType) {
+	r <- registerEvent(key, displayName, probeType)
 }
 
 // runPeriodic is the Start of the probers that probe each target on its own:
 // it registers the targets, probes all of them right away and then on every
 // tick (one goroutine per target per round) until Stop, and returns once the
 // in-flight probes have finished.
-func runPeriodic[T any](l *runLoop, r chan<- *Event, interval time.Duration, targets []T, id func(T) (key, displayName string), probe func(T)) error {
+func runPeriodic[T any](l *runLoop, r chan<- *Event, probeType ProbeType, interval time.Duration, targets []T, id func(T) (key, displayName string), probe func(T)) error {
 	ok, err := l.begin()
 	if !ok {
 		return err
@@ -90,7 +90,7 @@ func runPeriodic[T any](l *runLoop, r chan<- *Event, interval time.Duration, tar
 
 	for _, t := range targets {
 		key, name := id(t)
-		register(r, key, name)
+		register(r, key, name, probeType)
 	}
 
 	// Only this goroutine adds to and waits on wg.

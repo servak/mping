@@ -160,7 +160,7 @@ func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
 }
 
 func (p *DNSProber) Start(result chan *Event, interval, timeout time.Duration) error {
-	return runPeriodic(p.loop, result, interval, p.targets,
+	return runPeriodic(p.loop, result, DNS, interval, p.targets,
 		func(t *DNSTarget) (string, string) { return t.OriginalTarget, t.OriginalTarget },
 		func(t *DNSTarget) { p.sendProbe(result, t, timeout) })
 }

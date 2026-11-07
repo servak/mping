@@ -34,6 +34,13 @@ func FromEvents(t testing.TB, events ...*prober.Event) stats.MetricsManager {
 	return mm
 }
 
+// RegisterProbe registers name as a target of a prober of the given kind
+// (icmpv4, http, ...), as a prober's REGISTER event does.
+func RegisterProbe(t testing.TB, mm stats.MetricsManager, name string, probeType prober.ProbeType) {
+	t.Helper()
+	Feed(t, mm, &prober.Event{Key: name, DisplayName: name, Result: prober.REGISTER, ProbeType: probeType})
+}
+
 // Register registers each name as a target whose key equals its display name.
 func Register(t testing.TB, mm stats.MetricsManager, names ...string) {
 	t.Helper()

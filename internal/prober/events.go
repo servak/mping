@@ -23,8 +23,8 @@ func cutPrefix(target, prefix string) (string, bool) {
 	return target, false
 }
 
-func registerEvent(key, displayName string) *Event {
-	return &Event{Key: key, DisplayName: displayName, Result: REGISTER}
+func registerEvent(key, displayName string, probeType ProbeType) *Event {
+	return &Event{Key: key, DisplayName: displayName, Result: REGISTER, ProbeType: probeType}
 }
 
 func sentEvent(key, displayName string, sentTime time.Time) *Event {

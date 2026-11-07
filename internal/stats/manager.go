@@ -152,7 +152,7 @@ func (mm *metricsManager) Subscribe(res <-chan *prober.Event) <-chan struct{} {
 		for r := range res {
 			switch r.Result {
 			case prober.REGISTER:
-				mm.autoRegister(r.Key, r.DisplayName)
+				mm.autoRegister(r.Key, r.DisplayName, string(r.ProbeType))
 			case prober.SENT:
 				mm.Sent(r.Key)
 			case prober.SUCCESS:
@@ -168,12 +168,17 @@ func (mm *metricsManager) Subscribe(res <-chan *prober.Event) <-chan struct{} {
 }
 
 // autoRegister automatically registers target if not already registered
-func (mm *metricsManager) autoRegister(key, displayName string) {
+func (mm *metricsManager) autoRegister(key, displayName, probeType string) {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 
-	if _, exists := mm.metrics[key]; !exists {
-		mm.metrics[key] = mm.newMetrics(displayName)
+	m, exists := mm.metrics[key]
+	if !exists {
+		m = mm.newMetrics(displayName)
+		mm.metrics[key] = m
+	}
+	if probeType != "" {
+		m.ProbeType = probeType
 	}
 }
 
