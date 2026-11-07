@@ -144,6 +144,7 @@ mping turns consecutive failures into **outages** and records when each one star
 Press `p` in the TUI to show a live, MTR-style trace of the path to the selected host. The trace follows the selection. Any target works — for `tcp://`, `https://`, `dns://`, … the host part is traced.
 
 Notes:
+- When several routers answer for the same hop (ECMP / load balancing), each one is listed under the hop with its share of the replies and its own Last/Avg/Best/Wrst; the first row is the most frequent responder. Responders that stop answering are dimmed and marked `(stale)`, and are hidden after a longer silence once another router has answered more recently (the most recent responder of a hop is never hidden, so a rate-limited hop keeps its address). At most 4 extra responders are shown per hop, followed by `+N more`.
 - Loss at an intermediate hop that does not continue to the destination is usually ICMP rate limiting on that router, not real loss; the path view points this out.
 - Raw sockets are used when available (root / `cap_net_raw`). Otherwise mping falls back to unprivileged ICMP sockets: on macOS this works fully, on Linux only the destination may be visible.
 - In the TUI, path probing runs at most once per second so that router rate limiting does not show up as fake loss.

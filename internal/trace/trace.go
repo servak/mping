@@ -31,6 +31,16 @@ const (
 	// ICMP for every host behind them. mtr stops after 5 unknown hops; this
 	// allows more because many routers only answer occasionally.
 	maxUnknownHops = 8
+
+	// maxRespondersPerHop caps the per-responder statistics kept for one
+	// TTL. Further responders are still counted in the hop totals.
+	maxRespondersPerHop = 16
+
+	// staleAfterRounds is how many rounds a responder may stay silent before
+	// it is flagged Stale; hideAfterRounds is when it is dropped from the
+	// snapshot (it stays in the hop totals).
+	staleAfterRounds = 10
+	hideAfterRounds  = 30
 )
 
 // idCounter makes echo IDs unique per tracer within the process, and distinct
@@ -57,15 +67,31 @@ func (c Config) withDefaults() Config {
 // Hop is a snapshot of statistics for one TTL
 type Hop struct {
 	TTL    int
-	Addr   string // most recent responder ("" if none yet)
+	Addr   string // dominant responder: most replies, ties to the earliest seen ("" if none)
 	Name   string // reverse DNS name of Addr, if resolved
-	Others int    // number of other responders seen (ECMP / path changes)
+	Others int    // number of other visible responders (len(Responders)-1)
 	Sent   int    // probes that have been answered or timed out
 	Recv   int
 	Last   time.Duration
 	Avg    time.Duration
 	Best   time.Duration
 	Worst  time.Duration
+
+	// Responders lists every visible responder in first-seen order
+	Responders []Responder
+}
+
+// Responder is the per-address statistics of one hop (ECMP / load balancing
+// shows several responders on the same TTL)
+type Responder struct {
+	Addr  string
+	Name  string // reverse DNS name, if resolved
+	Recv  int
+	Last  time.Duration
+	Avg   time.Duration
+	Best  time.Duration
+	Worst time.Duration
+	Stale bool // not seen for more than staleAfterRounds rounds
 }
 
 // Loss returns the loss percentage of settled probes
@@ -104,17 +130,28 @@ func (r Result) HasRateLimitedHops() bool {
 	return false
 }
 
+type respStats struct {
+	recv       int
+	last       time.Duration
+	best       time.Duration
+	worst      time.Duration
+	sum        float64
+	firstRound int
+	lastRound  int
+}
+
 type hopStats struct {
 	sent, recv int
 	last       time.Duration
 	best       time.Duration
 	worst      time.Duration
 	sum        float64
-	addr       string
-	addrs      map[string]struct{}
+	resp       map[string]*respStats
+	order      []string // responder addresses in first-seen order
 }
 
-func (h *hopStats) record(addr string, rtt time.Duration) {
+// record counts a reply from addr received for a probe of the given round
+func (h *hopStats) record(addr string, rtt time.Duration, round int) {
 	h.recv++
 	h.last = rtt
 	if h.best == 0 || rtt < h.best {
@@ -124,11 +161,31 @@ func (h *hopStats) record(addr string, rtt time.Duration) {
 		h.worst = rtt
 	}
 	h.sum += float64(rtt)
-	h.addr = addr
-	if h.addrs == nil {
-		h.addrs = map[string]struct{}{}
+
+	r := h.resp[addr]
+	if r == nil {
+		if len(h.order) >= maxRespondersPerHop {
+			return // counted in the hop totals only
+		}
+		if h.resp == nil {
+			h.resp = map[string]*respStats{}
+		}
+		r = &respStats{firstRound: round}
+		h.resp[addr] = r
+		h.order = append(h.order, addr)
 	}
-	h.addrs[addr] = struct{}{}
+	r.recv++
+	r.last = rtt
+	if r.best == 0 || rtt < r.best {
+		r.best = rtt
+	}
+	if rtt > r.worst {
+		r.worst = rtt
+	}
+	r.sum += float64(rtt)
+	if round > r.lastRound {
+		r.lastRound = round
+	}
 }
 
 type inflight struct {
@@ -379,7 +436,7 @@ func (t *Tracer) handle(r reply, addr string, now time.Time) {
 
 	h := &t.hops[p.ttl-1]
 	h.sent++
-	h.record(addr, now.Sub(p.sent))
+	h.record(addr, now.Sub(p.sent), p.round)
 	if t.onEvent != nil {
 		t.onEvent(probeEvent{round: p.round, ttl: p.ttl, addr: addr, rtt: now.Sub(p.sent), outcome: outcomeReply})
 	}
@@ -469,22 +526,55 @@ func (t *Tracer) Snapshot() Result {
 		Hops:       make([]Hop, 0, last),
 	}
 	for i := 0; i < last; i++ {
-		h := t.hops[i]
+		h := &t.hops[i]
 		hop := Hop{
 			TTL:   i + 1,
-			Addr:  h.addr,
-			Name:  t.names[h.addr],
 			Sent:  h.sent,
 			Recv:  h.recv,
 			Last:  h.last,
 			Best:  h.best,
 			Worst: h.worst,
 		}
-		if len(h.addrs) > 1 {
-			hop.Others = len(h.addrs) - 1
-		}
 		if h.recv > 0 {
 			hop.Avg = time.Duration(h.sum / float64(h.recv))
+		}
+		dominant := -1
+		// The most recently seen responder (earliest seen on ties) is never
+		// hidden, so a rate-limited hop that replies only now and then keeps
+		// its address. Others are hidden once silent for hideAfterRounds and
+		// a more recent responder exists (the path moved).
+		latest := ""
+		for _, addr := range h.order {
+			if latest == "" || h.resp[addr].lastRound > h.resp[latest].lastRound {
+				latest = addr
+			}
+		}
+		for _, addr := range h.order {
+			r := h.resp[addr]
+			age := t.rounds - r.lastRound
+			if age > hideAfterRounds && addr != latest {
+				continue
+			}
+			resp := Responder{
+				Addr:  addr,
+				Name:  t.names[addr],
+				Recv:  r.recv,
+				Last:  r.last,
+				Avg:   time.Duration(r.sum / float64(r.recv)),
+				Best:  r.best,
+				Worst: r.worst,
+				Stale: age > staleAfterRounds,
+			}
+			// strict > keeps the earliest seen responder on ties
+			if dominant < 0 || resp.Recv > hop.Responders[dominant].Recv {
+				dominant = len(hop.Responders)
+			}
+			hop.Responders = append(hop.Responders, resp)
+		}
+		if dominant >= 0 {
+			hop.Addr = hop.Responders[dominant].Addr
+			hop.Name = hop.Responders[dominant].Name
+			hop.Others = len(hop.Responders) - 1
 		}
 		res.Hops = append(res.Hops, hop)
 	}
