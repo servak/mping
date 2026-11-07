@@ -3,9 +3,7 @@ package command
 import (
 	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
-	"strings"
 
 	"github.com/servak/mping/internal/config"
 	"github.com/spf13/cobra"
@@ -59,12 +57,7 @@ func NewInitConfigCmd() *cobra.Command {
 				cmd.PrintErr("Error: output path is required\n")
 				return
 			}
-			if strings.HasPrefix(path, "~") {
-				usr, err := user.Current()
-				if err == nil {
-					path = strings.Replace(path, "~", usr.HomeDir, 1)
-				}
-			}
+			path, _ = config.ExpandHome(path) // on failure keep the path as given
 			path, _ = filepath.Abs(path)
 			if _, err := os.Stat(path); err == nil {
 				cmd.PrintErrf("Error: output file %s already exists\n", path)

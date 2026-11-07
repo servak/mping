@@ -2,14 +2,11 @@ package command
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/servak/mping/internal/config"
-	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/ui/shared"
 	"github.com/servak/mping/internal/ui/tui"
@@ -28,20 +25,9 @@ mping http://google.com
 mping dns://8.8.8.8/google.com`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flags := cmd.Flags()
-			interval, err := flags.GetInt("interval")
+			interval, timeout, err := parseTimingFlags(flags)
 			if err != nil {
 				return err
-			}
-			timeout, err := flags.GetInt("timeout")
-			if err != nil {
-				return err
-			}
-			if interval == 0 && timeout == 0 {
-				return errors.New("both interval and timeout can't be zero")
-			} else if interval == 0 {
-				return errors.New("interval can't be zero")
-			} else if timeout == 0 {
-				return errors.New("timeout can't be zero")
 			}
 			title, err := flags.GetString("title")
 			if err != nil {
@@ -67,55 +53,48 @@ mping dns://8.8.8.8/google.com`,
 				return nil
 			}
 
-			cfg, err := config.LoadFile(path)
-			if cfg == nil {
-				return fmt.Errorf("failed to load config %q: %w", path, err)
+			cfg, err := loadConfig(path)
+			if err != nil {
+				return err
 			}
 			cfg.SetTitle(title)
-			cfg.SetSourceInterface(sourceInterface)
-			_interval := time.Duration(interval) * time.Millisecond
-			_timeout := time.Duration(timeout) * time.Millisecond
 
 			silenced, err := flags.GetStringSlice("silence")
 			if err != nil {
 				return err
 			}
 
-			// Create ProbeManager and MetricsManager
-			probeManager := prober.NewProbeManager(cfg.Prober, cfg.Default)
-			metricsManager := stats.NewMetricsManagerWithOptions(stats.Options{
-				SettleTime: stats.SettleTimeFor(_interval, _timeout),
-				Silenced:   ExpandTargets(silenced, ""),
+			sess, err := newSession(sessionParams{
+				Cfg:             cfg,
+				Hosts:           hosts,
+				SourceInterface: sourceInterface,
+				Interval:        interval,
+				Timeout:         timeout,
+				Stats:           stats.Options{Silenced: ExpandTargets(silenced, "")},
 			})
-
-			// Add targets
-			err = probeManager.AddTargets(hosts...)
 			if err != nil {
-				return fmt.Errorf("failed to add targets: %w", err)
+				return err
 			}
 
-			// Subscribe to events for metrics collection
-			done := metricsManager.Subscribe(probeManager.Events())
-
-			// Start probing in background
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
+			probeErr := sess.start(ctx)
 
-			go func() {
-				if err := probeManager.Run(ctx, _interval, _timeout); err != nil {
-					fmt.Printf("ProbeManager error: %v\n", err)
-				}
-			}()
-
-			// Start TUI
-			startTUI(metricsManager, cfg.UI, _interval, _timeout)
+			startTUI(sess.metrics, cfg.UI, interval, timeout)
 
 			// Stop probing when TUI exits
-			probeManager.Stop()
-			<-done // wait for in-flight metric updates to settle
+			sess.stop()
+
+			// A ProbeManager failure is reported only now: printing while
+			// the TUI owns the screen would corrupt the display.
+			select {
+			case err := <-probeErr:
+				return fmt.Errorf("probe manager: %w", err)
+			default:
+			}
 
 			// Final results
-			metrics := metricsManager.SortBy(stats.Fail, false)
+			metrics := sess.metrics.SortBy(stats.Fail, false)
 			return shared.WriteReport(cmd.OutOrStderr(), shared.FormatTable, metrics, stats.Fail, false)
 		},
 	}
@@ -139,10 +118,18 @@ func startTUI(manager stats.MetricsManager, cfg *shared.Config, interval, timeou
 	if refreshTime < (interval / 2) {
 		refreshTime = interval / 2
 	}
+	stop := make(chan struct{})
+	defer close(stop)
 	go func() {
+		ticker := time.NewTicker(refreshTime)
+		defer ticker.Stop()
 		for {
 			app.Update()
-			time.Sleep(refreshTime)
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+			}
 		}
 	}()
 	app.Run()

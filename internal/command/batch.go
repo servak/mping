@@ -11,8 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/servak/mping/internal/config"
-	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/ui/shared"
 )
@@ -37,20 +35,9 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 			if counter <= 0 {
 				return errors.New("count must be greater than zero")
 			}
-			interval, err := flags.GetInt("interval")
+			interval, timeout, err := parseTimingFlags(flags)
 			if err != nil {
 				return err
-			}
-			timeout, err := flags.GetInt("timeout")
-			if err != nil {
-				return err
-			}
-			if interval == 0 && timeout == 0 {
-				return errors.New("both interval and timeout can't be zero")
-			} else if interval == 0 {
-				return errors.New("interval can't be zero")
-			} else if timeout == 0 {
-				return errors.New("timeout can't be zero")
 			}
 			path, err := flags.GetString("config")
 			if err != nil {
@@ -88,31 +75,26 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 				return nil
 			}
 
-			cfg, err := config.LoadFile(path)
-			if cfg == nil {
-				return fmt.Errorf("failed to load config %q: %w", path, err)
-			}
-			cfg.SetSourceInterface(sourceInterface)
-			_interval := time.Duration(interval) * time.Millisecond
-			_timeout := time.Duration(timeout) * time.Millisecond
-
-			// Create ProbeManager and MetricsManager
-			probeManager := prober.NewProbeManager(cfg.Prober, cfg.Default)
-			metricsManager := stats.NewMetricsManagerWithOptions(stats.Options{
-				SettleTime: stats.SettleTimeFor(_interval, _timeout),
-				// The terminal bell would corrupt machine-readable output and
-				// is pointless in non-interactive runs.
-				DisableBeep: true,
-			})
-
-			// Add targets
-			err = probeManager.AddTargets(hosts...)
+			cfg, err := loadConfig(path)
 			if err != nil {
-				return fmt.Errorf("failed to add targets: %w", err)
+				return err
 			}
 
-			// Subscribe to events for metrics collection
-			done := metricsManager.Subscribe(probeManager.Events())
+			sess, err := newSession(sessionParams{
+				Cfg:             cfg,
+				Hosts:           hosts,
+				SourceInterface: sourceInterface,
+				Interval:        interval,
+				Timeout:         timeout,
+				Stats: stats.Options{
+					// The terminal bell would corrupt machine-readable output and
+					// is pointless in non-interactive runs.
+					DisableBeep: true,
+				},
+			})
+			if err != nil {
+				return err
+			}
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -121,11 +103,7 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 			// stdout stays clean for piping into other tools.
 			progress := progressWriter()
 			fmt.Fprint(progress, "probe")
-			go func() {
-				if err := probeManager.Run(ctx, _interval, _timeout); err != nil {
-					fmt.Fprintf(os.Stderr, "ProbeManager error: %v\n", err)
-				}
-			}()
+			probeErr := sess.start(ctx)
 
 			// Probers send the first round immediately and then one round per
 			// interval, so round N goes out at (N-1)*interval. Stopping half an
@@ -136,17 +114,21 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 			start := time.Now()
 			fmt.Fprint(progress, ".")
 			for i := 1; i < counter; i++ {
-				time.Sleep(time.Until(start.Add(time.Duration(i) * _interval)))
+				time.Sleep(time.Until(start.Add(time.Duration(i) * interval)))
 				fmt.Fprint(progress, ".")
 			}
-			time.Sleep(time.Until(start.Add(time.Duration(counter-1)*_interval + _interval/2)))
+			time.Sleep(time.Until(start.Add(time.Duration(counter-1)*interval + interval/2)))
 
 			// Stop probing
-			probeManager.Stop()
-			<-done // wait for in-flight metric updates to settle
+			sess.stop()
 			fmt.Fprint(progress, "\r\033[K")
+			select {
+			case err := <-probeErr:
+				fmt.Fprintf(os.Stderr, "ProbeManager error: %v\n", err)
+			default:
+			}
 
-			metrics := metricsManager.SortBy(stats.Success, true)
+			metrics := sess.metrics.SortBy(stats.Success, true)
 			if err := shared.WriteReport(cmd.OutOrStdout(), output, metrics, stats.Success, true); err != nil {
 				return err
 			}
