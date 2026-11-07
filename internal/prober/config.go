@@ -2,9 +2,6 @@ package prober
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
-	"time"
 )
 
 type (
@@ -48,23 +45,5 @@ func (pc *ProberConfig) Validate() error {
 		return pc.NTP.Validate()
 	default:
 		return fmt.Errorf("unknown probe type: %s", pc.Probe)
-	}
-}
-
-func convertToDuration(s string) (time.Duration, error) {
-	if strings.HasSuffix(s, "ms") {
-		milliseconds, err := strconv.Atoi(strings.TrimSuffix(s, "ms"))
-		if err != nil {
-			return 0, err
-		}
-		return time.Duration(milliseconds) * time.Millisecond, nil
-	} else if strings.HasSuffix(s, "s") {
-		seconds, err := strconv.Atoi(strings.TrimSuffix(s, "s"))
-		if err != nil {
-			return 0, err
-		}
-		return time.Duration(seconds) * time.Second, nil
-	} else {
-		return 0, fmt.Errorf("invalid duration format")
 	}
 }

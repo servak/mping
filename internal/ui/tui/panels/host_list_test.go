@@ -8,6 +8,7 @@ import (
 
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
+	"github.com/servak/mping/internal/stats/statstest"
 	"github.com/servak/mping/internal/ui/shared"
 	"github.com/servak/mping/internal/ui/tui/state"
 )
@@ -40,7 +41,7 @@ func newMockState() *mockState {
 }
 
 func TestNewHostListPanel(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	state := newMockState()
 
 	config := shared.DefaultConfig()
@@ -68,7 +69,7 @@ func TestNewHostListPanel(t *testing.T) {
 }
 
 func TestHostListPanelGetView(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
 	panel := NewHostListPanel(state, mm, config)
@@ -84,14 +85,14 @@ func TestHostListPanelGetView(t *testing.T) {
 }
 
 func TestHostListPanelUpdate(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
 	panel := NewHostListPanel(state, mm, config)
 
 	// Register some test metrics
-	mm.Register("google.com", "google.com")
-	mm.Register("example.com", "example.com")
+	statstest.Register(t, mm, "google.com")
+	statstest.Register(t, mm, "example.com")
 
 	// Note: We just register the metrics for testing
 	// The actual metrics data would be populated by the probe manager
@@ -112,15 +113,15 @@ func TestHostListPanelUpdate(t *testing.T) {
 }
 
 func TestHostListPanelUpdateWithFilter(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
 	panel := NewHostListPanel(state, mm, config)
 
 	// Register test metrics
-	mm.Register("google.com", "google.com")
-	mm.Register("yahoo.com", "yahoo.com")
-	mm.Register("example.org", "example.org")
+	statstest.Register(t, mm, "google.com")
+	statstest.Register(t, mm, "yahoo.com")
+	statstest.Register(t, mm, "example.org")
 
 	// Set filter
 	state.SetFilter("google")
@@ -133,17 +134,6 @@ func TestHostListPanelUpdateWithFilter(t *testing.T) {
 	}()
 
 	panel.Update()
-}
-
-// feedEvents sends events through the public API and waits until processed
-func feedEvents(t *testing.T, mm stats.MetricsManager, events ...*prober.Event) {
-	t.Helper()
-	ch := make(chan *prober.Event, len(events))
-	for _, e := range events {
-		ch <- e
-	}
-	close(ch)
-	<-mm.Subscribe(ch)
 }
 
 func selectedName(t *testing.T, p *HostListPanel) string {
@@ -159,8 +149,7 @@ func selectedName(t *testing.T, p *HostListPanel) string {
 // row 1, so a sort change (e.g. another host failing once) silently moved
 // the selection - and restarted the path trace - to a different host.
 func TestHostListPanelSelectionFollowsHostAcrossSortChanges(t *testing.T) {
-	mm := stats.NewMetricsManager()
-	mm.ToggleBeep()
+	mm := statstest.NewQuietManager()
 	st := state.NewUIState() // default sort: Fail, descending
 	panel := NewHostListPanel(st, mm, shared.DefaultConfig())
 
@@ -171,7 +160,7 @@ func TestHostListPanelSelectionFollowsHostAcrossSortChanges(t *testing.T) {
 			&prober.Event{Key: h, DisplayName: h, Result: prober.REGISTER},
 			&prober.Event{Key: h, Result: prober.SUCCESS, SentTime: now, Rtt: time.Millisecond})
 	}
-	feedEvents(t, mm, events...)
+	statstest.Feed(t, mm, events...)
 
 	panel.Update()
 	if got := selectedName(t, panel); got != "1.1.1.1" {
@@ -182,7 +171,7 @@ func TestHostListPanelSelectionFollowsHostAcrossSortChanges(t *testing.T) {
 	}
 
 	// 8.8.8.8 times out once and jumps to the top of the Fail-sorted list
-	feedEvents(t, mm, &prober.Event{Key: "8.8.8.8", Result: prober.TIMEOUT, SentTime: now, Message: "timeout"})
+	statstest.Feed(t, mm, &prober.Event{Key: "8.8.8.8", Result: prober.TIMEOUT, SentTime: now, Message: "timeout"})
 	panel.Update()
 	if got := selectedName(t, panel); got != "1.1.1.1" {
 		t.Errorf("selection moved to %s after a sort change, want it to stay on 1.1.1.1", got)
@@ -195,11 +184,11 @@ func TestHostListPanelSelectionFollowsHostAcrossSortChanges(t *testing.T) {
 // Mouse clicks select rows through Table.Select; the selection must stick
 // on the next Update instead of snapping back.
 func TestHostListPanelClickSelectionSticks(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	st := state.NewUIState()
 	panel := NewHostListPanel(st, mm, shared.DefaultConfig())
-	mm.Register("a.example", "a.example")
-	mm.Register("b.example", "b.example")
+	statstest.Register(t, mm, "a.example")
+	statstest.Register(t, mm, "b.example")
 
 	var notified string
 	panel.SetSelectionChangeCallback(func(m stats.Metrics) { notified = m.GetName() })
@@ -217,7 +206,7 @@ func TestHostListPanelClickSelectionSticks(t *testing.T) {
 }
 
 func TestHostListPanelScrollDown(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
 	panel := NewHostListPanel(state, mm, config)
@@ -225,7 +214,7 @@ func TestHostListPanelScrollDown(t *testing.T) {
 	// Register multiple metrics to enable scrolling
 	for i := 0; i < 10; i++ {
 		target := fmt.Sprintf("host%d.com", i)
-		mm.Register(target, target)
+		statstest.Register(t, mm, target)
 	}
 
 	panel.Update()
@@ -241,7 +230,7 @@ func TestHostListPanelScrollDown(t *testing.T) {
 }
 
 func TestHostListPanelScrollUp(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
 	panel := NewHostListPanel(state, mm, config)
@@ -249,7 +238,7 @@ func TestHostListPanelScrollUp(t *testing.T) {
 	// Register multiple metrics
 	for i := 0; i < 10; i++ {
 		target := fmt.Sprintf("host%d.com", i)
-		mm.Register(target, target)
+		statstest.Register(t, mm, target)
 	}
 
 	panel.Update()
@@ -265,13 +254,13 @@ func TestHostListPanelScrollUp(t *testing.T) {
 }
 
 func TestHostListPanelScrollToTop(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
 	panel := NewHostListPanel(state, mm, config)
 
 	// Register metrics
-	mm.Register("test.com", "test.com")
+	statstest.Register(t, mm, "test.com")
 	panel.Update()
 
 	// Test that ScrollToTop doesn't panic
@@ -285,13 +274,13 @@ func TestHostListPanelScrollToTop(t *testing.T) {
 }
 
 func TestHostListPanelScrollToBottom(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
 	panel := NewHostListPanel(state, mm, config)
 
 	// Register metrics
-	mm.Register("test.com", "test.com")
+	statstest.Register(t, mm, "test.com")
 	panel.Update()
 
 	// Test that ScrollToBottom doesn't panic
@@ -305,13 +294,13 @@ func TestHostListPanelScrollToBottom(t *testing.T) {
 }
 
 func TestHostListPanelPageDown(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
 	panel := NewHostListPanel(state, mm, config)
 
 	// Register metrics
-	mm.Register("test.com", "test.com")
+	statstest.Register(t, mm, "test.com")
 	panel.Update()
 
 	// Test that PageDown doesn't panic
@@ -325,13 +314,13 @@ func TestHostListPanelPageDown(t *testing.T) {
 }
 
 func TestHostListPanelPageUp(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
 	panel := NewHostListPanel(state, mm, config)
 
 	// Register metrics
-	mm.Register("test.com", "test.com")
+	statstest.Register(t, mm, "test.com")
 	panel.Update()
 
 	// Test that PageUp doesn't panic
@@ -345,14 +334,14 @@ func TestHostListPanelPageUp(t *testing.T) {
 }
 
 func TestHostListPanelRestoreSelection(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
 	panel := NewHostListPanel(state, mm, config)
 
 	// Register test metrics
-	mm.Register("google.com", "google.com")
-	mm.Register("example.com", "example.com")
+	statstest.Register(t, mm, "google.com")
+	statstest.Register(t, mm, "example.com")
 
 	metrics := []stats.Metrics{
 		stats.NewMetrics("google.com", 1),
@@ -372,8 +361,7 @@ func TestHostListPanelRestoreSelection(t *testing.T) {
 }
 
 func TestHostListPanelCurrentSelectedMetricIsFresh(t *testing.T) {
-	mm := stats.NewMetricsManager()
-	mm.ToggleBeep()
+	mm := statstest.NewQuietManager()
 	events := make(chan *prober.Event, 10)
 	done := mm.Subscribe(events)
 	events <- &prober.Event{Key: "h", DisplayName: "host", Result: prober.REGISTER}
@@ -399,12 +387,11 @@ func TestHostListPanelCurrentSelectedMetricIsFresh(t *testing.T) {
 }
 
 func TestHostListPanelLastFailTimeShowsOutage(t *testing.T) {
-	mm := stats.NewMetricsManager()
-	mm.ToggleBeep()
+	mm := statstest.NewQuietManager()
 	panel := NewHostListPanel(state.NewUIState(), mm, shared.DefaultConfig())
 
 	now := time.Now()
-	feedEvents(t, mm,
+	statstest.Feed(t, mm,
 		&prober.Event{Key: "down", DisplayName: "down.example", Result: prober.REGISTER},
 		&prober.Event{Key: "up", DisplayName: "up.example", Result: prober.REGISTER},
 		&prober.Event{Key: "down", Result: prober.SUCCESS, SentTime: now.Add(-3 * time.Second)},
@@ -442,8 +429,7 @@ func TestHostListPanelLastFailTimeShowsOutage(t *testing.T) {
 // A filter that hides the selected host shows the first row meanwhile, but
 // the selection must return to the host once the filter is cleared.
 func TestHostListPanelSelectionSurvivesFilter(t *testing.T) {
-	mm := stats.NewMetricsManager()
-	mm.ToggleBeep()
+	mm := statstest.NewQuietManager()
 	st := state.NewUIState()
 	panel := NewHostListPanel(st, mm, shared.DefaultConfig())
 
@@ -454,7 +440,7 @@ func TestHostListPanelSelectionSurvivesFilter(t *testing.T) {
 			&prober.Event{Key: h, DisplayName: h, Result: prober.REGISTER},
 			&prober.Event{Key: h, Result: prober.SUCCESS, SentTime: now, Rtt: time.Millisecond})
 	}
-	feedEvents(t, mm, events...)
+	statstest.Feed(t, mm, events...)
 
 	st.SetSelectedHost("192.168.1.1")
 	panel.Update()
@@ -473,10 +459,9 @@ func TestHostListPanelSelectionSurvivesFilter(t *testing.T) {
 }
 
 func TestHostListPanelMarksSilencedHost(t *testing.T) {
-	mm := stats.NewMetricsManager()
-	mm.ToggleBeep()
-	mm.Register("quiet", "quiet")
-	mm.Register("loud", "loud")
+	mm := statstest.NewQuietManager()
+	statstest.Register(t, mm, "quiet")
+	statstest.Register(t, mm, "loud")
 	mm.ToggleSilence("quiet")
 
 	panel := NewHostListPanel(newMockState(), mm, shared.DefaultConfig())

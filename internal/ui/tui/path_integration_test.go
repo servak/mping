@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/servak/mping/internal/prober"
-	"github.com/servak/mping/internal/stats"
+	"github.com/servak/mping/internal/stats/statstest"
 	"github.com/servak/mping/internal/ui/shared"
 	"github.com/servak/mping/internal/ui/tui/state"
 )
@@ -26,8 +26,7 @@ func TestIntegrationPathViewFollowsSelection(t *testing.T) {
 		duration = v
 	}
 
-	mm := stats.NewMetricsManager()
-	mm.ToggleBeep()
+	mm := statstest.NewQuietManager()
 	events := make(chan *prober.Event, 1000)
 	done := mm.Subscribe(events)
 	defer func() { close(events); <-done }()

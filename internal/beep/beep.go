@@ -28,14 +28,6 @@ func NewBeeper() *Beeper {
 	}
 }
 
-// NewBeeperWithDebounce creates a new Beeper with custom debounce interval
-func NewBeeperWithDebounce(debounceInterval time.Duration) *Beeper {
-	return &Beeper{
-		enabled:      true,
-		debounceTime: debounceInterval,
-	}
-}
-
 // Beep plays a beep sound if enabled and debounce time has passed
 // This function is non-blocking and thread-safe
 func (b *Beeper) Beep() {
@@ -71,20 +63,6 @@ func (b *Beeper) playBeep() error {
 	return err
 }
 
-// Enable turns on beep sound
-func (b *Beeper) Enable() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.enabled = true
-}
-
-// Disable turns off beep sound
-func (b *Beeper) Disable() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.enabled = false
-}
-
 // Toggle switches beep sound on/off
 func (b *Beeper) Toggle() {
 	b.mu.Lock()
@@ -97,13 +75,6 @@ func (b *Beeper) IsEnabled() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.enabled
-}
-
-// SetDebounceInterval sets the debounce interval
-func (b *Beeper) SetDebounceInterval(interval time.Duration) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.debounceTime = interval
 }
 
 // GetLastBeepTime returns the last beep time (for testing)

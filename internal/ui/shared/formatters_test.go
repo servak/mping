@@ -7,6 +7,7 @@ import (
 
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
+	"github.com/servak/mping/internal/stats/statstest"
 )
 
 func TestDurationFormater(t *testing.T) {
@@ -143,7 +144,7 @@ func TestFormatHostDetail(t *testing.T) {
 	}
 
 	for _, expected := range expectedContents {
-		if !contains(result, expected) {
+		if !strings.Contains(result, expected) {
 			t.Errorf("FormatHostDetail result missing expected content: %s\nActual result:\n%s", expected, result)
 		}
 	}
@@ -195,24 +196,10 @@ func TestFormatHostDetailWithZeroValues(t *testing.T) {
 	}
 
 	for _, expected := range expectedContents {
-		if !contains(result, expected) {
+		if !strings.Contains(result, expected) {
 			t.Errorf("FormatHostDetail result missing expected content: %s\nActual result:\n%s", expected, result)
 		}
 	}
-}
-
-// Helper function to check if a string contains a substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || findSubstring(s, substr))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestFormatSparkline(t *testing.T) {
@@ -293,10 +280,7 @@ func TestFormatLastFailCell(t *testing.T) {
 
 	// build feeds one probe per second: 'S' success, 'F' failure
 	build := func(pattern string) stats.Metrics {
-		mm := stats.NewMetricsManager()
-		mm.ToggleBeep()
-		ch := make(chan *prober.Event, len(pattern)+1)
-		ch <- &prober.Event{Key: "h", DisplayName: "h", Result: prober.REGISTER}
+		events := []*prober.Event{{Key: "h", DisplayName: "h", Result: prober.REGISTER}}
 		for i, c := range pattern {
 			ev := &prober.Event{Key: "h", SentTime: base.Add(time.Duration(i) * time.Second)}
 			if c == 'S' {
@@ -304,10 +288,9 @@ func TestFormatLastFailCell(t *testing.T) {
 			} else {
 				ev.Result, ev.Message = prober.TIMEOUT, "timeout"
 			}
-			ch <- ev
+			events = append(events, ev)
 		}
-		close(ch)
-		<-mm.Subscribe(ch)
+		mm := statstest.FromEvents(t, events...)
 		return mm.SortBy(stats.Host, true)[0]
 	}
 

@@ -85,12 +85,38 @@ func (l *LayoutManager) setupPanels(uiState *state.UIState, mm stats.MetricsProv
 
 // setupLayout configures the main layout structure
 func (l *LayoutManager) setupLayout() {
-	// Start with single pane layout (host list only)
-	l.root = tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(l.header.GetView(), 1, 0, false).
-		AddItem(l.hostList.GetView(), 0, 1, true).
-		AddItem(l.footer.GetView(), 1, 0, false)
+	l.root = tview.NewFlex().SetDirection(tview.FlexRow)
+	l.rebuild()
+}
+
+// rebuild reconstructs the root layout from the current display mode and
+// filter visibility. It is the only place that assembles the root flex.
+func (l *LayoutManager) rebuild() {
+	content := l.hostList.GetView()
+	switch l.mode {
+	case ListWithDetail:
+		content = tview.NewFlex().
+			SetDirection(tview.FlexColumn).
+			AddItem(l.hostList.GetView(), 0, 2, true).   // Host list takes 2/3
+			AddItem(l.hostDetail.GetView(), 0, 1, false) // Detail takes 1/3
+	case ListWithPath:
+		// The hop table needs more width than host details
+		content = tview.NewFlex().
+			SetDirection(tview.FlexColumn).
+			AddItem(l.hostList.GetView(), 0, 1, true).
+			AddItem(l.path.GetView(), 0, 1, false)
+	}
+
+	l.root.Clear()
+	l.root.AddItem(l.header.GetView(), 1, 0, false)
+	if l.showFilter {
+		// The filter input takes focus while it is shown
+		l.root.AddItem(content, 0, 1, false).
+			AddItem(l.filterInput, 1, 0, true)
+	} else {
+		l.root.AddItem(content, 0, 1, true)
+	}
+	l.root.AddItem(l.footer.GetView(), 1, 0, false)
 }
 
 // setupPages configures pages for modal support
@@ -107,16 +133,6 @@ func (l *LayoutManager) GetRoot() tview.Primitive {
 // GetHostListPanel returns the host list panel
 func (l *LayoutManager) GetHostListPanel() *panels.HostListPanel {
 	return l.hostList
-}
-
-// GetHostDetailPanel returns the host detail panel
-func (l *LayoutManager) GetHostDetailPanel() *panels.HostDetailPanel {
-	return l.hostDetail
-}
-
-// SetSelectedHost updates the detail panel with the selected host
-func (l *LayoutManager) SetSelectedHost(hostname string) {
-	l.hostDetail.SetHost(hostname)
 }
 
 // SetSelectedMetrics updates the detail panel with the selected metrics
@@ -154,29 +170,13 @@ func (l *LayoutManager) setMode(mode DisplayMode) {
 		l.pathTracer.Stop()
 	}
 
-	content := l.hostList.GetView()
-	switch mode {
-	case ListWithDetail:
+	if mode == ListWithDetail {
 		// Get currently selected metrics and set them in the detail panel
 		if m, ok := l.hostList.CurrentSelectedMetric(); ok {
 			l.hostDetail.SetMetrics(m)
 		}
-		content = tview.NewFlex().
-			SetDirection(tview.FlexColumn).
-			AddItem(l.hostList.GetView(), 0, 2, true).   // Host list takes 2/3
-			AddItem(l.hostDetail.GetView(), 0, 1, false) // Detail takes 1/3
-	case ListWithPath:
-		// The hop table needs more width than host details
-		content = tview.NewFlex().
-			SetDirection(tview.FlexColumn).
-			AddItem(l.hostList.GetView(), 0, 1, true).
-			AddItem(l.path.GetView(), 0, 1, false)
 	}
-
-	l.root.Clear()
-	l.root.AddItem(l.header.GetView(), 1, 0, false).
-		AddItem(content, 0, 1, true).
-		AddItem(l.footer.GetView(), 1, 0, false)
+	l.rebuild()
 }
 
 // UpdateAll refreshes all panels
@@ -235,13 +235,7 @@ func (l *LayoutManager) showFilterInput() {
 	}
 
 	l.showFilter = true
-
-	// Rebuild layout with filter input
-	l.root.Clear()
-	l.root.AddItem(l.header.GetView(), 1, 0, false).
-		AddItem(l.hostList.GetView(), 0, 1, false).
-		AddItem(l.filterInput, 1, 0, true).
-		AddItem(l.footer.GetView(), 1, 0, false)
+	l.rebuild()
 }
 
 func (l *LayoutManager) hideFilterInput() {
@@ -250,12 +244,7 @@ func (l *LayoutManager) hideFilterInput() {
 	}
 
 	l.showFilter = false
-
-	// Rebuild layout without filter input
-	l.root.Clear()
-	l.root.AddItem(l.header.GetView(), 1, 0, false).
-		AddItem(l.hostList.GetView(), 0, 1, true).
-		AddItem(l.footer.GetView(), 1, 0, false)
+	l.rebuild()
 }
 
 // SetFilterDoneFunc sets the function to call when filter input is done
@@ -305,10 +294,6 @@ func (l *LayoutManager) AddModal(name string, modal tview.Primitive) {
 	l.pages.AddPage(name, modal, false, false)
 }
 
-func (l *LayoutManager) RemoveModal(name string) {
-	l.pages.RemovePage(name)
-}
-
 func (l *LayoutManager) AddPage(name string, page tview.Primitive, resize, visible bool) {
 	l.pages.AddPage(name, page, resize, visible)
 }
@@ -331,14 +316,4 @@ func (l *LayoutManager) HasPage(name string) bool {
 
 func (l *LayoutManager) GetFrontPage() (string, tview.Primitive) {
 	return l.pages.GetFrontPage()
-}
-
-// Future layout mode switching methods
-func (l *LayoutManager) SetDisplayMode(mode DisplayMode) {
-	l.mode = mode
-	// Implementation for future layout switching
-}
-
-func (l *LayoutManager) GetDisplayMode() DisplayMode {
-	return l.mode
 }

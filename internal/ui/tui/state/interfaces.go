@@ -30,12 +30,3 @@ type RenderState interface {
 	GetFilter() string
 	GetSelectedHost() string
 }
-
-// FullUIState provides complete access to all UI state
-// Only TUIApp should use this interface
-type FullUIState interface {
-	SelectionState
-	SortState
-	FilterState
-	RenderState
-}
