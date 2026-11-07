@@ -46,6 +46,12 @@ func expandHost(host string, matches [][]string) []string {
 		fullMatch := match[0] // [1-10] or [web,db,cache]
 		content := match[1]   // 1-10 or web,db,cache
 
+		// Keep bracketed IPv6 literals such as tcp://[::1]:80 or
+		// http://[2001:db8::1]/ intact; they are address syntax, not expansions.
+		if isIPv6Literal(content) {
+			continue
+		}
+
 		var expansions []string
 		var isValidExpansion bool
 
@@ -212,4 +218,14 @@ func collectTargets(args []string, filePath string) []string {
 	// Append command-line arguments
 	targets = append(targets, args...)
 	return targets
+}
+
+// isIPv6Literal reports whether s is an IPv6 address, optionally with a zone
+// (e.g. "::1", "2001:db8::1", "fe80::1%eth0").
+func isIPv6Literal(s string) bool {
+	if !strings.Contains(s, ":") {
+		return false
+	}
+	addr, _, _ := strings.Cut(s, "%")
+	return net.ParseIP(addr) != nil
 }
