@@ -101,7 +101,7 @@ func TestMetricsWithHistory(t *testing.T) {
 			Payload:  "test",
 		},
 	}
-	mm.Success(host, 50*time.Millisecond, time.Now(), details)
+	mm.SuccessWithDetails(host, 50*time.Millisecond, time.Now(), details)
 
 	// メトリクスを取得
 	metrics := mm.GetMetrics(host)

@@ -21,7 +21,7 @@ func TestManagerSilence(t *testing.T) {
 
 func TestSilencedFailureStillCounted(t *testing.T) {
 	mm := NewMetricsManagerWithOptions(Options{DisableBeep: true, Silenced: []string{"quiet"}})
-	mm.Register("quiet", "quiet")
+	mm.(*metricsManager).autoRegister("quiet", "quiet")
 	mm.(*metricsManager).Failed("quiet", time.Now(), "timeout")
 	if got := mm.(*metricsManager).GetMetrics("quiet").GetFailed(); got != 1 {
 		t.Errorf("GetFailed() = %d, want 1", got)
@@ -30,7 +30,7 @@ func TestSilencedFailureStillCounted(t *testing.T) {
 
 func TestSilenceConcurrent(t *testing.T) {
 	mm := NewMetricsManagerWithOptions(Options{DisableBeep: true})
-	mm.Register("x", "x")
+	mm.(*metricsManager).autoRegister("x", "x")
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
 		wg.Add(1)

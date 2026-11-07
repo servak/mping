@@ -156,12 +156,6 @@ func (p *HTTPProber) resolveURL(target string) (scheme, rest string) {
 	return "http", rest
 }
 
-// convertToActualURL converts custom target to actual HTTP URL
-func (p *HTTPProber) convertToActualURL(target string) string {
-	scheme, rest := p.resolveURL(target)
-	return scheme + "://" + rest
-}
-
 func (p *HTTPProber) sent(r chan *Event, t string) {
 	r <- &Event{
 		Key:         t,

@@ -35,8 +35,9 @@ func TestHTTPProberResolveURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := NewHTTPProber(tt.probeType, tt.config, tt.prefix)
-			if got := p.convertToActualURL(tt.target); got != tt.want {
-				t.Errorf("convertToActualURL(%q) = %q, want %q", tt.target, got, tt.want)
+			scheme, rest := p.resolveURL(tt.target)
+			if got := scheme + "://" + rest; got != tt.want {
+				t.Errorf("resolveURL(%q) = %q, want %q", tt.target, got, tt.want)
 			}
 		})
 	}

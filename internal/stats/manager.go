@@ -70,17 +70,6 @@ func (mm *metricsManager) newMetrics(name string) *metrics {
 	return newMetrics(name, mm.historySize, mm.settle)
 }
 
-func (mm *metricsManager) Register(target, name string) {
-	mm.mu.Lock()
-	defer mm.mu.Unlock()
-
-	v, ok := mm.metrics[target]
-	if ok && v.Name != target {
-		return
-	}
-	mm.metrics[target] = mm.newMetrics(name)
-}
-
 // 指定されたホストのMetricsを取得（内部用）
 func (mm *metricsManager) getMetrics(host string) *metrics {
 	mm.mu.Lock()
@@ -111,12 +100,7 @@ func (mm *metricsManager) ResetAllMetrics() {
 	}
 }
 
-// Register success for host
-func (mm *metricsManager) Success(host string, rtt time.Duration, sentTime time.Time, details *prober.ProbeDetails) {
-	mm.SuccessWithDetails(host, rtt, sentTime, details)
-}
-
-// Register success for host with detailed information
+// SuccessWithDetails registers a success for host with detailed information
 func (mm *metricsManager) SuccessWithDetails(host string, rtt time.Duration, sentTime time.Time, details *prober.ProbeDetails) {
 	m := mm.getMetrics(host)
 
@@ -260,11 +244,6 @@ func (mm *metricsManager) SortBy(k Key, ascending bool) []Metrics {
 		return less(res[j], res[i])
 	})
 	return res
-}
-
-// GetMetricsAsReader retrieves as Metrics interface
-func (mm *metricsManager) GetMetricsAsReader(target string) Metrics {
-	return mm.GetMetrics(target)
 }
 
 // ToggleBeep toggles beep sound on/off

@@ -262,7 +262,8 @@ func TestHTTPProberTLSConfig(t *testing.T) {
 			// Extract prefix from target for proper testing
 			prefix := strings.SplitN(tt.target, "://", 2)[0]
 			prober := NewHTTPProber(HTTP, tt.config, prefix)
-			actualURL := prober.convertToActualURL(tt.target)
+			scheme, rest := prober.resolveURL(tt.target)
+			actualURL := scheme + "://" + rest
 
 			if actualURL != tt.expectedURL {
 				t.Errorf("Expected URL: %s, got: %s", tt.expectedURL, actualURL)

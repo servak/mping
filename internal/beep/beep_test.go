@@ -17,19 +17,6 @@ func TestNewBeeper(t *testing.T) {
 	}
 }
 
-func TestNewBeeperWithDebounce(t *testing.T) {
-	customInterval := 200 * time.Millisecond
-	beeper := NewBeeperWithDebounce(customInterval)
-
-	if !beeper.IsEnabled() {
-		t.Error("Expected beeper to be enabled by default")
-	}
-
-	if beeper.debounceTime != customInterval {
-		t.Errorf("Expected debounce time to be %v, got %v", customInterval, beeper.debounceTime)
-	}
-}
-
 func TestToggle(t *testing.T) {
 	beeper := NewBeeper()
 
@@ -46,23 +33,10 @@ func TestToggle(t *testing.T) {
 	}
 }
 
-func TestEnableDisable(t *testing.T) {
-	beeper := NewBeeper()
-
-	beeper.Disable()
-	if beeper.IsEnabled() {
-		t.Error("Expected beeper to be disabled")
-	}
-
-	beeper.Enable()
-	if !beeper.IsEnabled() {
-		t.Error("Expected beeper to be enabled")
-	}
-}
-
 func TestDebounce(t *testing.T) {
 	debounceInterval := 100 * time.Millisecond
-	beeper := NewBeeperWithDebounce(debounceInterval)
+	beeper := NewBeeper()
+	beeper.debounceTime = debounceInterval
 
 	// First beep should work
 	beeper.Beep()
@@ -93,7 +67,7 @@ func TestDebounce(t *testing.T) {
 
 func TestBeepWhenDisabled(t *testing.T) {
 	beeper := NewBeeper()
-	beeper.Disable()
+	beeper.Toggle() // disable
 
 	// Beep should not update lastBeepTime when disabled
 	beeper.Beep()
@@ -131,15 +105,4 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 
 	// If we get here without deadlock or panic, the test passes
-}
-
-func TestSetDebounceInterval(t *testing.T) {
-	beeper := NewBeeper()
-	newInterval := 200 * time.Millisecond
-
-	beeper.SetDebounceInterval(newInterval)
-
-	if beeper.debounceTime != newInterval {
-		t.Errorf("Expected debounce time to be %v, got %v", newInterval, beeper.debounceTime)
-	}
 }
