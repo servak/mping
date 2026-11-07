@@ -2,6 +2,7 @@ package prober
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"maps"
 	"net"
@@ -25,15 +26,17 @@ type (
 	ICMPProber struct {
 		version ProbeType
 		prefix  string // Custom prefix like "my-ping", "icmpv4", etc.
-		c       *icmp.PacketConn
+		c       packetConn
 		body    []byte
 		targets map[string]string // IPAddr string -> DisplayName
 		timeout time.Duration
 		runCnt  int
 		runID   int
-		tables  map[runTime]map[string]bool
+		tables  map[runTime]map[string]bool // guarded by mu
 		mu      sync.Mutex
 		loop    *runLoop
+
+		closeOnce sync.Once
 	}
 
 	ICMPConfig struct {
@@ -46,6 +49,13 @@ type (
 	runTime struct {
 		runCnt   int
 		sentTime time.Time
+	}
+
+	// packetConn is the part of *icmp.PacketConn the prober uses
+	packetConn interface {
+		ReadFrom(b []byte) (int, net.Addr, error)
+		WriteTo(b []byte, dst net.Addr) (int, error)
+		Close() error
 	}
 )
 
@@ -87,7 +97,14 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, er
 		}
 	} else {
 		c, err = icmp.ListenPacket("ip6:ipv6-icmp", sourceAddr)
+		if err != nil {
+			return nil, err
+		}
 	}
+	return newICMPProber(t, c, []byte(cfg.Body), prefix), nil
+}
+
+func newICMPProber(t ProbeType, c packetConn, body []byte, prefix string) *ICMPProber {
 	return &ICMPProber{
 		version: t,
 		prefix:  prefix,
@@ -96,9 +113,9 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, er
 		targets: make(map[string]string),
 		runID:   os.Getpid() & 0xffff,
 		runCnt:  0,
-		body:    []byte(cfg.Body),
+		body:    body,
 		loop:    newRunLoop(),
-	}, err
+	}
 }
 
 func (p *ICMPProber) Accept(target string) error {
@@ -157,16 +174,10 @@ func (p *ICMPProber) getTargetInfo(addr string) (string, string) {
 	return addr, addr // fallback
 }
 
-func (p *ICMPProber) sent(r chan *Event, addr string) {
-	key, displayName := p.getTargetInfo(addr)
-	r <- &Event{
-		Key:         key,
-		DisplayName: displayName,
-		Result:      SENT,
-	}
-}
-
-func (p *ICMPProber) success(r chan *Event, runCnt int, addr string, payload icmp.Message, packetData []byte, packetSize int) {
+// success marks the reply from addr to round runCnt and returns its event,
+// or nil for a duplicate or unexpected reply. Events are returned rather than
+// sent so that p.mu is never held while blocking on the event channel.
+func (p *ICMPProber) success(runCnt int, addr string, payload icmp.Message, packetData []byte, packetSize int) *Event {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for k, table := range p.tables {
@@ -174,7 +185,7 @@ func (p *ICMPProber) success(r chan *Event, runCnt int, addr string, payload icm
 			continue
 		}
 		if _, ok := table[addr]; !ok {
-			return
+			return nil
 		}
 		if table[addr] {
 			continue
@@ -182,26 +193,13 @@ func (p *ICMPProber) success(r chan *Event, runCnt int, addr string, payload icm
 		table[addr] = true
 		elapse := time.Since(k.sentTime)
 		key, displayName := p.getTargetInfo(addr)
-
-		// Extract detailed packet information
-		icmpDetails := p.extractICMPDetails(runCnt, addr, payload, packetData, packetSize)
-
-		// Create ICMP detail information
 		details := &ProbeDetails{
 			ProbeType: string(p.version),
-			ICMP:      icmpDetails,
+			ICMP:      p.extractICMPDetails(runCnt, addr, payload, packetData, packetSize),
 		}
-
-		r <- &Event{
-			Key:         key,
-			DisplayName: displayName,
-			Result:      SUCCESS,
-			SentTime:    k.sentTime,
-			Rtt:         elapse,
-			Details:     details,
-		}
-		return
+		return successEvent(key, displayName, k.sentTime, elapse, details)
 	}
+	return nil
 }
 
 // extractICMPDetails extracts detailed information from ICMP packet
@@ -278,7 +276,9 @@ func formatPayloadContent(data []byte) string {
 	return payloadStr
 }
 
-func (p *ICMPProber) failed(r chan *Event, runCnt int, addr string, err error) {
+// failed marks addr as answered in round runCnt and returns its FAILED event
+// (nil when the round is unknown).
+func (p *ICMPProber) failed(runCnt int, addr string, err error) *Event {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for k, table := range p.tables {
@@ -289,21 +289,16 @@ func (p *ICMPProber) failed(r chan *Event, runCnt int, addr string, err error) {
 			table[addr] = true
 		}
 		key, displayName := p.getTargetInfo(addr)
-		r <- &Event{
-			Key:         key,
-			DisplayName: displayName,
-			Result:      FAILED,
-			SentTime:    k.sentTime,
-			Rtt:         0,
-			Message:     err.Error(),
-		}
-		return
+		return failureEvent(key, displayName, FAILED, k.sentTime, 0, err.Error())
 	}
+	return nil
 }
 
-func (p *ICMPProber) checkTimeout(r chan *Event) {
+// checkTimeout drops the rounds older than the timeout and returns TIMEOUT
+// events for their unanswered targets, plus the number of rounds still
+// waiting for replies.
+func (p *ICMPProber) checkTimeout() (events []*Event, pending int) {
 	now := time.Now()
-	var cleanTargets []runTime
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for rt, table := range p.tables {
@@ -313,20 +308,20 @@ func (p *ICMPProber) checkTimeout(r chan *Event) {
 		for t, res := range table {
 			if !res {
 				key, displayName := p.getTargetInfo(t)
-				r <- &Event{
-					Key:         key,
-					DisplayName: displayName,
-					Result:      TIMEOUT,
-					SentTime:    rt.sentTime,
-					Rtt:         p.timeout,
-					Message:     "timeout",
-				}
+				events = append(events, failureEvent(key, displayName, TIMEOUT, rt.sentTime, p.timeout, "timeout"))
 			}
 		}
-		cleanTargets = append(cleanTargets, rt)
-	}
-	for _, rt := range cleanTargets {
 		delete(p.tables, rt)
+	}
+	return events, len(p.tables)
+}
+
+// emit sends the events that were collected under p.mu.
+func emit(r chan<- *Event, events ...*Event) {
+	for _, e := range events {
+		if e != nil {
+			r <- e
+		}
 	}
 }
 
@@ -355,60 +350,80 @@ func (p *ICMPProber) probe(r chan *Event) {
 	}
 	m := p.makeEchoMsg()
 
-	b, err := m.Marshal(nil)
-	if err != nil {
-		fmt.Printf("Failed ICMP encode: %s\n", err)
-		os.Exit(1)
-	}
-
+	b, marshalErr := m.Marshal(nil)
 	n := time.Now()
 	p.addTable(p.runCnt, n)
 	for ipStr := range p.targets {
-		ip, err := net.ResolveIPAddr("ip", ipStr)
+		if marshalErr != nil {
+			// Not expected for an echo request; fail the round instead of exiting
+			emit(r, p.failed(p.runCnt, ipStr, fmt.Errorf("failed ICMP encode: %w", marshalErr)))
+			continue
+		}
+		ip, err := ipAddr(ipStr)
 		if err != nil {
-			p.failed(r, p.runCnt, ipStr, err)
+			emit(r, p.failed(p.runCnt, ipStr, err))
 			continue
 		}
 		_, err = p.c.WriteTo(b, ip)
-		p.sent(r, ipStr)
+		key, displayName := p.getTargetInfo(ipStr)
+		r <- sentEvent(key, displayName, n)
 		if err != nil {
-			p.failed(r, p.runCnt, ipStr, err)
+			emit(r, p.failed(p.runCnt, ipStr, err))
 		}
 	}
 }
 
+// ipAddr converts a target key (an IP address from Accept) to the address
+// to send to. Only zoned IPv6 addresses (fe80::1%eth0) need the resolver.
+func ipAddr(s string) (*net.IPAddr, error) {
+	if ip := net.ParseIP(s); ip != nil {
+		return &net.IPAddr{IP: ip}, nil
+	}
+	return net.ResolveIPAddr("ip", s)
+}
+
+// recvPkts reads replies until the connection is closed.
 func (p *ICMPProber) recvPkts(r chan *Event) {
+	proto := ipv4.ICMPTypeEchoReply.Protocol()
+	if p.version == ICMPV6 {
+		proto = ipv6.ICMPTypeEchoReply.Protocol()
+	}
 	pktbuf := make([]byte, maxPacketSize)
 	for {
 		n, addr, err := p.c.ReadFrom(pktbuf)
 		if err != nil {
-			fmt.Printf("Error reading ICMP packet: %s\n", err)
-			os.Exit(1)
-		}
-		proto := ipv4.ICMPTypeEchoReply.Protocol()
-		if p.version == ICMPV6 {
-			proto = ipv6.ICMPTypeEchoReply.Protocol()
+			if errors.Is(err, net.ErrClosed) {
+				return // closed by Start or Stop
+			}
+			// Unexpected read error: keep receiving, but do not spin
+			time.Sleep(10 * time.Millisecond)
+			continue
 		}
 		rm, err := icmp.ParseMessage(proto, pktbuf[:n])
-		if err != nil {
-			fmt.Printf("Error parsing ICMP message: %s\n", err)
-			os.Exit(1)
+		if err != nil || n < 8 {
+			continue // not a packet of ours; skip it
 		}
-		offset := 0
-		id := binary.BigEndian.Uint16(pktbuf[offset+4 : offset+6])
+		id := binary.BigEndian.Uint16(pktbuf[4:6])
 		if id != uint16(p.runID) {
 			continue
 		}
-		seq := binary.BigEndian.Uint16(pktbuf[offset+6 : offset+8])
+		seq := binary.BigEndian.Uint16(pktbuf[6:8])
 		if rm.Code == 0 {
 			switch rm.Type {
 			case ipv4.ICMPTypeEchoReply, ipv6.ICMPTypeEchoReply:
-				p.success(r, int(seq), addr.String(), *rm, pktbuf[:n], n)
+				emit(r, p.success(int(seq), addr.String(), *rm, pktbuf[:n], n))
 			}
 		}
 	}
 }
 
+func (p *ICMPProber) closeConn() {
+	p.closeOnce.Do(func() { _ = p.c.Close() })
+}
+
+// Start sends one echo request per target and round until Stop. After Stop
+// it keeps receiving until every outstanding round is answered or has timed
+// out, then closes the socket and returns once the receiver has exited.
 func (p *ICMPProber) Start(r chan *Event, interval, timeout time.Duration) error {
 	ok, err := p.loop.begin()
 	if !ok {
@@ -420,9 +435,19 @@ func (p *ICMPProber) Start(r chan *Event, interval, timeout time.Duration) error
 		register(r, ipStr, p.targets[ipStr])
 	}
 	p.timeout = timeout
+
+	recvDone := make(chan struct{})
+	go func() {
+		defer close(recvDone)
+		p.recvPkts(r)
+	}()
+	defer func() {
+		p.closeConn()
+		<-recvDone
+	}()
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	go p.recvPkts(r)
 	p.probe(r)
 loop:
 	for {
@@ -431,22 +456,27 @@ loop:
 			break loop
 		case <-ticker.C:
 			p.probe(r)
-			go p.checkTimeout(r)
+			events, _ := p.checkTimeout()
+			emit(r, events...)
 		}
 	}
 	for {
-		p.checkTimeout(r)
-		if len(p.tables) == 0 {
-			break
+		events, pending := p.checkTimeout()
+		emit(r, events...)
+		if pending == 0 {
+			return nil
 		}
 		time.Sleep(interval)
 	}
-	return nil
 }
 
-// Stop stops probing and waits for Start to return. It is safe to call more than once.
+// Stop stops probing and waits for Start to return, which includes waiting
+// for the replies of the last rounds. It is safe to call more than once; if
+// Start never ran, it closes the socket itself.
 func (p *ICMPProber) Stop() {
-	p.loop.stop()
+	if !p.loop.stop() {
+		p.closeConn()
+	}
 }
 
 // resolveSourceInterface resolves interface name or IP address to a bind address

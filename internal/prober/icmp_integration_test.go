@@ -15,6 +15,7 @@ package prober
 
 import (
 	"os"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -32,6 +33,7 @@ func TestIntegrationICMPProberLifecycle(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.version), func(t *testing.T) {
+			base := runtime.NumGoroutine()
 			p, err := NewICMPProber(tc.version, &ICMPConfig{Body: "mping-it"}, string(tc.version))
 			if err != nil {
 				if os.Getenv("MPING_IT_STRICT") == "1" {
@@ -55,6 +57,11 @@ func TestIntegrationICMPProberLifecycle(t *testing.T) {
 					t.Errorf("payload = %q, want %q", e.Details.ICMP.Payload, "mping-it")
 				}
 			}
+			if goroutineRunning("(*ICMPProber).recvPkts") {
+				t.Error("receive goroutine still running after Stop")
+			}
+			stopReturns(t, p) // second Stop
+			waitGoroutines(t, base)
 		})
 	}
 }

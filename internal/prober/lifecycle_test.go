@@ -102,6 +102,13 @@ func waitGoroutines(t *testing.T, base int) {
 	}
 }
 
+// goroutineRunning reports whether any goroutine has fn in its stack.
+func goroutineRunning(fn string) bool {
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, true)
+	return strings.Contains(string(buf[:n]), fn)
+}
+
 // lifecycleResult is what runLifecycle observed.
 type lifecycleResult struct {
 	events []*Event
