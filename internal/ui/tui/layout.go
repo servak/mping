@@ -12,6 +12,17 @@ import (
 	"github.com/servak/mping/internal/ui/tui/state"
 )
 
+// Notifier controls the failure beep. It is implemented by *beep.Notifier;
+// the TUI only depends on this interface.
+type Notifier interface {
+	panels.BeepStateProvider
+	panels.SilenceChecker
+	// Toggle switches the global beep on/off and returns the new state
+	Toggle() bool
+	// ToggleSilence mutes/unmutes the beep for one host (display name)
+	ToggleSilence(name string) bool
+}
+
 // DisplayMode represents the current layout mode
 type DisplayMode int
 
@@ -49,12 +60,12 @@ type LayoutManager struct {
 }
 
 // NewLayoutManager creates a new LayoutManager
-func NewLayoutManager(uiState *state.UIState, mm stats.MetricsManager, config *shared.Config, interval, timeout time.Duration) *LayoutManager {
+func NewLayoutManager(uiState *state.UIState, mm stats.MetricsManager, notifier Notifier, config *shared.Config, interval, timeout time.Duration) *LayoutManager {
 	layout := &LayoutManager{
 		mode: ListOnly,
 	}
 
-	layout.setupPanels(uiState, mm, config, interval, timeout)
+	layout.setupPanels(uiState, mm, notifier, config, interval, timeout)
 	layout.setupLayout()
 	layout.setupPages()
 
@@ -62,15 +73,16 @@ func NewLayoutManager(uiState *state.UIState, mm stats.MetricsManager, config *s
 }
 
 // setupPanels initializes all panels
-func (l *LayoutManager) setupPanels(uiState *state.UIState, mm stats.MetricsProvider, config *shared.Config, interval, timeout time.Duration) {
+func (l *LayoutManager) setupPanels(uiState *state.UIState, mm stats.MetricsProvider, notifier Notifier, config *shared.Config, interval, timeout time.Duration) {
 	l.header = panels.NewHeaderPanel(uiState, config, interval, timeout)
 
-	// Set beep state provider if mm implements the interface
-	if beepProvider, ok := mm.(panels.BeepStateProvider); ok {
-		l.header.SetBeepProvider(beepProvider)
+	var silence panels.SilenceChecker
+	if notifier != nil {
+		l.header.SetBeepProvider(notifier)
+		silence = notifier
 	}
 
-	l.hostList = panels.NewHostListPanel(uiState, mm, config)
+	l.hostList = panels.NewHostListPanel(uiState, mm, silence, config)
 	l.footer = panels.NewFooterPanel(config)
 	l.hostDetail = panels.NewHostDetailPanel(config)
 	l.path = panels.NewPathPanel(config)

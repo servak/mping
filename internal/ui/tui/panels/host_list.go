@@ -20,6 +20,7 @@ type HostListPanel struct {
 	renderState       state.RenderState
 	selectionState    state.SelectionState
 	mm                stats.MetricsProvider
+	silence           SilenceChecker // may be nil: no host is marked
 	config            *shared.Config
 	onSelectionChange func(metrics stats.Metrics) // Callback when selection changes
 	lastTableData     *shared.TableData           // Data rendered by the last Update
@@ -31,11 +32,17 @@ type HostListParams interface {
 	state.SelectionState
 }
 
+// SilenceChecker reports whether a host's (display name) failure beep is muted
+type SilenceChecker interface {
+	IsSilenced(name string) bool
+}
+
 // silenceMarker is appended to the host name of silenced targets
 const silenceMarker = " ⊘"
 
 // NewHostListPanel creates a new HostListPanel
-func NewHostListPanel(state HostListParams, mm stats.MetricsProvider, config *shared.Config) *HostListPanel {
+// silence may be nil, in which case no host is marked as silenced.
+func NewHostListPanel(state HostListParams, mm stats.MetricsProvider, silence SilenceChecker, config *shared.Config) *HostListPanel {
 	table := tview.NewTable().
 		SetSelectable(true, false)
 
@@ -50,6 +57,7 @@ func NewHostListPanel(state HostListParams, mm stats.MetricsProvider, config *sh
 		renderState:    state,
 		selectionState: state,
 		mm:             mm,
+		silence:        silence,
 		config:         config,
 	}
 	// Every selection change (keys, mouse clicks, programmatic Select) goes
@@ -272,7 +280,7 @@ func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 		cells = slices.Insert(cells, historyColumn, sparkline)
 		for col, cellData := range cells {
 			text, color := cellData, theme.Primary
-			if col == 0 && h.mm.IsSilenced(cellData) {
+			if col == 0 && h.silence != nil && h.silence.IsSilenced(cellData) {
 				text += silenceMarker
 				color = theme.Warning
 			}

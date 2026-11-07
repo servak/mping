@@ -17,13 +17,15 @@ type TUIApp struct {
 	layout   *LayoutManager
 	state    *state.UIState
 	mm       stats.MetricsManager
+	notifier Notifier // may be nil: beep controls are then no-ops
 	config   *shared.Config
 	interval time.Duration
 	timeout  time.Duration
 }
 
 // NewTUIApp creates a new TUIApp instance
-func NewTUIApp(mm stats.MetricsManager, cfg *shared.Config, interval, timeout time.Duration) *TUIApp {
+// notifier may be nil, in which case beep and mute keys do nothing.
+func NewTUIApp(mm stats.MetricsManager, notifier Notifier, cfg *shared.Config, interval, timeout time.Duration) *TUIApp {
 	if cfg == nil {
 		cfg = shared.DefaultConfig()
 	}
@@ -31,13 +33,14 @@ func NewTUIApp(mm stats.MetricsManager, cfg *shared.Config, interval, timeout ti
 	app := tview.NewApplication()
 	app.EnableMouse(true)
 	uiState := state.NewUIState()
-	layout := NewLayoutManager(uiState, mm, cfg, interval, timeout)
+	layout := NewLayoutManager(uiState, mm, notifier, cfg, interval, timeout)
 
 	tuiApp := &TUIApp{
 		app:      app,
 		layout:   layout,
 		state:    uiState,
 		mm:       mm,
+		notifier: notifier,
 		config:   cfg,
 		interval: interval,
 		timeout:  timeout,
@@ -308,12 +311,17 @@ func (a *TUIApp) cycleTheme() {
 
 // Beep-related methods
 func (a *TUIApp) toggleBeep() {
-	a.mm.ToggleBeep()
+	if a.notifier != nil {
+		a.notifier.Toggle()
+	}
 }
 
 // toggleSilence mutes or unmutes the failure beep for the selected host
 func (a *TUIApp) toggleSilence() {
+	if a.notifier == nil {
+		return
+	}
 	if host := a.state.GetSelectedHost(); host != "" {
-		a.mm.ToggleSilence(host)
+		a.notifier.ToggleSilence(host)
 	}
 }

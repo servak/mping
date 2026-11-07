@@ -86,11 +86,9 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 				SourceInterface: sourceInterface,
 				Interval:        interval,
 				Timeout:         timeout,
-				Stats: stats.Options{
-					// The terminal bell would corrupt machine-readable output and
-					// is pointless in non-interactive runs.
-					DisableBeep: true,
-				},
+				// No failure hook: the terminal bell would corrupt
+				// machine-readable output and is pointless in non-interactive runs.
+				Stats: stats.Options{},
 			})
 			if err != nil {
 				return err

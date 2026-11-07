@@ -55,7 +55,7 @@ func TestIntegrationPathViewFollowsSelection(t *testing.T) {
 	}
 
 	uiState := state.NewUIState()
-	layout := NewLayoutManager(uiState, mm, shared.DefaultConfig(), 500*time.Millisecond, time.Second)
+	layout := NewLayoutManager(uiState, mm, nil, shared.DefaultConfig(), 500*time.Millisecond, time.Second)
 	defer layout.StopPathTrace()
 	layout.UpdateAll()
 	layout.TogglePathView()

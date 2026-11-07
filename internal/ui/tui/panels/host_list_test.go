@@ -45,7 +45,7 @@ func TestNewHostListPanel(t *testing.T) {
 	state := newMockState()
 
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	if panel == nil {
 		t.Fatal("NewHostListPanel() returned nil")
@@ -72,7 +72,7 @@ func TestHostListPanelGetView(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	view := panel.GetView()
 	if view == nil {
@@ -88,7 +88,7 @@ func TestHostListPanelUpdate(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register some test metrics
 	statstest.Register(t, mm, "google.com")
@@ -116,7 +116,7 @@ func TestHostListPanelUpdateWithFilter(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register test metrics
 	statstest.Register(t, mm, "google.com")
@@ -151,7 +151,7 @@ func selectedName(t *testing.T, p *HostListPanel) string {
 func TestHostListPanelSelectionFollowsHostAcrossSortChanges(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	st := state.NewUIState() // default sort: Fail, descending
-	panel := NewHostListPanel(st, mm, shared.DefaultConfig())
+	panel := NewHostListPanel(st, mm, nil, shared.DefaultConfig())
 
 	now := time.Now()
 	var events []*prober.Event
@@ -186,7 +186,7 @@ func TestHostListPanelSelectionFollowsHostAcrossSortChanges(t *testing.T) {
 func TestHostListPanelClickSelectionSticks(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	st := state.NewUIState()
-	panel := NewHostListPanel(st, mm, shared.DefaultConfig())
+	panel := NewHostListPanel(st, mm, nil, shared.DefaultConfig())
 	statstest.Register(t, mm, "a.example")
 	statstest.Register(t, mm, "b.example")
 
@@ -209,7 +209,7 @@ func TestHostListPanelScrollDown(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register multiple metrics to enable scrolling
 	for i := 0; i < 10; i++ {
@@ -233,7 +233,7 @@ func TestHostListPanelScrollUp(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register multiple metrics
 	for i := 0; i < 10; i++ {
@@ -257,7 +257,7 @@ func TestHostListPanelScrollToTop(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register metrics
 	statstest.Register(t, mm, "test.com")
@@ -277,7 +277,7 @@ func TestHostListPanelScrollToBottom(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register metrics
 	statstest.Register(t, mm, "test.com")
@@ -297,7 +297,7 @@ func TestHostListPanelPageDown(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register metrics
 	statstest.Register(t, mm, "test.com")
@@ -317,7 +317,7 @@ func TestHostListPanelPageUp(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register metrics
 	statstest.Register(t, mm, "test.com")
@@ -337,7 +337,7 @@ func TestHostListPanelRestoreSelection(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register test metrics
 	statstest.Register(t, mm, "google.com")
@@ -366,7 +366,7 @@ func TestHostListPanelCurrentSelectedMetricIsFresh(t *testing.T) {
 	done := mm.Subscribe(events)
 	events <- &prober.Event{Key: "h", DisplayName: "host", Result: prober.REGISTER}
 
-	panel := NewHostListPanel(state.NewUIState(), mm, shared.DefaultConfig())
+	panel := NewHostListPanel(state.NewUIState(), mm, nil, shared.DefaultConfig())
 	waitFor := func(total int) {
 		t.Helper()
 		for i := 0; i < 100; i++ {
@@ -388,7 +388,7 @@ func TestHostListPanelCurrentSelectedMetricIsFresh(t *testing.T) {
 
 func TestHostListPanelLastFailTimeShowsOutage(t *testing.T) {
 	mm := statstest.NewQuietManager()
-	panel := NewHostListPanel(state.NewUIState(), mm, shared.DefaultConfig())
+	panel := NewHostListPanel(state.NewUIState(), mm, nil, shared.DefaultConfig())
 
 	now := time.Now()
 	statstest.Feed(t, mm,
@@ -431,7 +431,7 @@ func TestHostListPanelLastFailTimeShowsOutage(t *testing.T) {
 func TestHostListPanelSelectionSurvivesFilter(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	st := state.NewUIState()
-	panel := NewHostListPanel(st, mm, shared.DefaultConfig())
+	panel := NewHostListPanel(st, mm, nil, shared.DefaultConfig())
 
 	now := time.Now()
 	var events []*prober.Event
@@ -462,9 +462,9 @@ func TestHostListPanelMarksSilencedHost(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	statstest.Register(t, mm, "quiet")
 	statstest.Register(t, mm, "loud")
-	mm.ToggleSilence("quiet")
+	silenced := fakeSilence{"quiet": true}
 
-	panel := NewHostListPanel(newMockState(), mm, shared.DefaultConfig())
+	panel := NewHostListPanel(newMockState(), mm, silenced, shared.DefaultConfig())
 	panel.Update()
 
 	marked := map[string]bool{}
@@ -479,3 +479,8 @@ func TestHostListPanelMarksSilencedHost(t *testing.T) {
 		t.Errorf("non-silenced host marked: %v", marked)
 	}
 }
+
+// fakeSilence is a SilenceChecker backed by a set of display names
+type fakeSilence map[string]bool
+
+func (f fakeSilence) IsSilenced(name string) bool { return f[name] }

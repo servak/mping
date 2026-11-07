@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/servak/mping/internal/beep"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/ui/shared"
 	"github.com/servak/mping/internal/ui/tui"
@@ -64,13 +65,17 @@ mping dns://8.8.8.8/google.com`,
 				return err
 			}
 
+			// The notifier rings the bell on failures unless the host is
+			// silenced; --silence names match the displayed host name.
+			notifier := beep.NewNotifier(ExpandTargets(silenced, ""))
+
 			sess, err := newSession(sessionParams{
 				Cfg:             cfg,
 				Hosts:           hosts,
 				SourceInterface: sourceInterface,
 				Interval:        interval,
 				Timeout:         timeout,
-				Stats:           stats.Options{Silenced: ExpandTargets(silenced, "")},
+				Stats:           stats.Options{OnFailure: notifier.OnFailure},
 			})
 			if err != nil {
 				return err
@@ -80,7 +85,7 @@ mping dns://8.8.8.8/google.com`,
 			defer cancel()
 			probeErr := sess.start(ctx)
 
-			startTUI(sess.metrics, cfg.UI, interval, timeout)
+			startTUI(sess.metrics, notifier, cfg.UI, interval, timeout)
 
 			// Stop probing when TUI exits
 			sess.stop()
@@ -111,8 +116,8 @@ mping dns://8.8.8.8/google.com`,
 	return cmd
 }
 
-func startTUI(manager stats.MetricsManager, cfg *shared.Config, interval, timeout time.Duration) {
-	app := tui.NewTUIApp(manager, cfg, interval, timeout)
+func startTUI(manager stats.MetricsManager, notifier tui.Notifier, cfg *shared.Config, interval, timeout time.Duration) {
+	app := tui.NewTUIApp(manager, notifier, cfg, interval, timeout)
 
 	refreshTime := time.Millisecond * 250 // Minimum refresh time that can be set
 	if refreshTime < (interval / 2) {

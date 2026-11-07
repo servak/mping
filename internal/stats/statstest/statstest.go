@@ -9,10 +9,10 @@ import (
 	"github.com/servak/mping/internal/stats"
 )
 
-// NewQuietManager returns a MetricsManager whose failure beep is disabled, so
-// tests never write bell characters to the terminal.
+// NewQuietManager returns a MetricsManager without a failure hook, so tests
+// never ring the terminal bell.
 func NewQuietManager() stats.MetricsManager {
-	return stats.NewMetricsManagerWithOptions(stats.Options{DisableBeep: true})
+	return stats.NewMetricsManager()
 }
 
 // Feed sends events to mm and blocks until all of them have been processed.

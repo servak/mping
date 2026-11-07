@@ -148,7 +148,7 @@ func TestOutageTrackerReset(t *testing.T) {
 
 func TestMetricsManagerFlushesOutagesOnClose(t *testing.T) {
 	// A large settle window keeps results buffered until the channel closes
-	mm := NewMetricsManagerWithOptions(Options{SettleTime: time.Hour, DisableBeep: true})
+	mm := NewMetricsManagerWithOptions(Options{SettleTime: time.Hour})
 	events := make(chan *prober.Event, 10)
 	done := mm.Subscribe(events)
 
@@ -172,7 +172,7 @@ func TestMetricsManagerFlushesOutagesOnClose(t *testing.T) {
 }
 
 func TestSortByReturnsSnapshots(t *testing.T) {
-	mm := NewMetricsManagerWithOptions(Options{DisableBeep: true}).(*metricsManager)
+	mm := NewMetricsManagerWithOptions(Options{}).(*metricsManager)
 	mm.autoRegister("h", "h")
 	mm.Failed("h", at(0), "timeout")
 
@@ -208,7 +208,7 @@ func TestRTTPercentiles(t *testing.T) {
 }
 
 func TestSortByDescendingIsStableForTies(t *testing.T) {
-	mm := NewMetricsManagerWithOptions(Options{DisableBeep: true}).(*metricsManager)
+	mm := NewMetricsManagerWithOptions(Options{}).(*metricsManager)
 	for _, h := range []string{"c", "a", "d", "b"} {
 		mm.autoRegister(h, h)
 	}

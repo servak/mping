@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/servak/mping/internal/beep"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/stats/statstest"
 	"github.com/servak/mping/internal/ui/shared"
@@ -15,7 +16,7 @@ func TestNewTUIApp(t *testing.T) {
 	interval := time.Second
 	timeout := time.Second
 
-	app := NewTUIApp(mm, cfg, interval, timeout)
+	app := NewTUIApp(mm, nil, cfg, interval, timeout)
 
 	if app == nil {
 		t.Fatal("NewTUIApp() returned nil")
@@ -55,7 +56,7 @@ func TestNewTUIAppWithNilConfig(t *testing.T) {
 	interval := time.Second
 	timeout := time.Second
 
-	app := NewTUIApp(mm, nil, interval, timeout)
+	app := NewTUIApp(mm, nil, nil, interval, timeout)
 
 	if app == nil {
 		t.Fatal("NewTUIApp() with nil config returned nil")
@@ -74,7 +75,7 @@ func TestNewTUIAppWithNilConfig(t *testing.T) {
 func TestTUIAppClose(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	cfg := shared.DefaultConfig()
-	app := NewTUIApp(mm, cfg, time.Second, time.Second)
+	app := NewTUIApp(mm, nil, cfg, time.Second, time.Second)
 
 	// Test that Close doesn't panic
 	defer func() {
@@ -89,7 +90,7 @@ func TestTUIAppClose(t *testing.T) {
 func TestTUIAppSortMethods(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	cfg := shared.DefaultConfig()
-	app := NewTUIApp(mm, cfg, time.Second, time.Second)
+	app := NewTUIApp(mm, nil, cfg, time.Second, time.Second)
 
 	initialKey := app.state.GetSortKey()
 	initialAscending := app.state.IsAscending()
@@ -118,7 +119,7 @@ func TestTUIAppSortMethods(t *testing.T) {
 func TestTUIAppResetMetrics(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	cfg := shared.DefaultConfig()
-	app := NewTUIApp(mm, cfg, time.Second, time.Second)
+	app := NewTUIApp(mm, nil, cfg, time.Second, time.Second)
 
 	// Register test data
 	statstest.Register(t, mm, "test.com")
@@ -136,7 +137,7 @@ func TestTUIAppResetMetrics(t *testing.T) {
 func TestTUIAppFilterMethods(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	cfg := shared.DefaultConfig()
-	app := NewTUIApp(mm, cfg, time.Second, time.Second)
+	app := NewTUIApp(mm, nil, cfg, time.Second, time.Second)
 
 	// Test clearFilter
 	app.state.SetFilter("test")
@@ -149,11 +150,37 @@ func TestTUIAppFilterMethods(t *testing.T) {
 func TestTUIAppCreateHelpModal(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	cfg := shared.DefaultConfig()
-	app := NewTUIApp(mm, cfg, time.Second, time.Second)
+	app := NewTUIApp(mm, nil, cfg, time.Second, time.Second)
 
 	modal := app.createHelpModal()
 
 	if modal == nil {
 		t.Error("createHelpModal() returned nil")
 	}
+}
+
+func TestTUIAppBeepKeysUseNotifier(t *testing.T) {
+	mm := statstest.NewQuietManager()
+	statstest.Register(t, mm, "quiet")
+	n := beep.NewNotifier(nil)
+	app := NewTUIApp(mm, n, shared.DefaultConfig(), time.Second, time.Second)
+
+	app.toggleBeep()
+	if n.Enabled() {
+		t.Error("toggleBeep did not disable the beep")
+	}
+
+	app.state.SetSelectedHost("quiet")
+	app.toggleSilence()
+	if !n.IsSilenced("quiet") {
+		t.Error("toggleSilence did not silence the selected host")
+	}
+}
+
+func TestTUIAppBeepKeysWithoutNotifier(t *testing.T) {
+	app := NewTUIApp(statstest.NewQuietManager(), nil, shared.DefaultConfig(), time.Second, time.Second)
+	app.state.SetSelectedHost("x")
+	// Must not panic
+	app.toggleBeep()
+	app.toggleSilence()
 }
