@@ -582,3 +582,42 @@ Error: multiple validation errors:
   prober 'dns': DNS server is required;
   default prober 'invalid' not found in prober configurations
 ```
+
+## Development
+
+```bash
+go test ./...          # unit tests
+go vet -tags 'integration e2e' ./...
+```
+
+### Integration and end-to-end tests
+
+These use real sockets on loopback only (`127.0.0.1`, `::1`) plus HTTP/HTTPS/TCP/DNS/NTP servers started by the tests, so they need no external network. CI runs them in the `Integration / E2E` job.
+
+```bash
+# Path tracer and TUI path view (integration build tag).
+# Without MPING_IT_TARGETS / MPING_IT_HOSTS they probe public hosts.
+MPING_IT_TARGETS=127.0.0.1,::1 MPING_IT_ROUNDS=10 MPING_IT_INTERVAL=200ms \
+  go test -tags integration -run Integration -v ./internal/trace/
+MPING_IT_HOSTS=127.0.0.3,127.0.0.1,127.0.0.2 MPING_IT_DURATION=8s \
+  go test -tags integration -run Integration -v ./internal/ui/tui/
+
+# The real binary: "mping batch -o json" against every protocol (e2e build tag).
+# Without MPING_BIN the test builds ./cmd/mping itself.
+go test -tags e2e -v ./test/e2e/
+```
+
+The ICMP prober uses raw sockets, so the ICMP end-to-end cases are skipped unless the binary has `cap_net_raw` (set `MPING_E2E_ICMP=require` to fail instead of skip). On Linux:
+
+```bash
+go build -o /tmp/mping ./cmd/mping
+sudo setcap cap_net_raw=+ep /tmp/mping
+MPING_BIN=/tmp/mping MPING_E2E_ICMP=require go test -tags e2e -v ./test/e2e/
+
+# Raw-socket path of the tracer: grant the compiled test binary, not go test
+go test -c -tags integration -o /tmp/trace.test ./internal/trace/
+sudo setcap cap_net_raw=+ep /tmp/trace.test
+(cd internal/trace && MPING_IT_TARGETS=127.0.0.1,::1 MPING_IT_PRIVILEGED=1 /tmp/trace.test -test.run Integration -test.v)
+```
+
+On macOS everything except the ICMP prober cases runs without privileges: the tracer falls back to unprivileged datagram ICMP, and HTTP/HTTPS/TCP/DNS/NTP need none. The ICMP prober cases need `sudo` (setcap does not exist on macOS) and are skipped otherwise.
