@@ -239,13 +239,23 @@ func sameProbeFamily(a, b prober.ProbeType) bool {
 	return family(a) == family(b)
 }
 
-func LoadFile(path string) (*Config, error) {
-	if strings.HasPrefix(path, "~") {
-		usr, err := user.Current()
-		if err == nil {
-			path = strings.Replace(path, "~", usr.HomeDir, 1)
-		}
+// ExpandHome replaces a leading "~" with the current user's home directory.
+// Paths without a leading "~" are returned unchanged. If the home directory
+// cannot be determined, the original path is returned together with the error.
+func ExpandHome(path string) (string, error) {
+	if !strings.HasPrefix(path, "~") {
+		return path, nil
 	}
+	usr, err := user.Current()
+	if err != nil {
+		return path, err
+	}
+	return strings.Replace(path, "~", usr.HomeDir, 1), nil
+}
+
+func LoadFile(path string) (*Config, error) {
+	// A failed lookup keeps the path as given, as before.
+	path, _ = ExpandHome(path)
 	cfgPath, _ := filepath.Abs(path)
 	out, err := os.ReadFile(cfgPath)
 	if err != nil {
