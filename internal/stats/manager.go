@@ -18,6 +18,7 @@ type metricsManager struct {
 	historySize int // Number of history entries to keep
 	settle      time.Duration
 	beeper      *beep.Beeper
+	silenced    map[string]struct{} // display names whose failure beep is muted
 	mu          sync.Mutex
 }
 
@@ -31,6 +32,8 @@ type Options struct {
 	SettleTime time.Duration
 	// DisableBeep turns off the failure beep, e.g. for non-interactive runs
 	DisableBeep bool
+	// Silenced lists targets (display names) whose failures never beep
+	Silenced []string
 }
 
 // SettleTimeFor returns the recommended SettleTime for the probe timing
@@ -52,6 +55,10 @@ func NewMetricsManagerWithOptions(opts Options) MetricsManager {
 		metrics:     make(map[string]*metrics),
 		historySize: opts.HistorySize,
 		settle:      opts.SettleTime,
+		silenced:    make(map[string]struct{}, len(opts.Silenced)),
+	}
+	for _, name := range opts.Silenced {
+		mm.silenced[name] = struct{}{}
 	}
 	if !opts.DisableBeep {
 		mm.beeper = beep.NewBeeper()
@@ -132,6 +139,7 @@ func (mm *metricsManager) Failed(host string, sentTime time.Time, msg string) {
 	m := mm.getMetrics(host)
 
 	mm.mu.Lock()
+	_, silenced := mm.silenced[m.Name]
 	m.Fail(sentTime, msg)
 	if m.history != nil {
 		m.history.AddEntry(HistoryEntry{
@@ -144,8 +152,8 @@ func (mm *metricsManager) Failed(host string, sentTime time.Time, msg string) {
 	m.outage.add(sentTime, false, msg, time.Now())
 	mm.mu.Unlock()
 
-	// Play beep sound on failure (non-blocking)
-	if mm.beeper != nil {
+	// Play beep sound on failure (non-blocking), unless the target is silenced
+	if mm.beeper != nil && !silenced {
 		mm.beeper.Beep()
 	}
 }
@@ -287,4 +295,25 @@ func rttFor(k Key, m Metrics) time.Duration {
 		return m.GetMaximumRTT()
 	}
 	return -1
+}
+
+// ToggleSilence toggles beep silencing for the target (display name) and
+// returns the new state
+func (mm *metricsManager) ToggleSilence(name string) bool {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	if _, ok := mm.silenced[name]; ok {
+		delete(mm.silenced, name)
+		return false
+	}
+	mm.silenced[name] = struct{}{}
+	return true
+}
+
+// IsSilenced reports whether the target (display name) is silenced
+func (mm *metricsManager) IsSilenced(name string) bool {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	_, ok := mm.silenced[name]
+	return ok
 }

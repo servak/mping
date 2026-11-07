@@ -31,6 +31,9 @@ type HostListParams interface {
 	state.SelectionState
 }
 
+// silenceMarker is appended to the host name of silenced targets
+const silenceMarker = " ⊘"
+
 // NewHostListPanel creates a new HostListPanel
 func NewHostListPanel(state HostListParams, mm stats.MetricsProvider, config *shared.Config) *HostListPanel {
 	table := tview.NewTable().
@@ -268,7 +271,12 @@ func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 		}
 		cells = slices.Insert(cells, historyColumn, sparkline)
 		for col, cellData := range cells {
-			setCell(row+1, col, cellData, theme.Primary, false)
+			text, color := cellData, theme.Primary
+			if col == 0 && h.mm.IsSilenced(cellData) {
+				text += silenceMarker
+				color = theme.Warning
+			}
+			setCell(row+1, col, text, color, false)
 		}
 	}
 }

@@ -76,10 +76,16 @@ mping dns://8.8.8.8/google.com`,
 			_interval := time.Duration(interval) * time.Millisecond
 			_timeout := time.Duration(timeout) * time.Millisecond
 
+			silenced, err := flags.GetStringSlice("silence")
+			if err != nil {
+				return err
+			}
+
 			// Create ProbeManager and MetricsManager
 			probeManager := prober.NewProbeManager(cfg.Prober, cfg.Default)
 			metricsManager := stats.NewMetricsManagerWithOptions(stats.Options{
 				SettleTime: stats.SettleTimeFor(_interval, _timeout),
+				Silenced:   ExpandTargets(silenced, ""),
 			})
 
 			// Add targets
@@ -119,6 +125,7 @@ mping dns://8.8.8.8/google.com`,
 	flags.StringP("title", "n", "", "print title")
 	flags.StringP("config", "c", "~/.mping.yml", "config path")
 	flags.StringP("interface", "I", "", "source interface (name or IP address)")
+	flags.StringSlice("silence", nil, "target whose failure beep is muted (repeatable, comma-separated; bracket/CIDR expansion applies)")
 	flags.IntP("interval", "i", 1000, "interval(ms)")
 	flags.IntP("timeout", "t", 1000, "timeout(ms)")
 
