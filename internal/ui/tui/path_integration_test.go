@@ -8,13 +8,20 @@ package tui
 //	go test -tags integration -run Integration -v ./internal/ui/tui/
 //
 // MPING_IT_DURATION controls how long each scenario samples (default 12s).
+// MPING_IT_HOSTS sets the hosts (default 8.8.8.8,1.1.1.1,192.168.1.1). The
+// first one times out once and jumps to the top of the list; the path view
+// must keep following the host selected before that. CI uses loopback hosts
+// (127.0.0.3,127.0.0.1,127.0.0.2) because hosted runners block outbound ICMP.
+// MPING_IT_STRICT=1 fails instead of skipping when tracing is unavailable.
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/servak/mping/internal/prober"
+	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/stats/statstest"
 	"github.com/servak/mping/internal/ui/shared"
 	"github.com/servak/mping/internal/ui/tui/state"
@@ -32,8 +39,19 @@ func TestIntegrationPathViewFollowsSelection(t *testing.T) {
 	defer func() { close(events); <-done }()
 
 	hosts := []string{"8.8.8.8", "1.1.1.1", "192.168.1.1"}
+	if v := os.Getenv("MPING_IT_HOSTS"); v != "" {
+		hosts = strings.Split(v, ",")
+	}
+	flapping := hosts[0]
 	for _, h := range hosts {
 		events <- &prober.Event{Key: h, DisplayName: h, Result: prober.REGISTER}
+	}
+	// Events are processed asynchronously; select only once every host is listed
+	for deadline := time.Now().Add(5 * time.Second); len(mm.SortBy(stats.Host, true)) < len(hosts); {
+		if time.Now().After(deadline) {
+			t.Fatal("hosts were not registered")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	uiState := state.NewUIState()
@@ -41,6 +59,12 @@ func TestIntegrationPathViewFollowsSelection(t *testing.T) {
 	defer layout.StopPathTrace()
 	layout.UpdateAll()
 	layout.TogglePathView()
+	layout.UpdateAll() // starts following the selected host
+	// The host selected before anything fails; it must stay selected.
+	want, _, _ := layout.pathTracer.State()
+	if want == "" || want == flapping {
+		t.Fatalf("initial path target = %q, want one of the healthy hosts %v", want, hosts[1:])
+	}
 
 	start := time.Now()
 	failed := false
@@ -50,9 +74,9 @@ func TestIntegrationPathViewFollowsSelection(t *testing.T) {
 		for _, h := range hosts {
 			events <- &prober.Event{Key: h, Result: prober.SUCCESS, SentTime: now, Rtt: time.Millisecond}
 		}
-		// Like the report: 8.8.8.8 times out once and jumps to the top
+		// Like the report: one host times out once and jumps to the top
 		if !failed && time.Since(start) > duration/3 {
-			events <- &prober.Event{Key: "8.8.8.8", Result: prober.TIMEOUT, SentTime: now, Message: "timeout"}
+			events <- &prober.Event{Key: flapping, Result: prober.TIMEOUT, SentTime: now, Message: "timeout"}
 			failed = true
 		}
 		time.Sleep(250 * time.Millisecond) // TUI refresh period
@@ -60,11 +84,14 @@ func TestIntegrationPathViewFollowsSelection(t *testing.T) {
 		layout.UpdateAll()
 		target, res, err := layout.pathTracer.State()
 		if err != nil {
+			if os.Getenv("MPING_IT_STRICT") == "1" {
+				t.Fatalf("path tracing unavailable: %v", err)
+			}
 			t.Skipf("path tracing unavailable: %v", err)
 		}
-		if target != "1.1.1.1" {
-			t.Fatalf("path target switched to %q at %v, want it to stay on 1.1.1.1",
-				target, time.Since(start).Round(time.Millisecond))
+		if target != want {
+			t.Fatalf("path target switched to %q at %v, want it to stay on %s",
+				target, time.Since(start).Round(time.Millisecond), want)
 		}
 		if res == nil {
 			continue
@@ -79,5 +106,5 @@ func TestIntegrationPathViewFollowsSelection(t *testing.T) {
 	if res == nil || res.Rounds < int(duration/time.Second)-2 {
 		t.Fatalf("trace made too little progress: %+v", res)
 	}
-	t.Logf("path to 1.1.1.1 kept for %v: %d rounds, %d hops, reached=%v", duration, res.Rounds, len(res.Hops), res.Reached)
+	t.Logf("path to %s kept for %v: %d rounds, %d hops, reached=%v", want, duration, res.Rounds, len(res.Hops), res.Reached)
 }
