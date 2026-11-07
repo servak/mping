@@ -13,7 +13,7 @@ package trace
 //	MPING_IT_INTERVAL  interval between rounds (default 1s, same as the TUI)
 //	MPING_IT_STRICT    "1" fails instead of skipping when a target cannot be
 //	                   traced (no ICMP socket); CI sets it with loopback targets
-//	MPING_IT_PRIVILEGED "1" requires the raw socket (not the datagram fallback)
+//	MPING_IT_PRIVILEGED "1" requires the raw socket, "0" the datagram fallback
 //
 // CI runs it against loopback only (GitHub-hosted runners block outbound ICMP):
 //
@@ -83,8 +83,15 @@ func TestIntegrationTrace(t *testing.T) {
 				res.Privileged, res.Reached, res.Rounds, len(res.Hops), log.late)
 			t.Log("\n" + renderGrid(res, log))
 
-			if os.Getenv("MPING_IT_PRIVILEGED") == "1" && !res.Privileged {
-				t.Errorf("traced with the datagram fallback, want a raw socket (cap_net_raw)")
+			switch os.Getenv("MPING_IT_PRIVILEGED") {
+			case "1":
+				if !res.Privileged {
+					t.Errorf("traced with the datagram fallback, want a raw socket (cap_net_raw)")
+				}
+			case "0":
+				if res.Privileged {
+					t.Errorf("traced with a raw socket, want the unprivileged datagram fallback")
+				}
 			}
 			checkInvariants(t, res, log)
 		})

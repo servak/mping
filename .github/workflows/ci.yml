@@ -131,38 +131,40 @@ jobs:
         ip addr show lo
         sysctl net.ipv4.ping_group_range
 
-    # Datagram ICMP fallback of the tracer (no privileges). Strict only when
-    # the kernel allows unprivileged ICMP for this user's group.
-    - name: Integration tests (unprivileged ICMP)
+    # Datagram ICMP fallback of the tracer, as used by unprivileged users on
+    # distros that allow it. The runner disables it (ping_group_range "1 0"),
+    # so enable it for all groups on this throwaway VM.
+    - name: Integration tests (unprivileged datagram ICMP)
       env:
         MPING_IT_TARGETS: 127.0.0.1,::1
         MPING_IT_ROUNDS: '10'
         MPING_IT_INTERVAL: 200ms
         MPING_IT_HOSTS: 127.0.0.3,127.0.0.1,127.0.0.2
         MPING_IT_DURATION: 8s
+        MPING_IT_STRICT: '1'
+        MPING_IT_PRIVILEGED: '0'
       run: |
-        read -r lo hi < /proc/sys/net/ipv4/ping_group_range
-        gid=$(id -g)
-        if [ "$gid" -ge "$lo" ] && [ "$gid" -le "$hi" ]; then
-          export MPING_IT_STRICT=1
-        else
-          echo "::notice::unprivileged ICMP is disabled (ping_group_range=$lo $hi); unprivileged trace tests may skip"
-        fi
+        sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
         go test -tags integration -count=1 -v -run Integration ./internal/trace/ ./internal/ui/tui/
 
-    # Raw socket path: compile the test binary and grant it cap_net_raw
+    # Raw socket path: compile the test binaries and grant them cap_net_raw
     # instead of running go test as root.
     - name: Integration tests (raw ICMP via cap_net_raw)
       env:
         MPING_IT_TARGETS: 127.0.0.1,::1
         MPING_IT_ROUNDS: '10'
         MPING_IT_INTERVAL: 200ms
+        MPING_IT_HOSTS: 127.0.0.3,127.0.0.1,127.0.0.2
+        MPING_IT_DURATION: 8s
         MPING_IT_STRICT: '1'
         MPING_IT_PRIVILEGED: '1'
       run: |
-        go test -c -tags integration -o "$RUNNER_TEMP/trace.test" ./internal/trace/
-        sudo setcap cap_net_raw=+ep "$RUNNER_TEMP/trace.test"
-        cd internal/trace && "$RUNNER_TEMP/trace.test" -test.count=1 -test.v -test.run Integration
+        for pkg in trace ui/tui; do
+          bin="$RUNNER_TEMP/$(basename "$pkg").test"
+          go test -c -tags integration -o "$bin" "./internal/$pkg/"
+          sudo setcap cap_net_raw=+ep "$bin"
+          (cd "internal/$pkg" && "$bin" -test.count=1 -test.v -test.run Integration)
+        done
 
     - name: Build mping with cap_net_raw
       run: |

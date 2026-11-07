@@ -620,4 +620,6 @@ sudo setcap cap_net_raw=+ep /tmp/trace.test
 (cd internal/trace && MPING_IT_TARGETS=127.0.0.1,::1 MPING_IT_PRIVILEGED=1 /tmp/trace.test -test.run Integration -test.v)
 ```
 
+Without privileges the tracer falls back to datagram ICMP, which Linux only allows when the user's group is within `net.ipv4.ping_group_range` (otherwise the integration tests skip; `MPING_IT_STRICT=1` makes them fail). `MPING_IT_PRIVILEGED=1` / `0` asserts which socket type was used.
+
 On macOS everything except the ICMP prober cases runs without privileges: the tracer falls back to unprivileged datagram ICMP, and HTTP/HTTPS/TCP/DNS/NTP need none. The ICMP prober cases need `sudo` (setcap does not exist on macOS) and are skipped otherwise.
