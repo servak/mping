@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rivo/tview"
+
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/stats/statstest"
@@ -402,10 +404,7 @@ func TestHostListPanelLastFailTimeShowsOutage(t *testing.T) {
 	)
 	panel.Update()
 
-	col := shared.ColumnLastFailTime + 1 // shifted by the History column
-	if got := panel.table.GetCell(0, col).Text; !strings.Contains(got, "LastFailTime") {
-		t.Fatalf("header at column %d = %q, want LastFailTime", col, got)
-	}
+	col := columnByHeader(t, panel, "LastFailTime")
 	for row := 0; row < panel.table.GetRowCount(); row++ {
 		for c := 0; c < panel.table.GetColumnCount(); c++ {
 			if strings.Contains(panel.table.GetCell(row, c).Text, "Outage") {
@@ -484,3 +483,53 @@ func TestHostListPanelMarksSilencedHost(t *testing.T) {
 type fakeSilence map[string]bool
 
 func (f fakeSilence) IsSilenced(name string) bool { return f[name] }
+
+// columnByHeader returns the index of the column whose header starts with title
+func columnByHeader(t *testing.T, p *HostListPanel, title string) int {
+	t.Helper()
+	for c := 0; c < p.table.GetColumnCount(); c++ {
+		if strings.HasPrefix(strings.TrimSpace(p.table.GetCell(0, c).Text), title) {
+			return c
+		}
+	}
+	t.Fatalf("no column with header %q", title)
+	return -1
+}
+
+func TestHostListPanelColumns(t *testing.T) {
+	mm := statstest.NewQuietManager()
+	statstest.Register(t, mm, "a")
+	panel := NewHostListPanel(newMockState(), mm, nil, shared.DefaultConfig())
+	panel.Update()
+
+	want := []struct {
+		header string
+		align  int
+	}{
+		{"Host", tview.AlignLeft},
+		{"Sent", tview.AlignRight},
+		{"Succ ↓", tview.AlignRight}, // newMockState sorts by Success, descending
+		{"Fail", tview.AlignRight},
+		{"Loss", tview.AlignRight},
+		{"History", tview.AlignLeft},
+		{"Last", tview.AlignRight},
+		{"Avg", tview.AlignRight},
+		{"Best", tview.AlignRight},
+		{"Worst", tview.AlignRight},
+		{"LastSuccTime", tview.AlignCenter},
+		{"LastFailTime", tview.AlignCenter},
+		{"FAIL Reason", tview.AlignLeft},
+	}
+	if got := panel.table.GetColumnCount(); got != len(want) {
+		t.Fatalf("column count = %d, want %d", got, len(want))
+	}
+	for c, w := range want {
+		cell := panel.table.GetCell(0, c)
+		if got := strings.TrimSpace(cell.Text); got != w.header {
+			t.Errorf("header %d = %q, want %q", c, got, w.header)
+		}
+		if cell.Align != w.align {
+			t.Errorf("column %q align = %d, want %d", w.header, cell.Align, w.align)
+		}
+	}
+}
