@@ -206,8 +206,8 @@ func (pm *probeManager) getOrCreateProber(proberType string) (Prober, error) {
 		prober, err = NewICMPProber(ICMPV4, config.ICMP, proberType)
 	case ICMPV6:
 		prober, err = NewICMPProber(ICMPV6, config.ICMP, proberType)
-	case HTTP, HTTPS: // Both HTTP and HTTPS use HTTPProber (protocol determined by TLS config)
-		prober = NewHTTPProber(config.HTTP, proberType)
+	case HTTP, HTTPS: // Both HTTP and HTTPS use HTTPProber (scheme rules: see HTTPProber.resolveURL)
+		prober = NewHTTPProber(config.Probe, config.HTTP, proberType)
 	case TCP:
 		prober = NewTCPProber(config.TCP, proberType)
 	case DNS:

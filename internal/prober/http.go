@@ -21,12 +21,13 @@ const (
 
 type (
 	HTTPProber struct {
-		client   *http.Client
-		targets  []string
-		config   *HTTPConfig
-		prefix   string // Custom prefix like "my-http", "http", "https", etc.
-		exitChan chan bool
-		wg       sync.WaitGroup
+		client    *http.Client
+		targets   []string
+		config    *HTTPConfig
+		probeType ProbeType // HTTP or HTTPS (the "probe:" value of the prober config)
+		prefix    string    // Custom prefix like "my-http", "http", "https", etc.
+		exitChan  chan bool
+		wg        sync.WaitGroup
 	}
 
 	HTTPConfig struct {
@@ -38,7 +39,9 @@ type (
 	}
 
 	TLSConfig struct {
-		SkipVerify bool `yaml:"skip_verify"`
+		// SkipVerify controls TLS certificate verification.
+		// nil (unset) means the default, which is to skip verification.
+		SkipVerify *bool `yaml:"skip_verify,omitempty"`
 	}
 
 	customTransport struct {
@@ -47,7 +50,24 @@ type (
 	}
 )
 
-func NewHTTPProber(cfg *HTTPConfig, prefix string) *HTTPProber {
+// ShouldSkipVerify reports whether TLS certificate verification should be skipped.
+// A nil TLSConfig or an unset skip_verify falls back to the default (true).
+func (t *TLSConfig) ShouldSkipVerify() bool {
+	if t == nil || t.SkipVerify == nil {
+		return true
+	}
+	return *t.SkipVerify
+}
+
+// BoolPtr returns a pointer to b. Useful for optional boolean config fields.
+func BoolPtr(b bool) *bool {
+	return &b
+}
+
+// NewHTTPProber creates an HTTP(S) prober. probeType is the "probe:" value of the
+// prober config (HTTP or HTTPS) and is used to pick the default URL scheme for
+// custom prefixes (see resolveURL).
+func NewHTTPProber(probeType ProbeType, cfg *HTTPConfig, prefix string) *HTTPProber {
 	var rd func(req *http.Request, via []*http.Request) error
 	if cfg.RedirectOFF {
 		rd = func(req *http.Request, via []*http.Request) error {
@@ -55,11 +75,8 @@ func NewHTTPProber(cfg *HTTPConfig, prefix string) *HTTPProber {
 		}
 	}
 
-	// Determine TLS skip verification setting
-	skipVerify := true
-	if cfg.TLS != nil {
-		skipVerify = cfg.TLS.SkipVerify // Use new TLS config if available
-	}
+	// Determine TLS skip verification setting (default: skip)
+	skipVerify := cfg.TLS.ShouldSkipVerify()
 
 	client := &http.Client{
 		Transport: &customTransport{
@@ -71,11 +88,12 @@ func NewHTTPProber(cfg *HTTPConfig, prefix string) *HTTPProber {
 		CheckRedirect: rd,
 	}
 	return &HTTPProber{
-		client:   client,
-		targets:  make([]string, 0),
-		config:   cfg,
-		prefix:   prefix,
-		exitChan: make(chan bool),
+		client:    client,
+		targets:   make([]string, 0),
+		config:    cfg,
+		probeType: probeType,
+		prefix:    prefix,
+		exitChan:  make(chan bool),
 	}
 }
 
@@ -85,19 +103,16 @@ func (p *HTTPProber) Accept(target string) error {
 		return ErrNotAccepted
 	}
 
-	// Extract the actual URL part
-	hostname := strings.TrimPrefix(target, p.prefix+"://")
+	scheme, rest := p.resolveURL(target)
 
-	// Create the actual HTTP URL for validation
-	var actualURL string
-	if p.config != nil && p.config.TLS != nil {
-		actualURL = "https://" + hostname
-	} else {
-		actualURL = "http://" + hostname
+	// The remainder must be a plain "host[:port][/path]". Anything still
+	// containing "://" (e.g. "http://ftp://host") is malformed.
+	if rest == "" || strings.Contains(rest, "://") {
+		return fmt.Errorf("invalid HTTP URL format")
 	}
 
 	// Validate URL format
-	u, err := url.Parse(actualURL)
+	u, err := url.Parse(scheme + "://" + rest)
 	if err != nil || u.Host == "" {
 		return fmt.Errorf("invalid HTTP URL format")
 	}
@@ -110,16 +125,41 @@ func (p *HTTPProber) Accept(target string) error {
 
 }
 
+// resolveURL splits a target ("<prefix>://<rest>") into the URL scheme to use
+// and the remainder (host[:port][/path]). The scheme is decided as follows:
+//
+//  1. Built-in prefixes: "https" always uses https and "http" always uses http,
+//     regardless of the probe type or tls block.
+//  2. Custom prefixes whose remainder carries an explicit scheme
+//     ("api-check://https://host") use that scheme; it is stripped from rest.
+//  3. Otherwise the prober config decides: "probe: https" -> https; a tls block
+//     present -> https (backward compatibility with older configs); else http.
+func (p *HTTPProber) resolveURL(target string) (scheme, rest string) {
+	rest = strings.TrimPrefix(target, p.prefix+"://")
+
+	switch p.prefix {
+	case string(HTTPS):
+		return "https", rest
+	case string(HTTP):
+		return "http", rest
+	}
+
+	for _, s := range []string{"https", "http"} {
+		if after, ok := strings.CutPrefix(rest, s+"://"); ok {
+			return s, after
+		}
+	}
+
+	if p.probeType == HTTPS || (p.config != nil && p.config.TLS != nil) {
+		return "https", rest
+	}
+	return "http", rest
+}
+
 // convertToActualURL converts custom target to actual HTTP URL
 func (p *HTTPProber) convertToActualURL(target string) string {
-	// Extract hostname from custom target
-	hostname := strings.TrimPrefix(target, p.prefix+"://")
-
-	// Determine protocol based on TLS configuration
-	if p.config != nil && p.config.TLS != nil {
-		return "https://" + hostname
-	}
-	return "http://" + hostname
+	scheme, rest := p.resolveURL(target)
+	return scheme + "://" + rest
 }
 
 func (p *HTTPProber) sent(r chan *Event, t string) {
@@ -158,7 +198,8 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 	p.sent(r, target)
 
 	// Convert target to actual HTTP URL
-	actualURL := p.convertToActualURL(target)
+	scheme, rest := p.resolveURL(target)
+	actualURL := scheme + "://" + rest
 	resp, err := p.client.Get(actualURL)
 	if err != nil {
 		if err, ok := err.(net.Error); ok && err.Timeout() {
@@ -188,20 +229,15 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 			}
 		}
 
+		// Compare against the URL actually requested (not the target, which
+		// may carry a custom prefix) to detect redirects.
 		var redirects []string
-		if resp.Request.URL.String() != target {
-			redirects = append(redirects, resp.Request.URL.String())
-		}
-
-		var probeType string
-		if strings.HasPrefix(target, "https://") {
-			probeType = "https"
-		} else {
-			probeType = "http"
+		if finalURL := resp.Request.URL.String(); finalURL != actualURL {
+			redirects = append(redirects, finalURL)
 		}
 
 		details := &ProbeDetails{
-			ProbeType: probeType,
+			ProbeType: scheme,
 			HTTP: &HTTPDetails{
 				StatusCode:   resp.StatusCode,
 				ResponseSize: int64(len(body)),
@@ -263,7 +299,17 @@ func (p *HTTPProber) Stop() {
 }
 
 func (c *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if len(c.headers) == 0 {
+		return c.transport.RoundTrip(req)
+	}
+	// A RoundTripper must not modify the caller's request.
+	req = req.Clone(req.Context())
 	for k, v := range c.headers {
+		// net/http ignores Header["Host"]; the Host header is taken from req.Host.
+		if strings.EqualFold(k, "Host") {
+			req.Host = v
+			continue
+		}
 		req.Header.Set(k, v)
 	}
 	return c.transport.RoundTrip(req)
