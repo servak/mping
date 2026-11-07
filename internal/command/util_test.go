@@ -19,6 +19,16 @@ func TestParseBrackets(t *testing.T) {
 			expected: []string{"example.com", "google.com"},
 		},
 		{
+			name:     "IPv6 literals are not expanded",
+			input:    []string{"tcp://[::1]:8080", "http://[2001:db8::1]/health", "https://[fe80::1%eth0]:443/"},
+			expected: []string{"tcp://[::1]:8080", "http://[2001:db8::1]/health", "https://[fe80::1%eth0]:443/"},
+		},
+		{
+			name:     "IPv6 literal mixed with range expansion",
+			input:    []string{"http://[::1]:80[80-81]/"},
+			expected: []string{"http://[::1]:8080/", "http://[::1]:8081/"},
+		},
+		{
 			name:     "simple numeric range",
 			input:    []string{"server[1-3].example.com"},
 			expected: []string{"server1.example.com", "server2.example.com", "server3.example.com"},
