@@ -4,7 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats/statstest"
+	"github.com/servak/mping/internal/trace"
 	"github.com/servak/mping/internal/ui/shared"
 	"github.com/servak/mping/internal/ui/tui/state"
 )
@@ -57,6 +59,40 @@ func TestFilterToggleKeepsSidePanel(t *testing.T) {
 			tt.toggle(l)
 			if hasSidePanel(l) {
 				t.Error("toggling the mode off should drop the side panel")
+			}
+		})
+	}
+}
+
+// The path view traces like the selected probe flows: ICMP for ICMP targets,
+// UDP (all ECMP branches) for every other prober kind.
+func TestPathViewProtocolFollowsProbeType(t *testing.T) {
+	tests := []struct {
+		target    string
+		probeType prober.ProbeType
+		want      trace.Proto
+	}{
+		{"127.0.0.1", "icmpv4", trace.ProtoICMP},
+		{"::1", "icmpv6", trace.ProtoICMP},
+		{"tcp://127.0.0.1:443", "tcp", trace.ProtoUDP},
+		{"https://127.0.0.1/", "https", trace.ProtoUDP},
+		{"dns://127.0.0.1/example.com", "dns", trace.ProtoUDP},
+		{"unregistered", "", trace.ProtoICMP},
+	}
+	for _, tt := range tests {
+		t.Run(tt.target, func(t *testing.T) {
+			mm := statstest.NewQuietManager()
+			statstest.RegisterProbe(t, mm, tt.target, tt.probeType)
+			l := NewLayoutManager(state.NewUIState(), mm, nil, shared.DefaultConfig(), time.Second, time.Second)
+			defer l.StopPathTrace()
+			l.TogglePathView()
+			l.UpdateAll()
+
+			l.pathTracer.mu.Lock()
+			target, proto := l.pathTracer.target, l.pathTracer.proto
+			l.pathTracer.mu.Unlock()
+			if target != tt.target || proto != tt.want {
+				t.Errorf("tracing %q with %q, want %q with %q", target, proto, tt.target, tt.want)
 			}
 		})
 	}

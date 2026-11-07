@@ -23,11 +23,27 @@ import (
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/stats/statstest"
+	"github.com/servak/mping/internal/trace"
 	"github.com/servak/mping/internal/ui/shared"
 	"github.com/servak/mping/internal/ui/tui/state"
 )
 
 func TestIntegrationPathViewFollowsSelection(t *testing.T) {
+	// ICMP targets are traced with ICMP, every other prober kind with UDP
+	for _, tc := range []struct {
+		probeType prober.ProbeType
+		want      trace.Proto
+	}{
+		{"icmpv4", trace.ProtoICMP},
+		{"tcp", trace.ProtoUDP},
+	} {
+		t.Run(string(tc.want), func(t *testing.T) {
+			runPathViewFollowsSelection(t, tc.probeType, tc.want)
+		})
+	}
+}
+
+func runPathViewFollowsSelection(t *testing.T, probeType prober.ProbeType, wantProto trace.Proto) {
 	duration := 12 * time.Second
 	if v, err := time.ParseDuration(os.Getenv("MPING_IT_DURATION")); err == nil {
 		duration = v
@@ -44,7 +60,7 @@ func TestIntegrationPathViewFollowsSelection(t *testing.T) {
 	}
 	flapping := hosts[0]
 	for _, h := range hosts {
-		events <- &prober.Event{Key: h, DisplayName: h, Result: prober.REGISTER}
+		events <- &prober.Event{Key: h, DisplayName: h, Result: prober.REGISTER, ProbeType: probeType}
 	}
 	// Events are processed asynchronously; select only once every host is listed
 	for deadline := time.Now().Add(5 * time.Second); len(mm.SortBy(stats.Host, true)) < len(hosts); {
@@ -95,6 +111,9 @@ func TestIntegrationPathViewFollowsSelection(t *testing.T) {
 		}
 		if res == nil {
 			continue
+		}
+		if res.Proto != wantProto {
+			t.Fatalf("traced with %q, want %q", res.Proto, wantProto)
 		}
 		if res.Rounds < lastRounds {
 			t.Fatalf("rounds went back from %d to %d: the trace was restarted", lastRounds, res.Rounds)

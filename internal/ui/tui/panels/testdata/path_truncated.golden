@@ -1,4 +1,4 @@
-[#5FAFFF]192.0.2.10[#ffffff] · 42 rounds
+[#5FAFFF]192.0.2.10[#ffffff] · icmp · 42 rounds
 [#ffff00]Hop  Host        Share    Loss  Snt   Last    Avg   Best   Wrst[#ffffff]
 [#ffffff]  1  10.0.1.1      48%[#ffffff]  [#ffffff]  0.0%[#ffffff]   42 [#ffffff]   2ms    2ms    1ms    3ms[#ffffff]
 [#ffffff]     10.0.1.2      10%                 3ms    3ms    2ms    4ms[#ffffff]

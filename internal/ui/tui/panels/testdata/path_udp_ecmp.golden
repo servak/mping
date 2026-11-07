@@ -1,0 +1,10 @@
+[#5FAFFF]192.0.2.10[#ffffff] · udp · 42 rounds
+[#ffff00]Hop  Host          Share    Loss  Snt   Last    Avg   Best   Wrst[#ffffff]
+[#ffffff]  1  192.0.2.1          [#ffffff]  [#ffffff]  0.0%[#ffffff]   42 [#ffffff]   1ms    1ms    1ms    2ms[#ffffff]
+[#ffffff]  2  10.0.0.1        26%[#ffffff]  [#ffffff]  0.0%[#ffffff]   42 [#ffffff]   2ms    2ms    1ms    3ms[#ffffff]
+[#ffffff]     10.0.0.5        26%                 2ms    2ms    1ms    3ms[#ffffff]
+[#ffffff]     10.0.0.9        24%                 3ms    3ms    2ms    4ms[#ffffff]
+[#ffffff]     10.0.0.13       24%                 2ms    2ms    1ms    3ms[#ffffff]
+[#ffffff]  3  198.51.100.1    50%[#ffffff]  [#ffffff]  0.0%[#ffffff]   42 [#ffffff]   4ms    4ms    3ms    5ms[#ffffff]
+[#ffffff]     198.51.100.5    50%                 5ms    5ms    4ms    6ms[#ffffff]
+[#ffffff]  9  192.0.2.10         [#ffffff]  [#ffffff]  0.0%[#ffffff]   42 [#ffffff]   8ms    8ms    7ms    9ms[#ffffff]

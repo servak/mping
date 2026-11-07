@@ -82,3 +82,28 @@ func TestFormatPathWaitingAndRateLimitColors(t *testing.T) {
 		t.Errorf("real loss should use the error color:\n%s", got)
 	}
 }
+
+func TestFormatPathProtocolAndPrivilegeNote(t *testing.T) {
+	theme := shared.PredefinedThemes["dark"]
+	res := &trace.Result{Dst: net.ParseIP("192.0.2.10"), Rounds: 2, Reached: true,
+		Hops: []trace.Hop{{TTL: 1, Addr: "192.0.2.10", Sent: 2, Recv: 2}}}
+	for _, tt := range []struct {
+		proto    trace.Proto
+		header   string
+		wantNote bool
+	}{
+		{"", "192.0.2.10[#ffffff] · icmp · 2 rounds", true},
+		{trace.ProtoICMP, "192.0.2.10[#ffffff] · icmp · 2 rounds", true},
+		// The UDP fallbacks see every hop, so no ICMP note
+		{trace.ProtoUDP, "192.0.2.10[#ffffff] · udp · 2 rounds", false},
+	} {
+		res.Proto = tt.proto
+		got := FormatPath("192.0.2.10", res, nil, &theme)
+		if !strings.Contains(got, tt.header) {
+			t.Errorf("proto %q: header missing %q:\n%s", tt.proto, tt.header, got)
+		}
+		if note := strings.Contains(got, "unprivileged ICMP"); note != tt.wantNote {
+			t.Errorf("proto %q: unprivileged note = %v, want %v", tt.proto, note, tt.wantNote)
+		}
+	}
+}
