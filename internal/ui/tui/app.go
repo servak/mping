@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -21,8 +20,6 @@ type TUIApp struct {
 	config   *shared.Config
 	interval time.Duration
 	timeout  time.Duration
-	ctx      context.Context
-	cancel   context.CancelFunc
 }
 
 // NewTUIApp creates a new TUIApp instance
@@ -30,8 +27,6 @@ func NewTUIApp(mm stats.MetricsManager, cfg *shared.Config, interval, timeout ti
 	if cfg == nil {
 		cfg = shared.DefaultConfig()
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
 
 	app := tview.NewApplication()
 	app.EnableMouse(true)
@@ -46,8 +41,6 @@ func NewTUIApp(mm stats.MetricsManager, cfg *shared.Config, interval, timeout ti
 		config:   cfg,
 		interval: interval,
 		timeout:  timeout,
-		ctx:      ctx,
-		cancel:   cancel,
 	}
 
 	tuiApp.setupCallbacks()
@@ -74,7 +67,6 @@ func (a *TUIApp) Update() {
 
 // Close terminates the application
 func (a *TUIApp) Close() {
-	a.cancel()
 	a.app.Stop()
 }
 
@@ -303,22 +295,10 @@ func (a *TUIApp) handleRowSelection(row, col int) {
 		return // Skip header row
 	}
 
-	// Get filtered metrics directly
-	metrics := a.getFilteredMetrics()
-	tableData := shared.NewTableData(metrics, a.state.GetSortKey(), a.state.IsAscending())
-
-	// Convert table row to data row (subtract 1 for header)
-	dataRow := row - 1
-	if metric, ok := tableData.GetMetricAtRow(dataRow); ok {
-		// Update detail panel instead of showing modal
+	// Update detail panel instead of showing modal
+	if metric, ok := a.layout.GetHostListPanel().CurrentSelectedMetric(); ok {
 		a.layout.SetSelectedMetrics(metric)
 	}
-}
-
-// getFilteredMetrics returns filtered metrics based on current state
-func (a *TUIApp) getFilteredMetrics() []stats.Metrics {
-	metrics := a.mm.SortBy(a.state.GetSortKey(), a.state.IsAscending())
-	return shared.FilterMetrics(metrics, a.state.GetFilter())
 }
 
 // Theme-related methods

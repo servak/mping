@@ -193,5 +193,4 @@ func TestUIStateInterfaces(t *testing.T) {
 	var _ SortState = state
 	var _ FilterState = state
 	var _ RenderState = state
-	var _ FullUIState = state
 }

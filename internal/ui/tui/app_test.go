@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"github.com/servak/mping/internal/stats"
+	"github.com/servak/mping/internal/stats/statstest"
 	"github.com/servak/mping/internal/ui/shared"
 )
 
 func TestNewTUIApp(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	cfg := shared.DefaultConfig()
 	interval := time.Second
 	timeout := time.Second
@@ -50,7 +51,7 @@ func TestNewTUIApp(t *testing.T) {
 }
 
 func TestNewTUIAppWithNilConfig(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	interval := time.Second
 	timeout := time.Second
 
@@ -71,7 +72,7 @@ func TestNewTUIAppWithNilConfig(t *testing.T) {
 }
 
 func TestTUIAppClose(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	cfg := shared.DefaultConfig()
 	app := NewTUIApp(mm, cfg, time.Second, time.Second)
 
@@ -86,7 +87,7 @@ func TestTUIAppClose(t *testing.T) {
 }
 
 func TestTUIAppSortMethods(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	cfg := shared.DefaultConfig()
 	app := NewTUIApp(mm, cfg, time.Second, time.Second)
 
@@ -115,12 +116,12 @@ func TestTUIAppSortMethods(t *testing.T) {
 }
 
 func TestTUIAppResetMetrics(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	cfg := shared.DefaultConfig()
 	app := NewTUIApp(mm, cfg, time.Second, time.Second)
 
 	// Register test data
-	mm.Register("test.com", "test.com")
+	statstest.Register(t, mm, "test.com")
 
 	// Test resetMetrics doesn't panic
 	defer func() {
@@ -133,7 +134,7 @@ func TestTUIAppResetMetrics(t *testing.T) {
 }
 
 func TestTUIAppFilterMethods(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	cfg := shared.DefaultConfig()
 	app := NewTUIApp(mm, cfg, time.Second, time.Second)
 
@@ -145,32 +146,8 @@ func TestTUIAppFilterMethods(t *testing.T) {
 	}
 }
 
-func TestTUIAppGetFilteredMetrics(t *testing.T) {
-	mm := stats.NewMetricsManager()
-	cfg := shared.DefaultConfig()
-	app := NewTUIApp(mm, cfg, time.Second, time.Second)
-
-	// Register test metrics
-	mm.Register("google.com", "google.com")
-	mm.Register("yahoo.com", "yahoo.com")
-	mm.Register("example.org", "example.org")
-
-	// Test without filter
-	metrics := app.getFilteredMetrics()
-	if len(metrics) != 3 {
-		t.Errorf("Expected 3 metrics without filter, got %d", len(metrics))
-	}
-
-	// Test with filter
-	app.state.SetFilter("google")
-	metrics = app.getFilteredMetrics()
-	if len(metrics) != 1 {
-		t.Errorf("Expected 1 metric with 'google' filter, got %d", len(metrics))
-	}
-}
-
 func TestTUIAppCreateHelpModal(t *testing.T) {
-	mm := stats.NewMetricsManager()
+	mm := statstest.NewQuietManager()
 	cfg := shared.DefaultConfig()
 	app := NewTUIApp(mm, cfg, time.Second, time.Second)
 

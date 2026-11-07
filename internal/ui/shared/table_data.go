@@ -3,10 +3,8 @@ package shared
 import (
 	"fmt"
 
-	"github.com/gdamore/tcell/v2"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/rivo/tview"
 
 	"github.com/servak/mping/internal/stats"
 )
@@ -87,71 +85,6 @@ func (td *TableData) ToGoPrettyTable() table.Writer {
 			rowData[i] = cell
 		}
 		t.AppendRow(rowData)
-	}
-
-	return t
-}
-
-// ToTviewTable converts to interactive tview.Table format (primary UI)
-// Note: This method is deprecated. Use host_list.go panel implementation instead.
-func (td *TableData) ToTviewTable() *tview.Table {
-	// Use default dark theme colors as fallback
-	theme := PredefinedThemes["dark"]
-
-	t := tview.NewTable().
-		SetFixed(1, 0).
-		SetSelectable(true, false).
-		SetBorders(false). // Disable all borders
-		SetSeparator(' '). // Use space separator instead of lines
-		SetSelectedStyle(tcell.StyleDefault.
-			Background(tcell.GetColor(theme.SelectionBg)).
-			Foreground(tcell.GetColor(theme.SelectionFg)))
-
-	// Define alignment for each column
-	alignments := []int{
-		tview.AlignLeft,   // Host
-		tview.AlignRight,  // Sent
-		tview.AlignRight,  // Succ
-		tview.AlignRight,  // Fail
-		tview.AlignRight,  // Loss
-		tview.AlignRight,  // Last
-		tview.AlignRight,  // Avg
-		tview.AlignRight,  // Best
-		tview.AlignRight,  // Worst
-		tview.AlignCenter, // LastSuccTime
-		tview.AlignCenter, // LastFailTime
-		tview.AlignLeft,   // FAIL Reason
-	}
-
-	// Set headers with direct TableCell struct
-	for col, header := range td.Headers {
-		alignment := tview.AlignLeft
-		if col < len(alignments) {
-			alignment = alignments[col]
-		}
-
-		t.SetCell(0, col, &tview.TableCell{
-			Text:          "  " + header + "  ",
-			Color:         tcell.GetColor(theme.TableHeader),
-			Align:         alignment,
-			NotSelectable: true,
-		})
-	}
-
-	// Set rows with direct TableCell struct
-	for row, rowData := range td.Rows {
-		for col, cellData := range rowData {
-			alignment := tview.AlignLeft
-			if col < len(alignments) {
-				alignment = alignments[col]
-			}
-
-			t.SetCell(row+1, col, &tview.TableCell{
-				Text:  "  " + cellData + "  ",
-				Color: tcell.GetColor(theme.Primary),
-				Align: alignment,
-			})
-		}
 	}
 
 	return t

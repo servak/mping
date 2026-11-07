@@ -56,12 +56,6 @@ func (h *HostDetailPanel) Update() {
 	h.view.SetText(content)
 }
 
-// SetHost sets the current host to display details for
-func (h *HostDetailPanel) SetHost(hostname string) {
-	h.currentHost = hostname
-	h.container.SetTitle(" Host Details: " + hostname + " ")
-}
-
 // SetMetrics sets the current metrics object directly
 func (h *HostDetailPanel) SetMetrics(metrics stats.Metrics) {
 	h.currentMetrics = metrics
@@ -74,13 +68,4 @@ func (h *HostDetailPanel) SetMetrics(metrics stats.Metrics) {
 // GetView returns the underlying tview component
 func (h *HostDetailPanel) GetView() tview.Primitive {
 	return h.container
-}
-
-// SetVisible controls whether the detail panel is visible
-func (h *HostDetailPanel) SetVisible(visible bool) {
-	if visible {
-		h.container.SetBorder(true)
-	} else {
-		h.container.SetBorder(false)
-	}
 }
