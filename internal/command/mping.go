@@ -60,14 +60,9 @@ mping dns://8.8.8.8/google.com`,
 			}
 			cfg.SetTitle(title)
 
-			silenced, err := flags.GetStringSlice("silence")
-			if err != nil {
-				return err
-			}
-
-			// The notifier rings the bell on failures unless the host is
-			// silenced; --silence names match the displayed host name.
-			notifier := beep.NewNotifier(ExpandTargets(silenced, ""))
+			// The notifier rings the bell on failures unless the host was muted
+			// with the "m" key in the TUI.
+			notifier := beep.NewNotifier()
 
 			sess, err := newSession(sessionParams{
 				Cfg:             cfg,
@@ -109,7 +104,6 @@ mping dns://8.8.8.8/google.com`,
 	flags.StringP("title", "n", "", "print title")
 	flags.StringP("config", "c", "~/.mping.yml", "config path")
 	flags.StringP("interface", "I", "", "source interface (name or IP address)")
-	flags.StringSlice("silence", nil, "target whose failure beep is muted (repeatable, comma-separated; bracket/CIDR expansion applies)")
 	flags.IntP("interval", "i", 1000, "interval(ms)")
 	flags.IntP("timeout", "t", 1000, "timeout(ms)")
 

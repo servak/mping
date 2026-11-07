@@ -162,7 +162,7 @@ func TestTUIAppCreateHelpModal(t *testing.T) {
 func TestTUIAppBeepKeysUseNotifier(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	statstest.Register(t, mm, "quiet")
-	n := beep.NewNotifier(nil)
+	n := beep.NewNotifier()
 	app := NewTUIApp(mm, n, shared.DefaultConfig(), time.Second, time.Second)
 
 	app.toggleBeep()

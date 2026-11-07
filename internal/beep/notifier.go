@@ -13,19 +13,15 @@ type Notifier struct {
 	silenced map[string]struct{}
 }
 
-// NewNotifier returns a Notifier with the beep enabled and the given targets
-// (display names) silenced.
-func NewNotifier(silenced []string) *Notifier {
+// NewNotifier returns a Notifier with the beep enabled and no target silenced.
+// Targets are silenced at runtime with ToggleSilence (the TUI "m" key).
+func NewNotifier() *Notifier {
 	b := NewBeeper()
-	n := &Notifier{
+	return &Notifier{
 		beeper:   b,
 		beep:     b.Beep,
-		silenced: make(map[string]struct{}, len(silenced)),
+		silenced: make(map[string]struct{}),
 	}
-	for _, name := range silenced {
-		n.silenced[name] = struct{}{}
-	}
-	return n
 }
 
 // OnFailure rings the bell for a failure of the named target (display name)

@@ -8,7 +8,10 @@ import (
 
 // countingNotifier returns a Notifier whose bell only increments a counter
 func countingNotifier(silenced ...string) (*Notifier, *atomic.Int32) {
-	n := NewNotifier(silenced)
+	n := NewNotifier()
+	for _, name := range silenced {
+		n.ToggleSilence(name)
+	}
 	var rang atomic.Int32
 	n.beep = func() { rang.Add(1) }
 	return n, &rang
@@ -17,7 +20,7 @@ func countingNotifier(silenced ...string) (*Notifier, *atomic.Int32) {
 func TestNotifierSilence(t *testing.T) {
 	n, _ := countingNotifier("quiet")
 	if !n.IsSilenced("quiet") || n.IsSilenced("loud") {
-		t.Error("pre-silenced state wrong")
+		t.Error("initial silenced state wrong")
 	}
 	if !n.ToggleSilence("loud") || !n.IsSilenced("loud") {
 		t.Error("ToggleSilence did not silence")
