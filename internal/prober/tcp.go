@@ -2,9 +2,9 @@ package prober
 
 import (
 	"fmt"
+	"maps"
 	"net"
-	"strings"
-	"sync"
+	"slices"
 	"time"
 )
 
@@ -14,11 +14,10 @@ const (
 
 type (
 	TCPProber struct {
-		targets  map[string]string // key (ip:port) -> displayName (host:port)
-		config   *TCPConfig
-		prefix   string
-		exitChan chan bool
-		wg       sync.WaitGroup
+		targets map[string]string // key (ip:port) -> displayName (host:port)
+		config  *TCPConfig
+		prefix  string
+		loop    *runLoop
 	}
 
 	TCPConfig struct {
@@ -34,16 +33,15 @@ func (cfg *TCPConfig) Validate() error {
 
 func NewTCPProber(cfg *TCPConfig, prefix string) *TCPProber {
 	return &TCPProber{
-		targets:  make(map[string]string),
-		config:   cfg,
-		prefix:   prefix,
-		exitChan: make(chan bool),
+		targets: make(map[string]string),
+		config:  cfg,
+		prefix:  prefix,
+		loop:    newRunLoop(),
 	}
 }
 
 func (p *TCPProber) Accept(target string) error {
-	// Check if it's new format (tcp://host:port)
-	if !strings.HasPrefix(target, p.prefix+"://") && !strings.HasPrefix(target, p.prefix+":") {
+	if _, ok := cutPrefix(target, p.prefix); !ok {
 		return ErrNotAccepted
 	}
 
@@ -67,54 +65,22 @@ func (p *TCPProber) Accept(target string) error {
 	return nil
 }
 
-func (p *TCPProber) emitRegistrationEvents(r chan *Event) {
-	for k, v := range p.targets {
-		r <- &Event{
-			Key:         k,
-			DisplayName: v,
-			Result:      REGISTER,
-		}
-	}
-}
-
 func (p *TCPProber) Start(result chan *Event, interval, timeout time.Duration) error {
-	p.emitRegistrationEvents(result)
-	ticker := time.NewTicker(interval)
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
-		for target := range p.targets {
-			p.wg.Add(1)
-			go p.sendProbe(result, target, timeout)
-		}
-		for {
-			select {
-			case <-p.exitChan:
-				ticker.Stop()
-				return
-			case <-ticker.C:
-				for target := range p.targets {
-					p.wg.Add(1)
-					go p.sendProbe(result, target, timeout)
-				}
-			}
-		}
-	}()
-	p.wg.Wait()
-	return nil
+	return runPeriodic(p.loop, result, interval, slices.Sorted(maps.Keys(p.targets)),
+		func(target string) (string, string) { return target, p.targets[target] },
+		func(target string) { p.sendProbe(result, target, timeout) })
 }
 
+// Stop stops probing and waits for Start to return. It is safe to call more than once.
 func (p *TCPProber) Stop() {
-	close(p.exitChan)
-	p.wg.Wait()
+	p.loop.stop()
 }
 
 func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Duration) {
-	defer p.wg.Done()
-
 	// target is already in "ip:port" format from Accept method
 	now := time.Now()
-	p.sent(result, target, now)
+	name := p.targets[target]
+	result <- sentEvent(target, name, now)
 
 	// Create dialer with timeout
 	dialer := &net.Dialer{
@@ -123,8 +89,9 @@ func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Du
 
 	// Set source interface if specified
 	if p.config.SourceInterface != "" {
-		if localAddr, err := p.getSourceAddr(p.config.SourceInterface); err == nil {
-			dialer.LocalAddr = localAddr
+		// As before, an interface without a usable address is ignored
+		if ip, err := interfaceIP(p.config.SourceInterface, false, true); err == nil {
+			dialer.LocalAddr = &net.TCPAddr{IP: ip}
 		}
 	}
 
@@ -133,22 +100,17 @@ func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Du
 	rtt := time.Since(now)
 
 	if err != nil {
-		p.failed(result, target, now, err)
+		result <- errorEvent(target, name, now, err)
 		return
 	}
 
 	// Close connection immediately after successful establishment
 	conn.Close()
-	p.success(result, target, now, rtt)
+	result <- successEvent(target, name, now, rtt, nil) // TCP has no details
 }
 
 func (p *TCPProber) parseTarget(target string) (host, port string, err error) {
-	// Remove tcp:// or tcp: prefix
-	if strings.HasPrefix(target, p.prefix+"://") {
-		target = strings.TrimPrefix(target, p.prefix+"://")
-	} else if strings.HasPrefix(target, p.prefix+":") {
-		target = strings.TrimPrefix(target, p.prefix+":")
-	}
+	target, _ = cutPrefix(target, p.prefix)
 
 	// Parse host:port
 	host, port, err = net.SplitHostPort(target)
@@ -157,70 +119,4 @@ func (p *TCPProber) parseTarget(target string) (host, port string, err error) {
 	}
 
 	return host, port, nil
-}
-
-func (p *TCPProber) getSourceAddr(interfaceName string) (net.Addr, error) {
-	iface, err := net.InterfaceByName(interfaceName)
-	if err != nil {
-		return nil, err
-	}
-
-	addrs, err := iface.Addrs()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, addr := range addrs {
-		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-			if ipnet.IP.To4() != nil {
-				return &net.TCPAddr{IP: ipnet.IP}, nil
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("no suitable address found on interface %s", interfaceName)
-}
-
-func (p *TCPProber) sent(result chan *Event, target string, sentTime time.Time) {
-	displayName := p.targets[target] // Get displayName from targets map
-	result <- &Event{
-		Key:         target,
-		DisplayName: displayName,
-		Result:      SENT,
-		SentTime:    sentTime,
-		Rtt:         0,
-		Message:     "",
-	}
-}
-
-func (p *TCPProber) success(result chan *Event, target string, sentTime time.Time, rtt time.Duration) {
-	displayName := p.targets[target] // Get displayName from targets map
-
-	// TCP only checks connectivity, so no detailed information
-	result <- &Event{
-		Key:         target,
-		DisplayName: displayName,
-		Result:      SUCCESS,
-		SentTime:    sentTime,
-		Rtt:         rtt,
-		Message:     "",
-		Details:     nil, // TCP has no detailed information
-	}
-}
-
-func (p *TCPProber) failed(result chan *Event, target string, sentTime time.Time, err error) {
-	reason := FAILED
-	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-		reason = TIMEOUT
-	}
-
-	displayName := p.targets[target] // Get displayName from targets map
-	result <- &Event{
-		Key:         target,
-		DisplayName: displayName,
-		Result:      reason,
-		SentTime:    sentTime,
-		Rtt:         0,
-		Message:     err.Error(),
-	}
 }

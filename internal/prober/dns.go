@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/miekg/dns"
@@ -29,11 +28,10 @@ type DNSTarget struct {
 
 type (
 	DNSProber struct {
-		targets  []*DNSTarget
-		config   *DNSConfig
-		prefix   string
-		exitChan chan bool
-		wg       sync.WaitGroup
+		targets []*DNSTarget
+		config  *DNSConfig
+		prefix  string
+		loop    *runLoop
 	}
 
 	DNSConfig struct {
@@ -74,17 +72,16 @@ func (cfg *DNSConfig) Validate() error {
 
 func NewDNSProber(cfg *DNSConfig, prefix string) *DNSProber {
 	return &DNSProber{
-		targets:  make([]*DNSTarget, 0),
-		config:   cfg,
-		prefix:   prefix,
-		exitChan: make(chan bool),
+		targets: make([]*DNSTarget, 0),
+		config:  cfg,
+		prefix:  prefix,
+		loop:    newRunLoop(),
 	}
 }
 
 // Accept parses DNS targets in format: dns://server[:port]/domain[/record_type] or dns:server[:port]/domain[/record_type]
 func (p *DNSProber) Accept(target string) error {
-	// Check if it's new format (dns://...) or legacy format (dns:...)
-	if !strings.HasPrefix(target, p.prefix+"://") && !strings.HasPrefix(target, p.prefix+":") {
+	if _, ok := cutPrefix(target, p.prefix); !ok {
 		return ErrNotAccepted
 	}
 
@@ -114,13 +111,8 @@ func (p *DNSProber) Accept(target string) error {
 }
 
 func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
-	// Remove dns:// or dns: prefix
 	originalTarget := target
-	if strings.HasPrefix(target, p.prefix+"://") {
-		target = strings.TrimPrefix(target, p.prefix+"://")
-	} else if strings.HasPrefix(target, p.prefix+":") {
-		target = strings.TrimPrefix(target, p.prefix+":")
-	}
+	target, _ = cutPrefix(target, p.prefix)
 
 	// Split into server and query parts
 	parts := strings.SplitN(target, "/", 2)
@@ -167,53 +159,21 @@ func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
 	}, nil
 }
 
-func (p *DNSProber) emitRegistrationEvents(r chan *Event) {
-	for _, v := range p.targets {
-		r <- &Event{
-			Key:         v.OriginalTarget,
-			DisplayName: v.OriginalTarget,
-			Result:      REGISTER,
-		}
-	}
-}
-
 func (p *DNSProber) Start(result chan *Event, interval, timeout time.Duration) error {
-	p.emitRegistrationEvents(result)
-	ticker := time.NewTicker(interval)
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
-		for _, target := range p.targets {
-			p.wg.Add(1)
-			go p.sendProbe(result, target, timeout)
-		}
-		for {
-			select {
-			case <-p.exitChan:
-				ticker.Stop()
-				return
-			case <-ticker.C:
-				for _, target := range p.targets {
-					p.wg.Add(1)
-					go p.sendProbe(result, target, timeout)
-				}
-			}
-		}
-	}()
-	p.wg.Wait()
-	return nil
+	return runPeriodic(p.loop, result, interval, p.targets,
+		func(t *DNSTarget) (string, string) { return t.OriginalTarget, t.OriginalTarget },
+		func(t *DNSTarget) { p.sendProbe(result, t, timeout) })
 }
 
+// Stop stops probing and waits for Start to return. It is safe to call more than once.
 func (p *DNSProber) Stop() {
-	close(p.exitChan)
-	p.wg.Wait()
+	p.loop.stop()
 }
 
 func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout time.Duration) {
-	defer p.wg.Done()
-
 	now := time.Now()
-	p.sent(result, target, now)
+	key := target.OriginalTarget
+	result <- sentEvent(key, key, now)
 
 	// Create DNS client
 	c := new(dns.Client)
@@ -226,7 +186,7 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 	m := new(dns.Msg)
 	qtype := dns.StringToType[target.RecordType]
 	if qtype == 0 {
-		p.failed(result, target, now, fmt.Errorf("unsupported record type: %s", target.RecordType))
+		result <- errorEvent(key, key, now, fmt.Errorf("unsupported record type: %s", target.RecordType))
 		return
 	}
 
@@ -237,39 +197,28 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 	server := fmt.Sprintf("%s:%d", target.ServerIP, target.Port)
 	r, rtt, err := c.Exchange(m, server)
 	if err != nil {
-		p.failed(result, target, now, err)
+		result <- errorEvent(key, key, now, err)
 		return
 	}
 
 	// Check DNS response
 	if !p.isExpectedResponseCode(r.Rcode) {
-		p.failed(result, target, now, fmt.Errorf("DNS response code: %d (%s)", r.Rcode, dns.RcodeToString[r.Rcode]))
+		result <- errorEvent(key, key, now, fmt.Errorf("DNS response code: %d (%s)", r.Rcode, dns.RcodeToString[r.Rcode]))
 		return
 	}
 
 	// Success
-	p.success(result, target, now, rtt, r)
+	result <- successEvent(key, key, now, rtt, p.details(target, r))
 }
 
-func (p *DNSProber) sent(result chan *Event, target *DNSTarget, sentTime time.Time) {
-	result <- &Event{
-		Key:         target.OriginalTarget,
-		DisplayName: target.OriginalTarget,
-		Result:      SENT,
-		SentTime:    sentTime,
-		Rtt:         0,
-		Message:     "",
-	}
-}
-
-func (p *DNSProber) success(result chan *Event, target *DNSTarget, sentTime time.Time, rtt time.Duration, resp *dns.Msg) {
-	// Create DNS detail information
+// details describes a successful DNS response.
+func (p *DNSProber) details(target *DNSTarget, resp *dns.Msg) *ProbeDetails {
 	var answers []string
 	for _, ans := range resp.Answer {
 		answers = append(answers, ans.String())
 	}
 
-	details := &ProbeDetails{
+	return &ProbeDetails{
 		ProbeType: "dns",
 		DNS: &DNSDetails{
 			Server:       target.Server,
@@ -281,31 +230,6 @@ func (p *DNSProber) success(result chan *Event, target *DNSTarget, sentTime time
 			Answers:      answers,
 			UseTCP:       target.UseTCP,
 		},
-	}
-
-	result <- &Event{
-		Key:         target.OriginalTarget,
-		DisplayName: target.OriginalTarget,
-		Result:      SUCCESS,
-		SentTime:    sentTime,
-		Rtt:         rtt,
-		Message:     "",
-		Details:     details,
-	}
-}
-
-func (p *DNSProber) failed(result chan *Event, target *DNSTarget, sentTime time.Time, err error) {
-	reason := FAILED
-	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-		reason = TIMEOUT
-	}
-	result <- &Event{
-		Key:         target.OriginalTarget,
-		DisplayName: target.OriginalTarget,
-		Result:      reason,
-		SentTime:    sentTime,
-		Rtt:         0,
-		Message:     err.Error(),
 	}
 }
 

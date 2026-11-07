@@ -5,12 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -26,8 +24,7 @@ type (
 		config    *HTTPConfig
 		probeType ProbeType // HTTP or HTTPS (the "probe:" value of the prober config)
 		prefix    string    // Custom prefix like "my-http", "http", "https", etc.
-		exitChan  chan bool
-		wg        sync.WaitGroup
+		loop      *runLoop
 	}
 
 	HTTPConfig struct {
@@ -93,7 +90,7 @@ func NewHTTPProber(probeType ProbeType, cfg *HTTPConfig, prefix string) *HTTPPro
 		config:    cfg,
 		probeType: probeType,
 		prefix:    prefix,
-		exitChan:  make(chan bool),
+		loop:      newRunLoop(),
 	}
 }
 
@@ -156,50 +153,22 @@ func (p *HTTPProber) resolveURL(target string) (scheme, rest string) {
 	return "http", rest
 }
 
-func (p *HTTPProber) sent(r chan *Event, t string) {
-	r <- &Event{
-		Key:         t,
-		DisplayName: t,
-		Result:      SENT,
-	}
-}
-
-func (p *HTTPProber) timeout(r chan *Event, target string, now time.Time, err error) {
-	r <- &Event{
-		Key:         target,
-		DisplayName: target,
-		Result:      TIMEOUT,
-		SentTime:    now,
-		Rtt:         time.Since(now),
-		Message:     "timeout",
-	}
-}
-
-func (p *HTTPProber) failed(r chan *Event, target string, now time.Time, err error) {
-	r <- &Event{
-		Key:         target,
-		DisplayName: target,
-		Result:      FAILED,
-		SentTime:    now,
-		Rtt:         time.Since(now),
-		Message:     err.Error(),
-	}
-}
-
 func (p *HTTPProber) probe(r chan *Event, target string) {
-	defer p.wg.Done()
 	now := time.Now()
-	p.sent(r, target)
+	r <- sentEvent(target, target, now)
+	fail := func(err error) {
+		r <- failureEvent(target, target, FAILED, now, time.Since(now), err.Error())
+	}
 
 	// Convert target to actual HTTP URL
 	scheme, rest := p.resolveURL(target)
 	actualURL := scheme + "://" + rest
 	resp, err := p.client.Get(actualURL)
 	if err != nil {
-		if err, ok := err.(net.Error); ok && err.Timeout() {
-			p.timeout(r, target, now, err)
+		if classifyErr(err) == TIMEOUT {
+			r <- failureEvent(target, target, TIMEOUT, now, time.Since(now), "timeout")
 		} else {
-			p.failed(r, target, now, err)
+			fail(err)
 		}
 		return
 	}
@@ -207,13 +176,13 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		p.failed(r, target, now, err)
+		fail(err)
 		return
 	}
 	if !p.isExpectedStatusCode(resp.StatusCode) {
-		p.failed(r, target, now, fmt.Errorf("unexpected status code: %d", resp.StatusCode))
+		fail(fmt.Errorf("unexpected status code: %d", resp.StatusCode))
 	} else if p.config.ExpectBody != "" && p.config.ExpectBody != strings.TrimRight(string(body), "\n") {
-		p.failed(r, target, now, errors.New("invalid body"))
+		fail(errors.New("invalid body"))
 	} else {
 		// Create HTTP detail information
 		headers := make(map[string]string)
@@ -240,56 +209,22 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 			},
 		}
 
-		r <- &Event{
-			Key:         target,
-			DisplayName: target,
-			Result:      SUCCESS,
-			SentTime:    now,
-			Rtt:         time.Since(now),
-			Details:     details,
-		}
-	}
-}
-
-func (p *HTTPProber) emitRegistrationEvents(r chan *Event) {
-	for _, v := range p.targets {
-		r <- &Event{
-			Key:         v,
-			DisplayName: v,
-			Result:      REGISTER,
-		}
+		r <- successEvent(target, target, now, time.Since(now), details)
 	}
 }
 
 func (p *HTTPProber) Start(r chan *Event, interval, timeout time.Duration) error {
-	p.emitRegistrationEvents(r)
 	p.client.Timeout = timeout
-	ticker := time.NewTicker(interval)
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
-		for _, target := range p.targets {
-			p.wg.Add(1)
-			go p.probe(r, target)
-		}
-		for {
-			select {
-			case <-p.exitChan:
-				return
-			case <-ticker.C:
-				for _, target := range p.targets {
-					p.wg.Add(1)
-					go p.probe(r, target)
-				}
-			}
-		}
-	}()
-	p.wg.Wait()
-	return nil
+	return runPeriodic(p.loop, r, interval, p.targets,
+		func(target string) (string, string) { return target, target },
+		func(target string) { p.probe(r, target) })
 }
 
+// Stop stops probing, waits for Start to return and closes idle keep-alive
+// connections. It is safe to call more than once.
 func (p *HTTPProber) Stop() {
-	p.exitChan <- true
+	p.loop.stop()
+	p.client.CloseIdleConnections()
 }
 
 func (c *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
