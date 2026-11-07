@@ -51,7 +51,7 @@ func (h *HostDetailPanel) Update() {
 		SetBorderColor(tcell.GetColor(theme.Primary))
 
 	// Format and display the host details with history
-	content := shared.FormatHostDetail(h.currentMetrics, theme)
+	content := FormatHostDetail(h.currentMetrics, theme)
 	h.view.SetBackgroundColor(tcell.GetColor(theme.Background))
 	h.view.SetText(content)
 }

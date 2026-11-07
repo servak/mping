@@ -252,7 +252,7 @@ func listColumns(td *shared.TableData, theme *shared.Theme, now time.Time) []lis
 			cell:   func(r shared.Row) string { return r.Cells[i] },
 		}
 		if c.ID == shared.ColumnLastFailTime {
-			lc.cell = func(r shared.Row) string { return shared.FormatLastFailCell(r.Metric, now, theme) }
+			lc.cell = func(r shared.Row) string { return FormatLastFailCell(r.Metric, now, theme) }
 		}
 		cols = append(cols, lc)
 		if c.ID == shared.ColumnLoss {
@@ -260,7 +260,7 @@ func listColumns(td *shared.TableData, theme *shared.Theme, now time.Time) []lis
 				header: "History",
 				align:  tview.AlignLeft,
 				cell: func(r shared.Row) string {
-					return shared.FormatSparkline(r.Metric.GetRecentHistory(stats.DefaultHistorySize), shared.HistoryWidth, theme)
+					return FormatSparkline(r.Metric.GetRecentHistory(stats.DefaultHistorySize), HistoryWidth, theme)
 				},
 			})
 		}
