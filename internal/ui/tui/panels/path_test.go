@@ -29,11 +29,11 @@ func TestFormatPath(t *testing.T) {
 		Hops: []trace.Hop{
 			{TTL: 1, Addr: "192.0.2.1", Name: strings.Repeat("very-long-router-name.", 4), Sent: 3, Recv: 3, Avg: time.Millisecond},
 			{TTL: 2, Sent: 3},
-			{TTL: 3, Addr: "192.0.2.10", Others: 2, Sent: 3, Recv: 2, Avg: 3 * time.Millisecond},
+			{TTL: 3, Addr: "192.0.2.10", Sent: 3, Recv: 2, Avg: 3 * time.Millisecond},
 		},
 	}
 	got := FormatPath("tcp://[example]:443", res, nil, &theme)
-	for _, want := range []string{"tcp://[example[]:443 (192.0.2.10)", "· 3 rounds", "???", "192.0.2.10 +2", "33.3%", "…"} {
+	for _, want := range []string{"tcp://[example[]:443 (192.0.2.10)", "· 3 rounds", "???", "Share", "192.0.2.10", "33.3%", "…"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("FormatPath missing %q:\n%s", want, got)
 		}

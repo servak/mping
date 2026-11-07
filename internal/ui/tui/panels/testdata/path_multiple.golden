@@ -1,0 +1,6 @@
+[#5FAFFF]192.0.2.10[#ffffff] · 42 rounds
+[#ffff00]Hop  Host        Share    Loss  Snt   Last    Avg   Best   Wrst[#ffffff]
+[#ffffff]  1  192.0.2.1        [#ffffff]  [#ffffff]  0.0%[#ffffff]   42 [#ffffff]   1ms    1ms    1ms    2ms[#ffffff]
+[#ffffff]  2  10.0.0.1      57%[#ffffff]  [#ffffff]  0.0%[#ffffff]   42 [#ffffff]   1ms    1ms    1ms    2ms[#ffffff]
+[#ffffff]     10.0.0.5      43%                 1ms    2ms    1ms    2ms[#ffffff]
+[#ffffff]  9  192.0.2.10       [#ffffff]  [#ffffff]  0.0%[#ffffff]   42 [#ffffff]   8ms    8ms    7ms    9ms[#ffffff]

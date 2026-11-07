@@ -1,0 +1,8 @@
+[#5FAFFF]192.0.2.10[#ffffff] · 42 rounds
+[#ffff00]Hop  Host                Share    Loss  Snt   Last    Avg   Best   Wrst[#ffffff]
+[#ffffff]  3  ae1.r1.example.net    51%[#ffffff]  [#cccccc]  2.4%[#ffffff]   42 [#ffffff]   5ms    5ms    4ms    6ms[#ffffff]
+[#ffffff]     ae2.r2.example.net    49%                 5ms    5ms    4ms    7ms[#ffffff]
+[#ffffff]  4  203.0.113.1           98%[#ffffff]  [#cccccc]  2.4%[#ffffff]   42 [#ffffff]   5ms    5ms    4ms    6ms[#ffffff]
+[#cccccc]     192.0.2.9 (stale)      2%                   -    9ms    9ms    9ms[#ffffff]
+[#ffffff]  9  192.0.2.10               [#ffffff]  [#ffffff]  0.0%[#ffffff]   42 [#ffffff]   8ms    8ms    7ms    9ms[#ffffff]
+[#cccccc]loss only at intermediate hops is usually router ICMP rate limiting[#ffffff]
