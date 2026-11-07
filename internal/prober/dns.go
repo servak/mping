@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/miekg/dns"
@@ -29,11 +28,10 @@ type DNSTarget struct {
 
 type (
 	DNSProber struct {
-		targets  []*DNSTarget
-		config   *DNSConfig
-		prefix   string
-		exitChan chan bool
-		wg       sync.WaitGroup
+		targets []*DNSTarget
+		config  *DNSConfig
+		prefix  string
+		loop    *runLoop
 	}
 
 	DNSConfig struct {
@@ -74,10 +72,10 @@ func (cfg *DNSConfig) Validate() error {
 
 func NewDNSProber(cfg *DNSConfig, prefix string) *DNSProber {
 	return &DNSProber{
-		targets:  make([]*DNSTarget, 0),
-		config:   cfg,
-		prefix:   prefix,
-		exitChan: make(chan bool),
+		targets: make([]*DNSTarget, 0),
+		config:  cfg,
+		prefix:  prefix,
+		loop:    newRunLoop(),
 	}
 }
 
@@ -167,51 +165,18 @@ func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
 	}, nil
 }
 
-func (p *DNSProber) emitRegistrationEvents(r chan *Event) {
-	for _, v := range p.targets {
-		r <- &Event{
-			Key:         v.OriginalTarget,
-			DisplayName: v.OriginalTarget,
-			Result:      REGISTER,
-		}
-	}
-}
-
 func (p *DNSProber) Start(result chan *Event, interval, timeout time.Duration) error {
-	p.emitRegistrationEvents(result)
-	ticker := time.NewTicker(interval)
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
-		for _, target := range p.targets {
-			p.wg.Add(1)
-			go p.sendProbe(result, target, timeout)
-		}
-		for {
-			select {
-			case <-p.exitChan:
-				ticker.Stop()
-				return
-			case <-ticker.C:
-				for _, target := range p.targets {
-					p.wg.Add(1)
-					go p.sendProbe(result, target, timeout)
-				}
-			}
-		}
-	}()
-	p.wg.Wait()
-	return nil
+	return runPeriodic(p.loop, result, interval, p.targets,
+		func(t *DNSTarget) (string, string) { return t.OriginalTarget, t.OriginalTarget },
+		func(t *DNSTarget) { p.sendProbe(result, t, timeout) })
 }
 
+// Stop stops probing and waits for Start to return. It is safe to call more than once.
 func (p *DNSProber) Stop() {
-	close(p.exitChan)
-	p.wg.Wait()
+	p.loop.stop()
 }
 
 func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout time.Duration) {
-	defer p.wg.Done()
-
 	now := time.Now()
 	p.sent(result, target, now)
 

@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -26,8 +25,7 @@ type (
 		config    *HTTPConfig
 		probeType ProbeType // HTTP or HTTPS (the "probe:" value of the prober config)
 		prefix    string    // Custom prefix like "my-http", "http", "https", etc.
-		exitChan  chan bool
-		wg        sync.WaitGroup
+		loop      *runLoop
 	}
 
 	HTTPConfig struct {
@@ -93,7 +91,7 @@ func NewHTTPProber(probeType ProbeType, cfg *HTTPConfig, prefix string) *HTTPPro
 		config:    cfg,
 		probeType: probeType,
 		prefix:    prefix,
-		exitChan:  make(chan bool),
+		loop:      newRunLoop(),
 	}
 }
 
@@ -187,7 +185,6 @@ func (p *HTTPProber) failed(r chan *Event, target string, now time.Time, err err
 }
 
 func (p *HTTPProber) probe(r chan *Event, target string) {
-	defer p.wg.Done()
 	now := time.Now()
 	p.sent(r, target)
 
@@ -251,45 +248,18 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 	}
 }
 
-func (p *HTTPProber) emitRegistrationEvents(r chan *Event) {
-	for _, v := range p.targets {
-		r <- &Event{
-			Key:         v,
-			DisplayName: v,
-			Result:      REGISTER,
-		}
-	}
-}
-
 func (p *HTTPProber) Start(r chan *Event, interval, timeout time.Duration) error {
-	p.emitRegistrationEvents(r)
 	p.client.Timeout = timeout
-	ticker := time.NewTicker(interval)
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
-		for _, target := range p.targets {
-			p.wg.Add(1)
-			go p.probe(r, target)
-		}
-		for {
-			select {
-			case <-p.exitChan:
-				return
-			case <-ticker.C:
-				for _, target := range p.targets {
-					p.wg.Add(1)
-					go p.probe(r, target)
-				}
-			}
-		}
-	}()
-	p.wg.Wait()
-	return nil
+	return runPeriodic(p.loop, r, interval, p.targets,
+		func(target string) (string, string) { return target, target },
+		func(target string) { p.probe(r, target) })
 }
 
+// Stop stops probing, waits for Start to return and closes idle keep-alive
+// connections. It is safe to call more than once.
 func (p *HTTPProber) Stop() {
-	p.exitChan <- true
+	p.loop.stop()
+	p.client.CloseIdleConnections()
 }
 
 func (c *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {

@@ -85,7 +85,6 @@ func probeOnce(t *testing.T, p *HTTPProber, target string) *Event {
 	}
 	p.client.Timeout = 3 * time.Second
 	ch := make(chan *Event, 4)
-	p.wg.Add(1)
 	go p.probe(ch, target)
 	for {
 		select {

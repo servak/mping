@@ -2,9 +2,10 @@ package prober
 
 import (
 	"fmt"
+	"maps"
 	"net"
+	"slices"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -14,11 +15,10 @@ const (
 
 type (
 	TCPProber struct {
-		targets  map[string]string // key (ip:port) -> displayName (host:port)
-		config   *TCPConfig
-		prefix   string
-		exitChan chan bool
-		wg       sync.WaitGroup
+		targets map[string]string // key (ip:port) -> displayName (host:port)
+		config  *TCPConfig
+		prefix  string
+		loop    *runLoop
 	}
 
 	TCPConfig struct {
@@ -34,10 +34,10 @@ func (cfg *TCPConfig) Validate() error {
 
 func NewTCPProber(cfg *TCPConfig, prefix string) *TCPProber {
 	return &TCPProber{
-		targets:  make(map[string]string),
-		config:   cfg,
-		prefix:   prefix,
-		exitChan: make(chan bool),
+		targets: make(map[string]string),
+		config:  cfg,
+		prefix:  prefix,
+		loop:    newRunLoop(),
 	}
 }
 
@@ -67,51 +67,18 @@ func (p *TCPProber) Accept(target string) error {
 	return nil
 }
 
-func (p *TCPProber) emitRegistrationEvents(r chan *Event) {
-	for k, v := range p.targets {
-		r <- &Event{
-			Key:         k,
-			DisplayName: v,
-			Result:      REGISTER,
-		}
-	}
-}
-
 func (p *TCPProber) Start(result chan *Event, interval, timeout time.Duration) error {
-	p.emitRegistrationEvents(result)
-	ticker := time.NewTicker(interval)
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
-		for target := range p.targets {
-			p.wg.Add(1)
-			go p.sendProbe(result, target, timeout)
-		}
-		for {
-			select {
-			case <-p.exitChan:
-				ticker.Stop()
-				return
-			case <-ticker.C:
-				for target := range p.targets {
-					p.wg.Add(1)
-					go p.sendProbe(result, target, timeout)
-				}
-			}
-		}
-	}()
-	p.wg.Wait()
-	return nil
+	return runPeriodic(p.loop, result, interval, slices.Sorted(maps.Keys(p.targets)),
+		func(target string) (string, string) { return target, p.targets[target] },
+		func(target string) { p.sendProbe(result, target, timeout) })
 }
 
+// Stop stops probing and waits for Start to return. It is safe to call more than once.
 func (p *TCPProber) Stop() {
-	close(p.exitChan)
-	p.wg.Wait()
+	p.loop.stop()
 }
 
 func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Duration) {
-	defer p.wg.Done()
-
 	// target is already in "ip:port" format from Accept method
 	now := time.Now()
 	p.sent(result, target, now)

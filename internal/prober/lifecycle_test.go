@@ -186,6 +186,24 @@ func describeEvents(events []*Event) string {
 	return b.String()
 }
 
+// stopReturns calls Stop and fails if it panics or hangs.
+func stopReturns(t *testing.T, p Prober) {
+	t.Helper()
+	done := make(chan any, 1)
+	go func() {
+		defer func() { done <- recover() }()
+		p.Stop()
+	}()
+	select {
+	case r := <-done:
+		if r != nil {
+			t.Errorf("Stop panicked: %v", r)
+		}
+	case <-time.After(stopBudget):
+		t.Errorf("Stop did not return within %v", stopBudget)
+	}
+}
+
 // --- loopback servers ---
 
 func startTCPServer(t *testing.T) string {
@@ -353,6 +371,62 @@ func TestProberLifecycle(t *testing.T) {
 
 			p, keys := tc.setup(t)
 			runLifecycle(t, p, keys, lifecycleInterval, lifecycleTimeout)
+			stopReturns(t, p) // second Stop
+		})
+	}
+}
+
+// Stop before Start must not hang, and the later Start must return at once
+// without emitting anything.
+func TestProberStopBeforeStart(t *testing.T) {
+	for _, tc := range lifecycleCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			p, _ := tc.setup(t)
+			stopReturns(t, p)
+			events := make(chan *Event, 100)
+			done := make(chan error, 1)
+			go func() { done <- p.Start(events, lifecycleInterval, lifecycleTimeout) }()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Errorf("Start() after Stop error = %v", err)
+				}
+			case <-time.After(stopBudget):
+				t.Fatal("Start after Stop did not return")
+			}
+			if n := len(events); n != 0 {
+				t.Errorf("Start after Stop emitted %d events", n)
+			}
+			stopReturns(t, p)
+		})
+	}
+}
+
+// A second concurrent Start is rejected instead of running a second loop.
+func TestProberStartTwice(t *testing.T) {
+	for _, tc := range lifecycleCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			p, _ := tc.setup(t)
+			events := make(chan *Event, 1000)
+			log := collectEvents(events)
+			first := make(chan error, 1)
+			go func() { first <- p.Start(events, lifecycleInterval, lifecycleTimeout) }()
+			deadline := time.Now().Add(5 * time.Second)
+			for log.count(SENT) == 0 {
+				if time.Now().After(deadline) {
+					t.Fatal("first Start did not probe")
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			if err := p.Start(events, lifecycleInterval, lifecycleTimeout); err == nil {
+				t.Error("second Start() error = nil, want an error")
+			}
+			stopReturns(t, p)
+			if err := <-first; err != nil {
+				t.Errorf("first Start() error = %v", err)
+			}
+			close(events)
+			<-log.done
 		})
 	}
 }

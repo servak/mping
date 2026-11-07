@@ -3,9 +3,10 @@ package prober
 import (
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"net"
+	"slices"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -15,11 +16,10 @@ const (
 
 type (
 	NTPProber struct {
-		targets  map[string]string // server address -> display name
-		config   *NTPConfig
-		prefix   string
-		exitChan chan bool
-		wg       sync.WaitGroup
+		targets map[string]string // server address -> display name
+		config  *NTPConfig
+		prefix  string
+		loop    *runLoop
 	}
 
 	NTPConfig struct {
@@ -63,10 +63,10 @@ func (cfg *NTPConfig) Validate() error {
 
 func NewNTPProber(cfg *NTPConfig, prefix string) *NTPProber {
 	return &NTPProber{
-		targets:  make(map[string]string),
-		config:   cfg,
-		prefix:   prefix,
-		exitChan: make(chan bool),
+		targets: make(map[string]string),
+		config:  cfg,
+		prefix:  prefix,
+		loop:    newRunLoop(),
 	}
 }
 
@@ -133,51 +133,18 @@ func (p *NTPProber) parseTarget(target string) (string, int, error) {
 	return server, port, nil
 }
 
-func (p *NTPProber) emitRegistrationEvents(r chan *Event) {
-	for serverAddr, displayName := range p.targets {
-		r <- &Event{
-			Key:         serverAddr,
-			DisplayName: displayName,
-			Result:      REGISTER,
-		}
-	}
-}
-
 func (p *NTPProber) Start(result chan *Event, interval, timeout time.Duration) error {
-	p.emitRegistrationEvents(result)
-	ticker := time.NewTicker(interval)
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
-		for serverAddr := range p.targets {
-			p.wg.Add(1)
-			go p.sendProbe(result, serverAddr, timeout)
-		}
-		for {
-			select {
-			case <-p.exitChan:
-				ticker.Stop()
-				return
-			case <-ticker.C:
-				for serverAddr := range p.targets {
-					p.wg.Add(1)
-					go p.sendProbe(result, serverAddr, timeout)
-				}
-			}
-		}
-	}()
-	p.wg.Wait()
-	return nil
+	return runPeriodic(p.loop, result, interval, slices.Sorted(maps.Keys(p.targets)),
+		func(serverAddr string) (string, string) { return serverAddr, p.targets[serverAddr] },
+		func(serverAddr string) { p.sendProbe(result, serverAddr, timeout) })
 }
 
+// Stop stops probing and waits for Start to return. It is safe to call more than once.
 func (p *NTPProber) Stop() {
-	close(p.exitChan)
-	p.wg.Wait()
+	p.loop.stop()
 }
 
 func (p *NTPProber) sendProbe(result chan *Event, serverAddr string, timeout time.Duration) {
-	defer p.wg.Done()
-
 	now := time.Now()
 	displayName := p.targets[serverAddr]
 	p.sent(result, serverAddr, displayName, now)

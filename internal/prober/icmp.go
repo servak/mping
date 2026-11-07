@@ -3,8 +3,10 @@ package prober
 import (
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -21,18 +23,17 @@ const (
 
 type (
 	ICMPProber struct {
-		version  ProbeType
-		prefix   string // Custom prefix like "my-ping", "icmpv4", etc.
-		c        *icmp.PacketConn
-		body     []byte
-		targets  map[string]string // IPAddr string -> DisplayName
-		timeout  time.Duration
-		runCnt   int
-		runID    int
-		tables   map[runTime]map[string]bool
-		mu       sync.Mutex
-		exitChan chan bool
-		wg       sync.WaitGroup
+		version ProbeType
+		prefix  string // Custom prefix like "my-ping", "icmpv4", etc.
+		c       *icmp.PacketConn
+		body    []byte
+		targets map[string]string // IPAddr string -> DisplayName
+		timeout time.Duration
+		runCnt  int
+		runID   int
+		tables  map[runTime]map[string]bool
+		mu      sync.Mutex
+		loop    *runLoop
 	}
 
 	ICMPConfig struct {
@@ -88,15 +89,15 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, er
 		c, err = icmp.ListenPacket("ip6:ipv6-icmp", sourceAddr)
 	}
 	return &ICMPProber{
-		version:  t,
-		prefix:   prefix,
-		c:        c,
-		tables:   make(map[runTime]map[string]bool),
-		targets:  make(map[string]string),
-		runID:    os.Getpid() & 0xffff,
-		runCnt:   0,
-		body:     []byte(cfg.Body),
-		exitChan: make(chan bool),
+		version: t,
+		prefix:  prefix,
+		c:       c,
+		tables:  make(map[runTime]map[string]bool),
+		targets: make(map[string]string),
+		runID:   os.Getpid() & 0xffff,
+		runCnt:  0,
+		body:    []byte(cfg.Body),
+		loop:    newRunLoop(),
 	}, err
 }
 
@@ -414,36 +415,31 @@ func (p *ICMPProber) recvPkts(r chan *Event) {
 	}
 }
 
-func (p *ICMPProber) emitRegistrationEvents(r chan *Event) {
-	for k, v := range p.targets {
-		r <- &Event{
-			Key:         k,
-			DisplayName: v,
-			Result:      REGISTER,
-		}
-	}
-}
-
 func (p *ICMPProber) Start(r chan *Event, interval, timeout time.Duration) error {
-	p.emitRegistrationEvents(r)
+	ok, err := p.loop.begin()
+	if !ok {
+		return err
+	}
+	defer p.loop.finish()
+
+	for _, ipStr := range slices.Sorted(maps.Keys(p.targets)) {
+		register(r, ipStr, p.targets[ipStr])
+	}
 	p.timeout = timeout
 	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	go p.recvPkts(r)
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
-		p.probe(r)
-		for {
-			select {
-			case <-p.exitChan:
-				return
-			case <-ticker.C:
-				p.probe(r)
-				go p.checkTimeout(r)
-			}
+	p.probe(r)
+loop:
+	for {
+		select {
+		case <-p.loop.stopping():
+			break loop
+		case <-ticker.C:
+			p.probe(r)
+			go p.checkTimeout(r)
 		}
-	}()
-	p.wg.Wait()
+	}
 	for {
 		p.checkTimeout(r)
 		if len(p.tables) == 0 {
@@ -454,8 +450,9 @@ func (p *ICMPProber) Start(r chan *Event, interval, timeout time.Duration) error
 	return nil
 }
 
+// Stop stops probing and waits for Start to return. It is safe to call more than once.
 func (p *ICMPProber) Stop() {
-	p.exitChan <- true
+	p.loop.stop()
 }
 
 // resolveSourceInterface resolves interface name or IP address to a bind address

@@ -285,7 +285,9 @@ func TestNTPProberRegistration(t *testing.T) {
 
 	// Test registration events
 	events := make(chan *Event, 10)
-	prober.emitRegistrationEvents(events)
+	for serverAddr, name := range prober.targets {
+		register(events, serverAddr, name)
+	}
 	close(events)
 
 	// Count registration events
