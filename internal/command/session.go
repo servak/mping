@@ -66,7 +66,7 @@ type sessionParams struct {
 	SourceInterface string
 	Interval        time.Duration
 	Timeout         time.Duration
-	// Stats carries command-specific metrics options (silence, beep);
+	// Stats carries command-specific metrics options (e.g. the failure hook);
 	// SettleTime is filled in by newSession.
 	Stats stats.Options
 }

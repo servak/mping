@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/servak/mping/internal/beep"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/ui/shared"
 	"github.com/servak/mping/internal/ui/tui"
@@ -59,10 +60,9 @@ mping dns://8.8.8.8/google.com`,
 			}
 			cfg.SetTitle(title)
 
-			silenced, err := flags.GetStringSlice("silence")
-			if err != nil {
-				return err
-			}
+			// The notifier rings the bell on failures unless the host was muted
+			// with the "m" key in the TUI.
+			notifier := beep.NewNotifier()
 
 			sess, err := newSession(sessionParams{
 				Cfg:             cfg,
@@ -70,7 +70,7 @@ mping dns://8.8.8.8/google.com`,
 				SourceInterface: sourceInterface,
 				Interval:        interval,
 				Timeout:         timeout,
-				Stats:           stats.Options{Silenced: ExpandTargets(silenced, "")},
+				Stats:           stats.Options{OnFailure: notifier.OnFailure},
 			})
 			if err != nil {
 				return err
@@ -80,7 +80,7 @@ mping dns://8.8.8.8/google.com`,
 			defer cancel()
 			probeErr := sess.start(ctx)
 
-			startTUI(sess.metrics, cfg.UI, interval, timeout)
+			startTUI(sess.metrics, notifier, cfg.UI, interval, timeout)
 
 			// Stop probing when TUI exits
 			sess.stop()
@@ -104,15 +104,14 @@ mping dns://8.8.8.8/google.com`,
 	flags.StringP("title", "n", "", "print title")
 	flags.StringP("config", "c", "~/.mping.yml", "config path")
 	flags.StringP("interface", "I", "", "source interface (name or IP address)")
-	flags.StringSlice("silence", nil, "target whose failure beep is muted (repeatable, comma-separated; bracket/CIDR expansion applies)")
 	flags.IntP("interval", "i", 1000, "interval(ms)")
 	flags.IntP("timeout", "t", 1000, "timeout(ms)")
 
 	return cmd
 }
 
-func startTUI(manager stats.MetricsManager, cfg *shared.Config, interval, timeout time.Duration) {
-	app := tui.NewTUIApp(manager, cfg, interval, timeout)
+func startTUI(manager stats.MetricsManager, notifier tui.Notifier, cfg *shared.Config, interval, timeout time.Duration) {
+	app := tui.NewTUIApp(manager, notifier, cfg, interval, timeout)
 
 	refreshTime := time.Millisecond * 250 // Minimum refresh time that can be set
 	if refreshTime < (interval / 2) {

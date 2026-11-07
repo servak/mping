@@ -10,7 +10,7 @@ import (
 )
 
 func newTestLayout() *LayoutManager {
-	return NewLayoutManager(state.NewUIState(), statstest.NewQuietManager(), shared.DefaultConfig(), time.Second, time.Second)
+	return NewLayoutManager(state.NewUIState(), statstest.NewQuietManager(), nil, shared.DefaultConfig(), time.Second, time.Second)
 }
 
 // hasSidePanel reports whether the main content item is a list+side-panel

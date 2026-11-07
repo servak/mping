@@ -1,0 +1,99 @@
+==== example.com
+[#5FAFFF]Total Probes:[#ffffff] 100
+[#5FFF87]Successful:[#ffffff] 95
+[#FF5F87]Failed:[#ffffff] 5
+[#5FAFFF]Loss Rate:[#ffffff] [#5FFF87]5.0%[#ffffff]
+[#5FAFFF]Last RTT:[#ffffff]  25ms
+[#5FAFFF]Average RTT:[#ffffff]  30ms
+[#5FAFFF]Minimum RTT:[#ffffff]  20ms
+[#5FAFFF]Maximum RTT:[#ffffff]  40ms
+[#5FAFFF]Jitter (stddev):[#ffffff] -
+[#5FAFFF]RTT p50/p95/p99:[#ffffff] - / - / -
+[#5FAFFF]Last Success:[#ffffff] 15:30:45
+[#5FAFFF]Last Failure:[#ffffff] 15:30:46
+[#5FAFFF]Last Error:[#ffffff] timeout
+
+[#5FAFFF]Outages:[#ffffff] none
+==== zero.com
+[#5FAFFF]Total Probes:[#ffffff] 0
+[#FF5F87]Successful:[#ffffff] 0
+[#ffffff]Failed:[#ffffff] 0
+[#5FAFFF]Loss Rate:[#ffffff] [#5FFF87]0.0%[#ffffff]
+[#5FAFFF]Last RTT:[#ffffff] -
+[#5FAFFF]Average RTT:[#ffffff] -
+[#5FAFFF]Minimum RTT:[#ffffff] -
+[#5FAFFF]Maximum RTT:[#ffffff] -
+[#5FAFFF]Jitter (stddev):[#ffffff] -
+[#5FAFFF]RTT p50/p95/p99:[#ffffff] - / - / -
+[#5FAFFF]Last Success:[#ffffff] -
+[#5FAFFF]Last Failure:[#ffffff] -
+[#5FAFFF]Last Error:[#ffffff] 
+
+[#5FAFFF]Outages:[#ffffff] none
+==== warn.com
+[#5FAFFF]Total Probes:[#ffffff] 10
+[#5FFF87]Successful:[#ffffff] 8
+[#FF5F87]Failed:[#ffffff] 2
+[#5FAFFF]Loss Rate:[#ffffff] [#ffff00]20.0%[#ffffff]
+[#5FAFFF]Last RTT:[#ffffff]   1ms
+[#5FAFFF]Average RTT:[#ffffff]   1ms
+[#5FAFFF]Minimum RTT:[#ffffff]   1ms
+[#5FAFFF]Maximum RTT:[#ffffff]   3ms
+[#5FAFFF]Jitter (stddev):[#ffffff] -
+[#5FAFFF]RTT p50/p95/p99:[#ffffff] - / - / -
+[#5FAFFF]Last Success:[#ffffff] 15:30:45
+[#5FAFFF]Last Failure:[#ffffff] 15:30:45
+[#5FAFFF]Last Error:[#ffffff] refused
+
+[#5FAFFF]Outages:[#ffffff] none
+==== bad.com
+[#5FAFFF]Total Probes:[#ffffff] 10
+[#5FFF87]Successful:[#ffffff] 2
+[#FF5F87]Failed:[#ffffff] 8
+[#5FAFFF]Loss Rate:[#ffffff] [#FF5F87]80.0%[#ffffff]
+[#5FAFFF]Last RTT:[#ffffff] 500µs
+[#5FAFFF]Average RTT:[#ffffff]   1s
+[#5FAFFF]Minimum RTT:[#ffffff]   1s
+[#5FAFFF]Maximum RTT:[#ffffff]   1s
+[#5FAFFF]Jitter (stddev):[#ffffff] -
+[#5FAFFF]RTT p50/p95/p99:[#ffffff] - / - / -
+[#5FAFFF]Last Success:[#ffffff] 15:30:45
+[#5FAFFF]Last Failure:[#ffffff] 15:30:45
+[#5FAFFF]Last Error:[#ffffff] unreachable
+
+[#5FAFFF]Outages:[#ffffff] none
+==== events.example
+[#5FAFFF]Total Probes:[#ffffff] 0
+[#5FFF87]Successful:[#ffffff] 9
+[#FF5F87]Failed:[#ffffff] 7
+[#5FAFFF]Loss Rate:[#ffffff] [#ffff00]43.8%[#ffffff]
+[#5FAFFF]Last RTT:[#ffffff]  16ms
+[#5FAFFF]Average RTT:[#ffffff]  10ms
+[#5FAFFF]Minimum RTT:[#ffffff]   1ms
+[#5FAFFF]Maximum RTT:[#ffffff]  16ms
+[#5FAFFF]Jitter (stddev):[#ffffff]   4ms
+[#5FAFFF]RTT p50/p95/p99:[#ffffff]  12ms /  16ms /  16ms
+[#5FAFFF]Last Success:[#ffffff] 15:31:00
+[#5FAFFF]Last Failure:[#ffffff] 15:30:54
+[#5FAFFF]Last Error:[#ffffff] timeout
+
+[#5FAFFF]Outages:[#ffffff] 2 (total 7.000s, longest 4.000s)
+[#5FAFFF]Start        End          Duration  Lost[#ffffff]
+[#999999]15:30:51.000[#ffffff] [#ffffff]15:30:55.000    4.000s     4[#ffffff]
+[#999999]15:30:46.000[#ffffff] [#ffffff]15:30:49.000    3.000s     3[#ffffff]
+
+
+[#ffff00]Recent History (last 10 entries):[#ffffff]
+[#5FAFFF]Time     Status RTT     Details[#ffffff]
+[#666666]-------- ------ ------- --------[#ffffff]
+[#999999]15:31:00[#ffffff] [#5FFF87]OK    [#ffffff]  16ms   stratum=2 offset=  1ms
+[#999999]15:30:59[#ffffff] [#5FFF87]OK    [#ffffff]  15ms   tcp code=0 ans=1 192.0.2.1
+[#999999]15:30:58[#ffffff] [#5FFF87]OK    [#ffffff]  14ms   status=200 size=1234
+[#999999]15:30:57[#ffffff] [#5FFF87]OK    [#ffffff]  13ms   seq=7 size=64 type=0 payload=abc
+[#999999]15:30:56[#ffffff] [#5FFF87]OK    [#ffffff]  12ms   
+[#999999]15:30:55[#ffffff] [#5FFF87]OK    [#ffffff]  11ms   connection
+[#999999]15:30:54[#ffffff] [#FF5F87]FAIL  [#ffffff] -       [#FF5F87]timeout[#ffffff]
+[#999999]15:30:53[#ffffff] [#FF5F87]FAIL  [#ffffff] -       [#FF5F87]timeout[#ffffff]
+[#999999]15:30:52[#ffffff] [#FF5F87]FAIL  [#ffffff] -       [#FF5F87]timeout[#ffffff]
+[#999999]15:30:51[#ffffff] [#FF5F87]FAIL  [#ffffff] -       [#FF5F87]timeout[#ffffff]
+

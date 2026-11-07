@@ -2,7 +2,6 @@ package panels
 
 import (
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -20,6 +19,7 @@ type HostListPanel struct {
 	renderState       state.RenderState
 	selectionState    state.SelectionState
 	mm                stats.MetricsProvider
+	silence           SilenceChecker // may be nil: no host is marked
 	config            *shared.Config
 	onSelectionChange func(metrics stats.Metrics) // Callback when selection changes
 	lastTableData     *shared.TableData           // Data rendered by the last Update
@@ -31,11 +31,17 @@ type HostListParams interface {
 	state.SelectionState
 }
 
+// SilenceChecker reports whether a host's (display name) failure beep is muted
+type SilenceChecker interface {
+	IsSilenced(name string) bool
+}
+
 // silenceMarker is appended to the host name of silenced targets
 const silenceMarker = " ⊘"
 
 // NewHostListPanel creates a new HostListPanel
-func NewHostListPanel(state HostListParams, mm stats.MetricsProvider, config *shared.Config) *HostListPanel {
+// silence may be nil, in which case no host is marked as silenced.
+func NewHostListPanel(state HostListParams, mm stats.MetricsProvider, silence SilenceChecker, config *shared.Config) *HostListPanel {
 	table := tview.NewTable().
 		SetSelectable(true, false)
 
@@ -50,6 +56,7 @@ func NewHostListPanel(state HostListParams, mm stats.MetricsProvider, config *sh
 		renderState:    state,
 		selectionState: state,
 		mm:             mm,
+		silence:        silence,
 		config:         config,
 	}
 	// Every selection change (keys, mouse clicks, programmatic Select) goes
@@ -213,66 +220,81 @@ func (h *HostListPanel) PageUp() {
 	h.table.Select(newRow, 0)
 }
 
-// historyColumn is where the TUI-only History column is inserted (after Loss)
-const historyColumn = 5
+// listColumn is a column of the TUI host list
+type listColumn struct {
+	header string
+	align  int
+	host   bool // the host name column, which carries the silence marker
+	cell   func(r shared.Row) string
+}
 
-// populateTableFromData populates our table using TableData content.
-// A TUI-only History sparkline column is inserted after Loss, and the
-// LastFailTime cell also shows the duration of the related outage.
-func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
-	// Define alignment for each column (same as in shared/table_data.go)
-	alignments := []int{
-		tview.AlignLeft,   // Host
-		tview.AlignRight,  // Sent
-		tview.AlignRight,  // Succ
-		tview.AlignRight,  // Fail
-		tview.AlignRight,  // Loss
-		tview.AlignLeft,   // History
-		tview.AlignRight,  // Last
-		tview.AlignRight,  // Avg
-		tview.AlignRight,  // Best
-		tview.AlignRight,  // Worst
-		tview.AlignCenter, // LastSuccTime
-		tview.AlignCenter, // LastFailTime
-		tview.AlignLeft,   // FAIL Reason
+// tviewAlign maps a shared column alignment to tview's
+func tviewAlign(a shared.Align) int {
+	switch a {
+	case shared.AlignRight:
+		return tview.AlignRight
+	case shared.AlignCenter:
+		return tview.AlignCenter
 	}
+	return tview.AlignLeft
+}
 
+// listColumns derives the TUI columns from the shared table columns: the
+// TUI-only History sparkline is inserted after Loss, and the LastFailTime
+// cell also shows the duration of the related outage (with color tags).
+func listColumns(td *shared.TableData, theme *shared.Theme, now time.Time) []listColumn {
+	cols := make([]listColumn, 0, len(td.Columns)+1)
+	for i, c := range td.Columns {
+		lc := listColumn{
+			header: td.Headers[i],
+			align:  tviewAlign(c.Align),
+			host:   c.ID == shared.ColumnHost,
+			cell:   func(r shared.Row) string { return r.Cells[i] },
+		}
+		if c.ID == shared.ColumnLastFailTime {
+			lc.cell = func(r shared.Row) string { return FormatLastFailCell(r.Metric, now, theme) }
+		}
+		cols = append(cols, lc)
+		if c.ID == shared.ColumnLoss {
+			cols = append(cols, listColumn{
+				header: "History",
+				align:  tview.AlignLeft,
+				cell: func(r shared.Row) string {
+					return FormatSparkline(r.Metric.GetRecentHistory(stats.DefaultHistorySize), HistoryWidth, theme)
+				},
+			})
+		}
+	}
+	return cols
+}
+
+// populateTableFromData populates our table using TableData content
+func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 	// Get theme for theme-aware colors
 	theme := h.config.GetTheme()
+	cols := listColumns(tableData, theme, time.Now())
 
 	setCell := func(row, col int, text, color string, header bool) {
-		alignment := tview.AlignLeft
-		if col < len(alignments) {
-			alignment = alignments[col]
-		}
 		h.table.SetCell(row, col, &tview.TableCell{
 			Text:            "  " + text + "  ",
 			Color:           tcell.GetColor(color),
 			BackgroundColor: tcell.GetColor(theme.Background),
-			Align:           alignment,
+			Align:           cols[col].align,
 			NotSelectable:   header,
 		})
 	}
 
 	// Set headers
-	headers := slices.Insert(slices.Clone(tableData.Headers), historyColumn, "History")
-	for col, header := range headers {
-		setCell(0, col, header, theme.TableHeader, true)
+	for col, c := range cols {
+		setCell(0, col, c.header, theme.TableHeader, true)
 	}
 
 	// Set data rows
-	now := time.Now()
-	for row, rowData := range tableData.Rows {
-		cells := slices.Clone(rowData)
-		sparkline := ""
-		if m, ok := tableData.GetMetricAtRow(row); ok {
-			sparkline = shared.FormatSparkline(m.GetRecentHistory(stats.DefaultHistorySize), shared.HistoryWidth, theme)
-			cells[shared.ColumnLastFailTime] = shared.FormatLastFailCell(m, now, theme)
-		}
-		cells = slices.Insert(cells, historyColumn, sparkline)
-		for col, cellData := range cells {
-			text, color := cellData, theme.Primary
-			if col == 0 && h.mm.IsSilenced(cellData) {
+	for row, r := range tableData.Rows {
+		silenced := h.silence != nil && h.silence.IsSilenced(r.Metric.GetName())
+		for col, c := range cols {
+			text, color := c.cell(r), theme.Primary
+			if c.host && silenced {
 				text += silenceMarker
 				color = theme.Warning
 			}
@@ -283,8 +305,8 @@ func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 
 // restoreSelection finds and selects the row containing the specified host
 func (h *HostListPanel) restoreSelection(tableData *shared.TableData, selectedHost string) {
-	for i, metric := range tableData.Metrics {
-		if metric.GetName() == selectedHost {
+	for i, r := range tableData.Rows {
+		if r.Metric.GetName() == selectedHost {
 			h.table.Select(i+1, 0) // +1 because row 0 is header
 			return
 		}

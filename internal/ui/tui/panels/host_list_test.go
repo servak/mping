@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rivo/tview"
+
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/stats/statstest"
@@ -45,7 +47,7 @@ func TestNewHostListPanel(t *testing.T) {
 	state := newMockState()
 
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	if panel == nil {
 		t.Fatal("NewHostListPanel() returned nil")
@@ -72,7 +74,7 @@ func TestHostListPanelGetView(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	view := panel.GetView()
 	if view == nil {
@@ -88,7 +90,7 @@ func TestHostListPanelUpdate(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register some test metrics
 	statstest.Register(t, mm, "google.com")
@@ -116,7 +118,7 @@ func TestHostListPanelUpdateWithFilter(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register test metrics
 	statstest.Register(t, mm, "google.com")
@@ -151,7 +153,7 @@ func selectedName(t *testing.T, p *HostListPanel) string {
 func TestHostListPanelSelectionFollowsHostAcrossSortChanges(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	st := state.NewUIState() // default sort: Fail, descending
-	panel := NewHostListPanel(st, mm, shared.DefaultConfig())
+	panel := NewHostListPanel(st, mm, nil, shared.DefaultConfig())
 
 	now := time.Now()
 	var events []*prober.Event
@@ -186,7 +188,7 @@ func TestHostListPanelSelectionFollowsHostAcrossSortChanges(t *testing.T) {
 func TestHostListPanelClickSelectionSticks(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	st := state.NewUIState()
-	panel := NewHostListPanel(st, mm, shared.DefaultConfig())
+	panel := NewHostListPanel(st, mm, nil, shared.DefaultConfig())
 	statstest.Register(t, mm, "a.example")
 	statstest.Register(t, mm, "b.example")
 
@@ -209,7 +211,7 @@ func TestHostListPanelScrollDown(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register multiple metrics to enable scrolling
 	for i := 0; i < 10; i++ {
@@ -233,7 +235,7 @@ func TestHostListPanelScrollUp(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register multiple metrics
 	for i := 0; i < 10; i++ {
@@ -257,7 +259,7 @@ func TestHostListPanelScrollToTop(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register metrics
 	statstest.Register(t, mm, "test.com")
@@ -277,7 +279,7 @@ func TestHostListPanelScrollToBottom(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register metrics
 	statstest.Register(t, mm, "test.com")
@@ -297,7 +299,7 @@ func TestHostListPanelPageDown(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register metrics
 	statstest.Register(t, mm, "test.com")
@@ -317,7 +319,7 @@ func TestHostListPanelPageUp(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register metrics
 	statstest.Register(t, mm, "test.com")
@@ -337,7 +339,7 @@ func TestHostListPanelRestoreSelection(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	state := newMockState()
 	config := shared.DefaultConfig()
-	panel := NewHostListPanel(state, mm, config)
+	panel := NewHostListPanel(state, mm, nil, config)
 
 	// Register test metrics
 	statstest.Register(t, mm, "google.com")
@@ -366,7 +368,7 @@ func TestHostListPanelCurrentSelectedMetricIsFresh(t *testing.T) {
 	done := mm.Subscribe(events)
 	events <- &prober.Event{Key: "h", DisplayName: "host", Result: prober.REGISTER}
 
-	panel := NewHostListPanel(state.NewUIState(), mm, shared.DefaultConfig())
+	panel := NewHostListPanel(state.NewUIState(), mm, nil, shared.DefaultConfig())
 	waitFor := func(total int) {
 		t.Helper()
 		for i := 0; i < 100; i++ {
@@ -388,7 +390,7 @@ func TestHostListPanelCurrentSelectedMetricIsFresh(t *testing.T) {
 
 func TestHostListPanelLastFailTimeShowsOutage(t *testing.T) {
 	mm := statstest.NewQuietManager()
-	panel := NewHostListPanel(state.NewUIState(), mm, shared.DefaultConfig())
+	panel := NewHostListPanel(state.NewUIState(), mm, nil, shared.DefaultConfig())
 
 	now := time.Now()
 	statstest.Feed(t, mm,
@@ -402,10 +404,7 @@ func TestHostListPanelLastFailTimeShowsOutage(t *testing.T) {
 	)
 	panel.Update()
 
-	col := shared.ColumnLastFailTime + 1 // shifted by the History column
-	if got := panel.table.GetCell(0, col).Text; !strings.Contains(got, "LastFailTime") {
-		t.Fatalf("header at column %d = %q, want LastFailTime", col, got)
-	}
+	col := columnByHeader(t, panel, "LastFailTime")
 	for row := 0; row < panel.table.GetRowCount(); row++ {
 		for c := 0; c < panel.table.GetColumnCount(); c++ {
 			if strings.Contains(panel.table.GetCell(row, c).Text, "Outage") {
@@ -431,7 +430,7 @@ func TestHostListPanelLastFailTimeShowsOutage(t *testing.T) {
 func TestHostListPanelSelectionSurvivesFilter(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	st := state.NewUIState()
-	panel := NewHostListPanel(st, mm, shared.DefaultConfig())
+	panel := NewHostListPanel(st, mm, nil, shared.DefaultConfig())
 
 	now := time.Now()
 	var events []*prober.Event
@@ -462,9 +461,9 @@ func TestHostListPanelMarksSilencedHost(t *testing.T) {
 	mm := statstest.NewQuietManager()
 	statstest.Register(t, mm, "quiet")
 	statstest.Register(t, mm, "loud")
-	mm.ToggleSilence("quiet")
+	silenced := fakeSilence{"quiet": true}
 
-	panel := NewHostListPanel(newMockState(), mm, shared.DefaultConfig())
+	panel := NewHostListPanel(newMockState(), mm, silenced, shared.DefaultConfig())
 	panel.Update()
 
 	marked := map[string]bool{}
@@ -477,5 +476,60 @@ func TestHostListPanelMarksSilencedHost(t *testing.T) {
 	}
 	if marked["loud"] {
 		t.Errorf("non-silenced host marked: %v", marked)
+	}
+}
+
+// fakeSilence is a SilenceChecker backed by a set of display names
+type fakeSilence map[string]bool
+
+func (f fakeSilence) IsSilenced(name string) bool { return f[name] }
+
+// columnByHeader returns the index of the column whose header starts with title
+func columnByHeader(t *testing.T, p *HostListPanel, title string) int {
+	t.Helper()
+	for c := 0; c < p.table.GetColumnCount(); c++ {
+		if strings.HasPrefix(strings.TrimSpace(p.table.GetCell(0, c).Text), title) {
+			return c
+		}
+	}
+	t.Fatalf("no column with header %q", title)
+	return -1
+}
+
+func TestHostListPanelColumns(t *testing.T) {
+	mm := statstest.NewQuietManager()
+	statstest.Register(t, mm, "a")
+	panel := NewHostListPanel(newMockState(), mm, nil, shared.DefaultConfig())
+	panel.Update()
+
+	want := []struct {
+		header string
+		align  int
+	}{
+		{"Host", tview.AlignLeft},
+		{"Sent", tview.AlignRight},
+		{"Succ ↓", tview.AlignRight}, // newMockState sorts by Success, descending
+		{"Fail", tview.AlignRight},
+		{"Loss", tview.AlignRight},
+		{"History", tview.AlignLeft},
+		{"Last", tview.AlignRight},
+		{"Avg", tview.AlignRight},
+		{"Best", tview.AlignRight},
+		{"Worst", tview.AlignRight},
+		{"LastSuccTime", tview.AlignCenter},
+		{"LastFailTime", tview.AlignCenter},
+		{"FAIL Reason", tview.AlignLeft},
+	}
+	if got := panel.table.GetColumnCount(); got != len(want) {
+		t.Fatalf("column count = %d, want %d", got, len(want))
+	}
+	for c, w := range want {
+		cell := panel.table.GetCell(0, c)
+		if got := strings.TrimSpace(cell.Text); got != w.header {
+			t.Errorf("header %d = %q, want %q", c, got, w.header)
+		}
+		if cell.Align != w.align {
+			t.Errorf("column %q align = %d, want %d", w.header, cell.Align, w.align)
+		}
 	}
 }

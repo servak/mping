@@ -63,11 +63,12 @@ func (b *Beeper) playBeep() error {
 	return err
 }
 
-// Toggle switches beep sound on/off
-func (b *Beeper) Toggle() {
+// Toggle switches beep sound on/off and returns the new state
+func (b *Beeper) Toggle() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.enabled = !b.enabled
+	return b.enabled
 }
 
 // IsEnabled returns current beep sound state

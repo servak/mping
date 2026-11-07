@@ -24,7 +24,8 @@ type HeaderPanel struct {
 
 // BeepStateProvider provides access to beep state
 type BeepStateProvider interface {
-	IsBeepEnabled() bool
+	// Enabled reports whether the failure beep is on
+	Enabled() bool
 }
 
 // NewHeaderPanel creates a new HeaderPanel
@@ -77,7 +78,7 @@ func (h *HeaderPanel) generateHeaderContent() string {
 	// Add beep state
 	if h.beepProvider != nil {
 		beepState := "OFF"
-		if h.beepProvider.IsBeepEnabled() {
+		if h.beepProvider.Enabled() {
 			beepState = "ON"
 		}
 		parts = append(parts, fmt.Sprintf("[%s]Beep: %s[-]", theme.Accent, beepState))
