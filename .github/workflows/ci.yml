@@ -148,7 +148,8 @@ jobs:
         go test -tags integration -count=1 -v -run Integration ./internal/trace/ ./internal/ui/tui/
 
     # Raw socket path: compile the test binaries and grant them cap_net_raw
-    # instead of running go test as root.
+    # instead of running go test as root. The ICMP prober only supports raw
+    # sockets, so its lifecycle test runs here and not in the datagram step.
     - name: Integration tests (raw ICMP via cap_net_raw)
       env:
         MPING_IT_TARGETS: 127.0.0.1,::1
@@ -159,7 +160,7 @@ jobs:
         MPING_IT_STRICT: '1'
         MPING_IT_PRIVILEGED: '1'
       run: |
-        for pkg in trace ui/tui; do
+        for pkg in trace ui/tui prober; do
           bin="$RUNNER_TEMP/$(basename "$pkg").test"
           go test -c -tags integration -o "$bin" "./internal/$pkg/"
           sudo setcap cap_net_raw=+ep "$bin"
