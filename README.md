@@ -332,12 +332,38 @@ Flags:
   -h, --help               help for mping
   -I, --interface string   source interface (name or IP address)
   -i, --interval int       interval(ms) (default 1000)
+      --silence strings    target whose failure beep is muted (repeatable)
   -t, --timeout int        timeout(ms) (default 1000)
   -n, --title string       print title
   -v, --version            Display version
 
 Use "mping [command] --help" for more information about a command.
 ```
+
+### Keyboard shortcuts (TUI)
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` / `g` / `G` / `u` / `d` | Move selection |
+| `s` / `S` | Next / previous sort key |
+| `r` / `R` | Reverse sort / reset metrics |
+| `v` / `p` | Toggle detail / path (MTR) view |
+| `/` | Filter hosts |
+| `t` | Cycle theme |
+| `b` | Toggle failure beep globally |
+| `m` | Mute/unmute the failure beep for the selected host |
+| `h` | Help |
+| `q` / `Ctrl+C` | Quit |
+
+### Silencing a known-down target
+
+mping beeps when a probe fails. To stop the beep for a target you already know is down, press `m` on it in the host list (a `⊘` marker is shown next to the host name; press `m` again to restore the beep), or pre-mute targets at startup:
+
+```bash
+mping --silence 192.168.1.10 --silence 'web[1-3].example.com' 192.168.1.10 8.8.8.8
+```
+
+`--silence` is repeatable (or comma-separated) and accepts the same bracket/CIDR expansion as targets; names must match the host name shown in the list. Silencing only suppresses the beep: probing, statistics and outage tracking continue as normal, and other hosts still beep.
 
 ## Configuration
 

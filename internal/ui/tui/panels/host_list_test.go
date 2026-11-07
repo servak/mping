@@ -471,3 +471,27 @@ func TestHostListPanelSelectionSurvivesFilter(t *testing.T) {
 		t.Errorf("selection after clearing the filter = %s, want 192.168.1.1", got)
 	}
 }
+
+func TestHostListPanelMarksSilencedHost(t *testing.T) {
+	mm := stats.NewMetricsManager()
+	mm.ToggleBeep()
+	mm.Register("quiet", "quiet")
+	mm.Register("loud", "loud")
+	mm.ToggleSilence("quiet")
+
+	panel := NewHostListPanel(newMockState(), mm, shared.DefaultConfig())
+	panel.SetSilenceProvider(mm.(SilenceStateProvider))
+	panel.Update()
+
+	marked := map[string]bool{}
+	for row := 1; row < panel.table.GetRowCount(); row++ {
+		text := panel.table.GetCell(row, 0).Text
+		marked[strings.TrimSpace(text)] = strings.Contains(text, SilenceMarker)
+	}
+	if !marked["quiet"+SilenceMarker] {
+		t.Errorf("silenced host not marked: %v", marked)
+	}
+	if marked["loud"] {
+		t.Errorf("non-silenced host marked: %v", marked)
+	}
+}

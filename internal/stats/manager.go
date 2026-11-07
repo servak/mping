@@ -18,6 +18,7 @@ type metricsManager struct {
 	historySize int // Number of history entries to keep
 	settle      time.Duration
 	beeper      *beep.Beeper
+	silenced    *SilenceSet
 	mu          sync.Mutex
 }
 
@@ -31,6 +32,8 @@ type Options struct {
 	SettleTime time.Duration
 	// DisableBeep turns off the failure beep, e.g. for non-interactive runs
 	DisableBeep bool
+	// Silenced lists targets (display names) whose failures never beep
+	Silenced []string
 }
 
 // SettleTimeFor returns the recommended SettleTime for the probe timing
@@ -52,6 +55,7 @@ func NewMetricsManagerWithOptions(opts Options) MetricsManager {
 		metrics:     make(map[string]*metrics),
 		historySize: opts.HistorySize,
 		settle:      opts.SettleTime,
+		silenced:    NewSilenceSet(opts.Silenced...),
 	}
 	if !opts.DisableBeep {
 		mm.beeper = beep.NewBeeper()
@@ -132,6 +136,7 @@ func (mm *metricsManager) Failed(host string, sentTime time.Time, msg string) {
 	m := mm.getMetrics(host)
 
 	mm.mu.Lock()
+	name := m.Name
 	m.Fail(sentTime, msg)
 	if m.history != nil {
 		m.history.AddEntry(HistoryEntry{
@@ -144,8 +149,8 @@ func (mm *metricsManager) Failed(host string, sentTime time.Time, msg string) {
 	m.outage.add(sentTime, false, msg, time.Now())
 	mm.mu.Unlock()
 
-	// Play beep sound on failure (non-blocking)
-	if mm.beeper != nil {
+	// Play beep sound on failure (non-blocking), unless the target is silenced
+	if mm.beeper != nil && shouldBeep(mm.silenced, host, name) {
 		mm.beeper.Beep()
 	}
 }
@@ -287,4 +292,15 @@ func rttFor(k Key, m Metrics) time.Duration {
 		return m.GetMaximumRTT()
 	}
 	return -1
+}
+
+// ToggleSilence toggles beep silencing for the target (display name) and
+// returns the new state
+func (mm *metricsManager) ToggleSilence(name string) bool {
+	return mm.silenced.Toggle(name)
+}
+
+// IsSilenced reports whether the target (display name) is silenced
+func (mm *metricsManager) IsSilenced(name string) bool {
+	return mm.silenced.Contains(name)
 }

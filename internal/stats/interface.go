@@ -44,6 +44,10 @@ type MetricsSystemManager interface {
 	ResetAllMetrics()
 	ToggleBeep()
 	IsBeepEnabled() bool
+	// ToggleSilence mutes/unmutes the failure beep for one target and returns
+	// the new state. Probing and statistics are unaffected.
+	ToggleSilence(name string) bool
+	IsSilenced(name string) bool
 }
 
 // MetricsEventRecorder handles internal event recording

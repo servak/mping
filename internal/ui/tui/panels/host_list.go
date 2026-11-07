@@ -23,12 +23,26 @@ type HostListPanel struct {
 	config            *shared.Config
 	onSelectionChange func(metrics stats.Metrics) // Callback when selection changes
 	lastTableData     *shared.TableData           // Data rendered by the last Update
-	keepSelectedHost  bool                        // Select() moves the cursor without changing the selected host
+	silence           SilenceStateProvider
+	keepSelectedHost  bool // Select() moves the cursor without changing the selected host
 }
 
 type HostListParams interface {
 	state.RenderState
 	state.SelectionState
+}
+
+// SilenceStateProvider reports whether a host's failure beep is silenced
+type SilenceStateProvider interface {
+	IsSilenced(name string) bool
+}
+
+// SilenceMarker is appended to the host name of silenced targets
+const SilenceMarker = " ⊘"
+
+// SetSilenceProvider sets the provider used to mark silenced hosts
+func (h *HostListPanel) SetSilenceProvider(p SilenceStateProvider) {
+	h.silence = p
 }
 
 // NewHostListPanel creates a new HostListPanel
@@ -268,7 +282,12 @@ func (h *HostListPanel) populateTableFromData(tableData *shared.TableData) {
 		}
 		cells = slices.Insert(cells, historyColumn, sparkline)
 		for col, cellData := range cells {
-			setCell(row+1, col, cellData, theme.Primary, false)
+			color := theme.Primary
+			if col == 0 && h.silence != nil && h.silence.IsSilenced(cellData) {
+				cellData += SilenceMarker
+				color = theme.Warning
+			}
+			setCell(row+1, col, cellData, color, false)
 		}
 	}
 }

@@ -164,6 +164,9 @@ func (a *TUIApp) setupKeyBindings() {
 		case 'b':
 			a.toggleBeep()
 			return nil
+		case 'm':
+			a.toggleSilence()
+			return nil
 		}
 
 		// Delegate navigation to layout
@@ -197,6 +200,7 @@ NAVIGATION:
   /            Filter hosts
   t            Cycle theme
   b            Toggle beep sound
+  m            Mute/unmute beep for selected host
   h            Show/hide this help
   q, Ctrl+C    Quit application
 
@@ -325,4 +329,11 @@ func (a *TUIApp) cycleTheme() {
 // Beep-related methods
 func (a *TUIApp) toggleBeep() {
 	a.mm.ToggleBeep()
+}
+
+// toggleSilence mutes or unmutes the failure beep for the selected host
+func (a *TUIApp) toggleSilence() {
+	if host := a.state.GetSelectedHost(); host != "" {
+		a.mm.ToggleSilence(host)
+	}
 }
