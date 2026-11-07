@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/servak/mping/internal/prober"
+	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/stats/statstest"
 	"github.com/servak/mping/internal/ui/shared"
 	"github.com/servak/mping/internal/ui/tui/state"
@@ -44,6 +45,13 @@ func TestIntegrationPathViewFollowsSelection(t *testing.T) {
 	flapping := hosts[0]
 	for _, h := range hosts {
 		events <- &prober.Event{Key: h, DisplayName: h, Result: prober.REGISTER}
+	}
+	// Events are processed asynchronously; select only once every host is listed
+	for deadline := time.Now().Add(5 * time.Second); len(mm.SortBy(stats.Host, true)) < len(hosts); {
+		if time.Now().After(deadline) {
+			t.Fatal("hosts were not registered")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	uiState := state.NewUIState()
