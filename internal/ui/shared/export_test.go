@@ -10,6 +10,7 @@ import (
 
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
+	"github.com/servak/mping/internal/stats/statstest"
 )
 
 func exportTestMetrics() []stats.Metrics {
@@ -91,11 +92,7 @@ func TestWriteReportCSV(t *testing.T) {
 func metricsWithOutage(t *testing.T) []stats.Metrics {
 	t.Helper()
 	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	mm := stats.NewMetricsManager()
-	mm.ToggleBeep()
-	ch := make(chan *prober.Event, 16)
-	done := mm.Subscribe(ch)
-	ch <- &prober.Event{Key: "h", DisplayName: "flappy.example.com", Result: prober.REGISTER}
+	events := []*prober.Event{{Key: "h", DisplayName: "flappy.example.com", Result: prober.REGISTER}}
 	for i, ok := range []bool{true, false, false, false, true, false, false, false} {
 		ev := &prober.Event{Key: "h", SentTime: base.Add(time.Duration(i) * time.Second), Rtt: time.Millisecond}
 		if ok {
@@ -103,10 +100,9 @@ func metricsWithOutage(t *testing.T) []stats.Metrics {
 		} else {
 			ev.Result, ev.Message = prober.TIMEOUT, "timeout"
 		}
-		ch <- ev
+		events = append(events, ev)
 	}
-	close(ch)
-	<-done
+	mm := statstest.FromEvents(t, events...)
 	return mm.SortBy(stats.Host, true)
 }
 
