@@ -1,0 +1,4 @@
+host,sent,success,fail,loss_percent,last_rtt_ms,avg_rtt_ms,min_rtt_ms,max_rtt_ms,jitter_ms,p50_rtt_ms,p95_rtt_ms,p99_rtt_ms,last_success_at,last_fail_at,last_fail_reason,outage_count,total_downtime_ms,longest_outage_ms
+healthy.example.com,3,3,0,0,12.5,10,5,15,0,0,0,0,2026-01-02T03:04:05Z,,,0,0,0
+down.example.com,3,0,3,100,0,0,0,0,0,0,0,0,,2026-01-02T03:04:05Z,"timeout, no reply",0,0,0
+flappy.example.com,0,4,5,55.56,9,5.75,1,9,3.112,5,9,9,2026-01-02T03:04:13Z,2026-01-02T03:04:11Z,timeout,1,3000,3000
