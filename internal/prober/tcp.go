@@ -5,7 +5,6 @@ import (
 	"maps"
 	"net"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -42,8 +41,7 @@ func NewTCPProber(cfg *TCPConfig, prefix string) *TCPProber {
 }
 
 func (p *TCPProber) Accept(target string) error {
-	// Check if it's new format (tcp://host:port)
-	if !strings.HasPrefix(target, p.prefix+"://") && !strings.HasPrefix(target, p.prefix+":") {
+	if _, ok := cutPrefix(target, p.prefix); !ok {
 		return ErrNotAccepted
 	}
 
@@ -81,7 +79,8 @@ func (p *TCPProber) Stop() {
 func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Duration) {
 	// target is already in "ip:port" format from Accept method
 	now := time.Now()
-	p.sent(result, target, now)
+	name := p.targets[target]
+	result <- sentEvent(target, name, now)
 
 	// Create dialer with timeout
 	dialer := &net.Dialer{
@@ -90,8 +89,9 @@ func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Du
 
 	// Set source interface if specified
 	if p.config.SourceInterface != "" {
-		if localAddr, err := p.getSourceAddr(p.config.SourceInterface); err == nil {
-			dialer.LocalAddr = localAddr
+		// As before, an interface without a usable address is ignored
+		if ip, err := interfaceIP(p.config.SourceInterface, false, true); err == nil {
+			dialer.LocalAddr = &net.TCPAddr{IP: ip}
 		}
 	}
 
@@ -100,22 +100,17 @@ func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Du
 	rtt := time.Since(now)
 
 	if err != nil {
-		p.failed(result, target, now, err)
+		result <- errorEvent(target, name, now, err)
 		return
 	}
 
 	// Close connection immediately after successful establishment
 	conn.Close()
-	p.success(result, target, now, rtt)
+	result <- successEvent(target, name, now, rtt, nil) // TCP has no details
 }
 
 func (p *TCPProber) parseTarget(target string) (host, port string, err error) {
-	// Remove tcp:// or tcp: prefix
-	if strings.HasPrefix(target, p.prefix+"://") {
-		target = strings.TrimPrefix(target, p.prefix+"://")
-	} else if strings.HasPrefix(target, p.prefix+":") {
-		target = strings.TrimPrefix(target, p.prefix+":")
-	}
+	target, _ = cutPrefix(target, p.prefix)
 
 	// Parse host:port
 	host, port, err = net.SplitHostPort(target)
@@ -124,70 +119,4 @@ func (p *TCPProber) parseTarget(target string) (host, port string, err error) {
 	}
 
 	return host, port, nil
-}
-
-func (p *TCPProber) getSourceAddr(interfaceName string) (net.Addr, error) {
-	iface, err := net.InterfaceByName(interfaceName)
-	if err != nil {
-		return nil, err
-	}
-
-	addrs, err := iface.Addrs()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, addr := range addrs {
-		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-			if ipnet.IP.To4() != nil {
-				return &net.TCPAddr{IP: ipnet.IP}, nil
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("no suitable address found on interface %s", interfaceName)
-}
-
-func (p *TCPProber) sent(result chan *Event, target string, sentTime time.Time) {
-	displayName := p.targets[target] // Get displayName from targets map
-	result <- &Event{
-		Key:         target,
-		DisplayName: displayName,
-		Result:      SENT,
-		SentTime:    sentTime,
-		Rtt:         0,
-		Message:     "",
-	}
-}
-
-func (p *TCPProber) success(result chan *Event, target string, sentTime time.Time, rtt time.Duration) {
-	displayName := p.targets[target] // Get displayName from targets map
-
-	// TCP only checks connectivity, so no detailed information
-	result <- &Event{
-		Key:         target,
-		DisplayName: displayName,
-		Result:      SUCCESS,
-		SentTime:    sentTime,
-		Rtt:         rtt,
-		Message:     "",
-		Details:     nil, // TCP has no detailed information
-	}
-}
-
-func (p *TCPProber) failed(result chan *Event, target string, sentTime time.Time, err error) {
-	reason := FAILED
-	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-		reason = TIMEOUT
-	}
-
-	displayName := p.targets[target] // Get displayName from targets map
-	result <- &Event{
-		Key:         target,
-		DisplayName: displayName,
-		Result:      reason,
-		SentTime:    sentTime,
-		Rtt:         0,
-		Message:     err.Error(),
-	}
 }

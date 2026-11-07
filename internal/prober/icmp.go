@@ -102,15 +102,9 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, er
 }
 
 func (p *ICMPProber) Accept(target string) error {
-	var hostname string
-
-	// Check if it matches our prefix (e.g., "my-ping://host", "icmpv4://host")
-	if strings.HasPrefix(target, p.prefix+"://") {
-		hostname = strings.TrimPrefix(target, p.prefix+"://")
-	} else if strings.HasPrefix(target, p.prefix+":") {
-		// Legacy format (my-ping:host, icmpv4:host) - still supported
-		hostname = strings.TrimPrefix(target, p.prefix+":")
-	} else {
+	// "my-ping://host", "icmpv4://host" or the legacy "icmpv4:host"
+	hostname, ok := cutPrefix(target, p.prefix)
+	if !ok {
 		return ErrNotAccepted
 	}
 
@@ -478,32 +472,12 @@ func resolveSourceInterface(sourceInterface string, probeType ProbeType) (string
 		return sourceInterface, nil
 	}
 
-	// Try to resolve as interface name
-	iface, err := net.InterfaceByName(sourceInterface)
+	// Otherwise it is an interface name. IPv6 skips loopback addresses
+	// (::1); IPv4 accepts any address, including 127.0.0.1 on "lo".
+	v6 := probeType == ICMPV6
+	ip, err := interfaceIP(sourceInterface, v6, v6)
 	if err != nil {
-		return "", fmt.Errorf("interface not found: %s", sourceInterface)
+		return "", err
 	}
-
-	addrs, err := iface.Addrs()
-	if err != nil {
-		return "", fmt.Errorf("failed to get addresses for interface %s: %v", sourceInterface, err)
-	}
-
-	// Find appropriate IP address for the probe type
-	for _, addr := range addrs {
-		ipNet, ok := addr.(*net.IPNet)
-		if !ok {
-			continue
-		}
-
-		if probeType == ICMPV4 && ipNet.IP.To4() != nil {
-			return ipNet.IP.String(), nil
-		}
-		if probeType == ICMPV6 && ipNet.IP.To4() == nil && !ipNet.IP.IsLoopback() {
-			return ipNet.IP.String(), nil
-		}
-	}
-
-	return "", fmt.Errorf("no suitable %s address found on interface %s",
-		map[ProbeType]string{ICMPV4: "IPv4", ICMPV6: "IPv6"}[probeType], sourceInterface)
+	return ip.String(), nil
 }

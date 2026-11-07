@@ -74,7 +74,7 @@ func (l *runLoop) stop() bool {
 
 // register announces a target before it is probed.
 func register(r chan<- *Event, key, displayName string) {
-	r <- &Event{Key: key, DisplayName: displayName, Result: REGISTER}
+	r <- registerEvent(key, displayName)
 }
 
 // runPeriodic is the Start of the probers that probe each target on its own:

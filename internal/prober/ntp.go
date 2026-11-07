@@ -72,8 +72,7 @@ func NewNTPProber(cfg *NTPConfig, prefix string) *NTPProber {
 
 // Accept parses NTP targets in format: ntp://server[:port] or ntp:server[:port]
 func (p *NTPProber) Accept(target string) error {
-	// Check if it's new format (ntp://...) or legacy format (ntp:...)
-	if !strings.HasPrefix(target, p.prefix+"://") && !strings.HasPrefix(target, p.prefix+":") {
+	if _, ok := cutPrefix(target, p.prefix); !ok {
 		return ErrNotAccepted
 	}
 
@@ -98,12 +97,7 @@ func (p *NTPProber) Accept(target string) error {
 func (p *NTPProber) parseTarget(target string) (string, int, error) {
 	originalTarget := target
 
-	// Remove ntp:// or ntp: prefix
-	if strings.HasPrefix(target, p.prefix+"://") {
-		target = strings.TrimPrefix(target, p.prefix+"://")
-	} else if strings.HasPrefix(target, p.prefix+":") {
-		target = strings.TrimPrefix(target, p.prefix+":")
-	}
+	target, _ = cutPrefix(target, p.prefix)
 
 	// Parse server and port
 	server := p.config.Server
@@ -147,19 +141,19 @@ func (p *NTPProber) Stop() {
 func (p *NTPProber) sendProbe(result chan *Event, serverAddr string, timeout time.Duration) {
 	now := time.Now()
 	displayName := p.targets[serverAddr]
-	p.sent(result, serverAddr, displayName, now)
+	result <- sentEvent(serverAddr, displayName, now)
 
 	// Parse server address
 	host, portStr, err := net.SplitHostPort(serverAddr)
 	if err != nil {
-		p.failed(result, serverAddr, displayName, now, fmt.Errorf("invalid server address: %w", err))
+		result <- errorEvent(serverAddr, displayName, now, fmt.Errorf("invalid server address: %w", err))
 		return
 	}
 
 	// Connect to NTP server
 	conn, err := net.DialTimeout("udp", net.JoinHostPort(host, portStr), timeout)
 	if err != nil {
-		p.failed(result, serverAddr, displayName, now, err)
+		result <- errorEvent(serverAddr, displayName, now, err)
 		return
 	}
 	defer conn.Close()
@@ -177,7 +171,7 @@ func (p *NTPProber) sendProbe(result chan *Event, serverAddr string, timeout tim
 
 	err = binary.Write(conn, binary.BigEndian, req)
 	if err != nil {
-		p.failed(result, serverAddr, displayName, now, fmt.Errorf("failed to send NTP request: %w", err))
+		result <- errorEvent(serverAddr, displayName, now, fmt.Errorf("failed to send NTP request: %w", err))
 		return
 	}
 
@@ -185,7 +179,7 @@ func (p *NTPProber) sendProbe(result chan *Event, serverAddr string, timeout tim
 	var resp ntpPacket
 	err = binary.Read(conn, binary.BigEndian, &resp)
 	if err != nil {
-		p.failed(result, serverAddr, displayName, now, fmt.Errorf("failed to read NTP response: %w", err))
+		result <- errorEvent(serverAddr, displayName, now, fmt.Errorf("failed to read NTP response: %w", err))
 		return
 	}
 
@@ -198,27 +192,16 @@ func (p *NTPProber) sendProbe(result chan *Event, serverAddr string, timeout tim
 
 	// Check if offset exceeds maximum allowed
 	if p.config.MaxOffset > 0 && offset.Abs() > p.config.MaxOffset {
-		p.failed(result, serverAddr, displayName, now, fmt.Errorf("time offset too large: %v (max: %v)", offset, p.config.MaxOffset))
+		result <- errorEvent(serverAddr, displayName, now, fmt.Errorf("time offset too large: %v (max: %v)", offset, p.config.MaxOffset))
 		return
 	}
 
 	// Success
-	p.success(result, serverAddr, displayName, now, rtt, &resp, offset)
+	result <- successEvent(serverAddr, displayName, now, rtt, ntpDetails(serverAddr, displayName, &resp, offset))
 }
 
-func (p *NTPProber) sent(result chan *Event, serverAddr, displayName string, sentTime time.Time) {
-	result <- &Event{
-		Key:         serverAddr,
-		DisplayName: displayName,
-		Result:      SENT,
-		SentTime:    sentTime,
-		Rtt:         0,
-		Message:     "",
-	}
-}
-
-func (p *NTPProber) success(result chan *Event, serverAddr, displayName string, sentTime time.Time, rtt time.Duration, resp *ntpPacket, offset time.Duration) {
-	// Create NTP detail information
+// ntpDetails describes a successful NTP response.
+func ntpDetails(serverAddr, displayName string, resp *ntpPacket, offset time.Duration) *ProbeDetails {
 	// Extract port (serverAddr is in "host:port" format)
 	_, portStr, _ := net.SplitHostPort(serverAddr)
 	port := 123 // Default NTP port
@@ -228,7 +211,7 @@ func (p *NTPProber) success(result chan *Event, serverAddr, displayName string, 
 		}
 	}
 
-	details := &ProbeDetails{
+	return &ProbeDetails{
 		ProbeType: "ntp",
 		NTP: &NTPDetails{
 			Server:    displayName,
@@ -237,31 +220,6 @@ func (p *NTPProber) success(result chan *Event, serverAddr, displayName string, 
 			Offset:    offset.Microseconds(),
 			Precision: int(resp.Precision),
 		},
-	}
-
-	result <- &Event{
-		Key:         serverAddr,
-		DisplayName: displayName,
-		Result:      SUCCESS,
-		SentTime:    sentTime,
-		Rtt:         rtt,
-		Message:     "",
-		Details:     details,
-	}
-}
-
-func (p *NTPProber) failed(result chan *Event, serverAddr, displayName string, sentTime time.Time, err error) {
-	reason := FAILED
-	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-		reason = TIMEOUT
-	}
-	result <- &Event{
-		Key:         serverAddr,
-		DisplayName: displayName,
-		Result:      reason,
-		SentTime:    sentTime,
-		Rtt:         0,
-		Message:     err.Error(),
 	}
 }
 

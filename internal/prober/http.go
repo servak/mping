@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -154,49 +153,22 @@ func (p *HTTPProber) resolveURL(target string) (scheme, rest string) {
 	return "http", rest
 }
 
-func (p *HTTPProber) sent(r chan *Event, t string) {
-	r <- &Event{
-		Key:         t,
-		DisplayName: t,
-		Result:      SENT,
-	}
-}
-
-func (p *HTTPProber) timeout(r chan *Event, target string, now time.Time, err error) {
-	r <- &Event{
-		Key:         target,
-		DisplayName: target,
-		Result:      TIMEOUT,
-		SentTime:    now,
-		Rtt:         time.Since(now),
-		Message:     "timeout",
-	}
-}
-
-func (p *HTTPProber) failed(r chan *Event, target string, now time.Time, err error) {
-	r <- &Event{
-		Key:         target,
-		DisplayName: target,
-		Result:      FAILED,
-		SentTime:    now,
-		Rtt:         time.Since(now),
-		Message:     err.Error(),
-	}
-}
-
 func (p *HTTPProber) probe(r chan *Event, target string) {
 	now := time.Now()
-	p.sent(r, target)
+	r <- sentEvent(target, target, now)
+	fail := func(err error) {
+		r <- failureEvent(target, target, FAILED, now, time.Since(now), err.Error())
+	}
 
 	// Convert target to actual HTTP URL
 	scheme, rest := p.resolveURL(target)
 	actualURL := scheme + "://" + rest
 	resp, err := p.client.Get(actualURL)
 	if err != nil {
-		if err, ok := err.(net.Error); ok && err.Timeout() {
-			p.timeout(r, target, now, err)
+		if classifyErr(err) == TIMEOUT {
+			r <- failureEvent(target, target, TIMEOUT, now, time.Since(now), "timeout")
 		} else {
-			p.failed(r, target, now, err)
+			fail(err)
 		}
 		return
 	}
@@ -204,13 +176,13 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		p.failed(r, target, now, err)
+		fail(err)
 		return
 	}
 	if !p.isExpectedStatusCode(resp.StatusCode) {
-		p.failed(r, target, now, fmt.Errorf("unexpected status code: %d", resp.StatusCode))
+		fail(fmt.Errorf("unexpected status code: %d", resp.StatusCode))
 	} else if p.config.ExpectBody != "" && p.config.ExpectBody != strings.TrimRight(string(body), "\n") {
-		p.failed(r, target, now, errors.New("invalid body"))
+		fail(errors.New("invalid body"))
 	} else {
 		// Create HTTP detail information
 		headers := make(map[string]string)
@@ -237,14 +209,7 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 			},
 		}
 
-		r <- &Event{
-			Key:         target,
-			DisplayName: target,
-			Result:      SUCCESS,
-			SentTime:    now,
-			Rtt:         time.Since(now),
-			Details:     details,
-		}
+		r <- successEvent(target, target, now, time.Since(now), details)
 	}
 }
 

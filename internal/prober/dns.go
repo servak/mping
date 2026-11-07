@@ -81,8 +81,7 @@ func NewDNSProber(cfg *DNSConfig, prefix string) *DNSProber {
 
 // Accept parses DNS targets in format: dns://server[:port]/domain[/record_type] or dns:server[:port]/domain[/record_type]
 func (p *DNSProber) Accept(target string) error {
-	// Check if it's new format (dns://...) or legacy format (dns:...)
-	if !strings.HasPrefix(target, p.prefix+"://") && !strings.HasPrefix(target, p.prefix+":") {
+	if _, ok := cutPrefix(target, p.prefix); !ok {
 		return ErrNotAccepted
 	}
 
@@ -112,13 +111,8 @@ func (p *DNSProber) Accept(target string) error {
 }
 
 func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
-	// Remove dns:// or dns: prefix
 	originalTarget := target
-	if strings.HasPrefix(target, p.prefix+"://") {
-		target = strings.TrimPrefix(target, p.prefix+"://")
-	} else if strings.HasPrefix(target, p.prefix+":") {
-		target = strings.TrimPrefix(target, p.prefix+":")
-	}
+	target, _ = cutPrefix(target, p.prefix)
 
 	// Split into server and query parts
 	parts := strings.SplitN(target, "/", 2)
@@ -178,7 +172,8 @@ func (p *DNSProber) Stop() {
 
 func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout time.Duration) {
 	now := time.Now()
-	p.sent(result, target, now)
+	key := target.OriginalTarget
+	result <- sentEvent(key, key, now)
 
 	// Create DNS client
 	c := new(dns.Client)
@@ -191,7 +186,7 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 	m := new(dns.Msg)
 	qtype := dns.StringToType[target.RecordType]
 	if qtype == 0 {
-		p.failed(result, target, now, fmt.Errorf("unsupported record type: %s", target.RecordType))
+		result <- errorEvent(key, key, now, fmt.Errorf("unsupported record type: %s", target.RecordType))
 		return
 	}
 
@@ -202,39 +197,28 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 	server := fmt.Sprintf("%s:%d", target.ServerIP, target.Port)
 	r, rtt, err := c.Exchange(m, server)
 	if err != nil {
-		p.failed(result, target, now, err)
+		result <- errorEvent(key, key, now, err)
 		return
 	}
 
 	// Check DNS response
 	if !p.isExpectedResponseCode(r.Rcode) {
-		p.failed(result, target, now, fmt.Errorf("DNS response code: %d (%s)", r.Rcode, dns.RcodeToString[r.Rcode]))
+		result <- errorEvent(key, key, now, fmt.Errorf("DNS response code: %d (%s)", r.Rcode, dns.RcodeToString[r.Rcode]))
 		return
 	}
 
 	// Success
-	p.success(result, target, now, rtt, r)
+	result <- successEvent(key, key, now, rtt, p.details(target, r))
 }
 
-func (p *DNSProber) sent(result chan *Event, target *DNSTarget, sentTime time.Time) {
-	result <- &Event{
-		Key:         target.OriginalTarget,
-		DisplayName: target.OriginalTarget,
-		Result:      SENT,
-		SentTime:    sentTime,
-		Rtt:         0,
-		Message:     "",
-	}
-}
-
-func (p *DNSProber) success(result chan *Event, target *DNSTarget, sentTime time.Time, rtt time.Duration, resp *dns.Msg) {
-	// Create DNS detail information
+// details describes a successful DNS response.
+func (p *DNSProber) details(target *DNSTarget, resp *dns.Msg) *ProbeDetails {
 	var answers []string
 	for _, ans := range resp.Answer {
 		answers = append(answers, ans.String())
 	}
 
-	details := &ProbeDetails{
+	return &ProbeDetails{
 		ProbeType: "dns",
 		DNS: &DNSDetails{
 			Server:       target.Server,
@@ -246,31 +230,6 @@ func (p *DNSProber) success(result chan *Event, target *DNSTarget, sentTime time
 			Answers:      answers,
 			UseTCP:       target.UseTCP,
 		},
-	}
-
-	result <- &Event{
-		Key:         target.OriginalTarget,
-		DisplayName: target.OriginalTarget,
-		Result:      SUCCESS,
-		SentTime:    sentTime,
-		Rtt:         rtt,
-		Message:     "",
-		Details:     details,
-	}
-}
-
-func (p *DNSProber) failed(result chan *Event, target *DNSTarget, sentTime time.Time, err error) {
-	reason := FAILED
-	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-		reason = TIMEOUT
-	}
-	result <- &Event{
-		Key:         target.OriginalTarget,
-		DisplayName: target.OriginalTarget,
-		Result:      reason,
-		SentTime:    sentTime,
-		Rtt:         0,
-		Message:     err.Error(),
 	}
 }
 
