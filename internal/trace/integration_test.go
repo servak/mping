@@ -13,7 +13,12 @@ package trace
 //	MPING_IT_INTERVAL  interval between rounds (default 1s, same as the TUI)
 //	MPING_IT_STRICT    "1" fails instead of skipping when a target cannot be
 //	                   traced (no ICMP socket); CI sets it with loopback targets
-//	MPING_IT_PRIVILEGED "1" requires the raw socket, "0" the datagram fallback
+//	MPING_IT_PRIVILEGED "1" requires the raw socket, "0" the unprivileged
+//	                   fallback (datagram ICMP; for UDP traces the Linux
+//	                   socket error queue or datagram ICMP on macOS)
+//
+// Every target is traced with ICMP and with UDP (TestIntegrationTrace/icmp,
+// TestIntegrationTrace/udp).
 //
 // CI runs it against loopback only (GitHub-hosted runners block outbound ICMP):
 //
@@ -58,6 +63,15 @@ func (l *traceLog) record(e probeEvent) {
 }
 
 func TestIntegrationTrace(t *testing.T) {
+	for _, proto := range []Proto{ProtoICMP, ProtoUDP} {
+		t.Run(string(proto), func(t *testing.T) {
+			t.Parallel()
+			runIntegrationTrace(t, proto)
+		})
+	}
+}
+
+func runIntegrationTrace(t *testing.T, proto Proto) {
 	targets := strings.Split(envOr("MPING_IT_TARGETS", "8.8.8.8,1.1.1.1,192.168.1.1"), ",")
 	rounds, _ := strconv.Atoi(envOr("MPING_IT_ROUNDS", "20"))
 	interval, _ := time.ParseDuration(envOr("MPING_IT_INTERVAL", "1s"))
@@ -65,7 +79,7 @@ func TestIntegrationTrace(t *testing.T) {
 	for _, target := range targets {
 		t.Run(target, func(t *testing.T) {
 			t.Parallel()
-			tr, err := New(target, Config{Interval: interval, Timeout: time.Second, NoDNS: true})
+			tr, err := New(target, Config{Interval: interval, Timeout: time.Second, NoDNS: true, Proto: proto})
 			if err != nil {
 				if os.Getenv("MPING_IT_STRICT") == "1" {
 					t.Fatalf("cannot trace: %v", err)
@@ -79,18 +93,21 @@ func TestIntegrationTrace(t *testing.T) {
 				t.Fatalf("Run() error = %v", err)
 			}
 			res := tr.Snapshot()
-			t.Logf("privileged=%v reached=%v rounds=%d hops=%d late=%d",
-				res.Privileged, res.Reached, res.Rounds, len(res.Hops), log.late)
+			t.Logf("proto=%s privileged=%v reached=%v rounds=%d hops=%d late=%d",
+				res.Proto, res.Privileged, res.Reached, res.Rounds, len(res.Hops), log.late)
 			t.Log("\n" + renderGrid(res, log))
 
+			if res.Proto != proto {
+				t.Errorf("Proto = %q, want %q", res.Proto, proto)
+			}
 			switch os.Getenv("MPING_IT_PRIVILEGED") {
 			case "1":
 				if !res.Privileged {
-					t.Errorf("traced with the datagram fallback, want a raw socket (cap_net_raw)")
+					t.Errorf("traced without a raw socket, want one (cap_net_raw)")
 				}
 			case "0":
 				if res.Privileged {
-					t.Errorf("traced with a raw socket, want the unprivileged datagram fallback")
+					t.Errorf("traced with a raw socket, want the unprivileged fallback")
 				}
 			}
 			checkInvariants(t, res, log)
@@ -118,7 +135,7 @@ func renderGrid(res Result, log *traceLog) string {
 				sb.WriteByte('x')
 			}
 		}
-		fmt.Fprintf(&sb, "  loss=%5.1f%% sent=%d recv=%d\n", h.Loss(), h.Sent, h.Recv)
+		fmt.Fprintf(&sb, "  loss=%5.1f%% sent=%d recv=%d responders=%d\n", h.Loss(), h.Sent, h.Recv, len(h.Responders))
 	}
 	return sb.String()
 }

@@ -41,3 +41,14 @@ func TestResolveLiteral(t *testing.T) {
 		t.Errorf("Resolve literal = %v, %v", ip, err)
 	}
 }
+
+func TestProtoForProbeType(t *testing.T) {
+	for pt, want := range map[string]Proto{
+		"": ProtoICMP, "icmpv4": ProtoICMP, "icmpv6": ProtoICMP,
+		"http": ProtoUDP, "https": ProtoUDP, "tcp": ProtoUDP, "dns": ProtoUDP, "ntp": ProtoUDP,
+	} {
+		if got := ProtoForProbeType(pt); got != want {
+			t.Errorf("ProtoForProbeType(%q) = %s, want %s", pt, got, want)
+		}
+	}
+}
