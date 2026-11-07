@@ -143,10 +143,28 @@ mping turns consecutive failures into **outages** and records when each one star
 
 Press `p` in the TUI to show a live, MTR-style trace of the path to the selected host. The trace follows the selection. Any target works — for `tcp://`, `https://`, `dns://`, … the host part is traced.
 
+The trace uses the protocol that matches how the selected probe's packets are forwarded, and the header shows it (`1.1.1.1 · udp · 42 rounds`):
+
+| Selected target | Trace | Why |
+|-----------------|-------|-----|
+| ICMP (`icmpv4`, `icmpv6`, plain hosts, custom ICMP probers) | ICMP echo, fixed echo ID | The ICMP probe is a single flow, so ECMP routers keep it on one branch; so does the trace. |
+| HTTP, HTTPS, TCP, DNS, NTP (and custom probers of those kinds) | UDP, traceroute style | These probes open a new source port per probe, and routers hash ECMP on the L4 ports, so the probe's traffic spreads over every branch. |
+
+UDP probes are sent from one ephemeral source port to destination ports `33434 + (33 × round + ttl) mod 64`: each hop cycles through 64 flows (and then repeats them, so per-branch statistics accumulate), and two consecutive rounds never share a port. Routers answer with Time Exceeded, the destination with Port Unreachable. Every branch shows up as its own responder row under the hop, so a UDP trace through an ECMP fabric typically lists several routers per hop where an ICMP trace (or `mtr`, `traceroute -I`) shows one.
+
+Privileges needed for the trace:
+
+| Platform | ICMP trace | UDP trace |
+|----------|------------|-----------|
+| root / `cap_net_raw` (Linux, macOS) | raw ICMP socket | UDP socket + raw ICMP socket for the replies |
+| Linux, unprivileged | datagram ICMP if `net.ipv4.ping_group_range` allows it; intermediate hops are not visible | UDP socket error queue (`IP_RECVERR`): all hops visible, no privileges needed |
+| macOS, unprivileged | datagram ICMP, all hops visible | UDP socket + datagram ICMP socket, all hops visible |
+
 Notes:
 - When several routers answer for the same hop (ECMP / load balancing), each one is listed under the hop with its share of the replies and its own Last/Avg/Best/Wrst; the first row is the most frequent responder. Responders that stop answering are dimmed and marked `(stale)`, and are hidden after a longer silence once another router has answered more recently (the most recent responder of a hop is never hidden, so a rate-limited hop keeps its address). At most 4 extra responders are shown per hop, followed by `+N more`.
 - Loss at an intermediate hop that does not continue to the destination is usually ICMP rate limiting on that router, not real loss; the path view points this out.
-- Raw sockets are used when available (root / `cap_net_raw`). Otherwise mping falls back to unprivileged ICMP sockets: on macOS this works fully, on Linux only the destination may be visible.
+- Raw sockets are used when available (root / `cap_net_raw`), otherwise the unprivileged fallbacks above. When none is available the path view says why instead of showing a trace.
+- A destination that actually listens on one of the UDP ports answers with data instead of Port Unreachable; that probe is then lost. UDP to `33434-33497` is rarely open, but firewalls that drop UDP or ICMP errors hide the hops behind them.
 - In the TUI, path probing runs at most once per second so that router rate limiting does not show up as fake loss.
 
 ## History and Percentiles
@@ -614,6 +632,15 @@ sudo setcap cap_net_raw=+ep /tmp/trace.test
 (cd internal/trace && MPING_IT_TARGETS=127.0.0.1,::1 MPING_IT_PRIVILEGED=1 /tmp/trace.test -test.run Integration -test.v)
 ```
 
-Without privileges the tracer falls back to datagram ICMP, which Linux only allows when the user's group is within `net.ipv4.ping_group_range` (otherwise the integration tests skip; `MPING_IT_STRICT=1` makes them fail). `MPING_IT_PRIVILEGED=1` / `0` asserts which socket type was used.
+The tracer integration test traces every target with ICMP and with UDP. Without privileges the ICMP trace falls back to datagram ICMP, which Linux only allows when the user's group is within `net.ipv4.ping_group_range` (otherwise the integration tests skip; `MPING_IT_STRICT=1` makes them fail); the UDP trace uses the socket error queue. `MPING_IT_PRIVILEGED=1` / `0` asserts which socket type was used. Linux rate-limits ICMP errors (`net.ipv4.icmp_ratelimit`, `net.ipv6.icmp.ratelimit`); CI sets both to 0.
+
+Real ECMP is tested with Linux network namespaces (root required): `test/netns/ecmp.sh up` builds a client, a router with a two-way multipath route hashed on L4 ports (`fib_multipath_hash_policy=1`), two branch routers and a destination. The ECMP test then asserts that a UDP trace sees both branches at hop 2 and an ICMP trace exactly one:
+
+```bash
+go test -c -tags integration -o /tmp/trace.test ./internal/trace/
+sudo test/netns/ecmp.sh up
+sudo ip netns exec mping-c env MPING_IT_ECMP_TARGET=10.200.0.1 /tmp/trace.test -test.run IntegrationECMP -test.v
+sudo test/netns/ecmp.sh down
+```
 
 On macOS everything except the ICMP prober cases runs without privileges: the tracer falls back to unprivileged datagram ICMP, and HTTP/HTTPS/TCP/DNS/NTP need none. The ICMP prober cases need `sudo` (setcap does not exist on macOS) and are skipped otherwise.
