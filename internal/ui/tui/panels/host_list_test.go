@@ -480,15 +480,14 @@ func TestHostListPanelMarksSilencedHost(t *testing.T) {
 	mm.ToggleSilence("quiet")
 
 	panel := NewHostListPanel(newMockState(), mm, shared.DefaultConfig())
-	panel.SetSilenceProvider(mm.(SilenceStateProvider))
 	panel.Update()
 
 	marked := map[string]bool{}
 	for row := 1; row < panel.table.GetRowCount(); row++ {
 		text := panel.table.GetCell(row, 0).Text
-		marked[strings.TrimSpace(text)] = strings.Contains(text, SilenceMarker)
+		marked[strings.TrimSpace(text)] = strings.Contains(text, silenceMarker)
 	}
-	if !marked["quiet"+SilenceMarker] {
+	if !marked["quiet"+silenceMarker] {
 		t.Errorf("silenced host not marked: %v", marked)
 	}
 	if marked["loud"] {

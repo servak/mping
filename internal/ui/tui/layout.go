@@ -71,9 +71,6 @@ func (l *LayoutManager) setupPanels(uiState *state.UIState, mm stats.MetricsProv
 	}
 
 	l.hostList = panels.NewHostListPanel(uiState, mm, config)
-	if sp, ok := mm.(panels.SilenceStateProvider); ok {
-		l.hostList.SetSilenceProvider(sp)
-	}
 	l.footer = panels.NewFooterPanel(config)
 	l.hostDetail = panels.NewHostDetailPanel(config)
 	l.path = panels.NewPathPanel(config)

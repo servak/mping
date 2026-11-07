@@ -37,6 +37,8 @@ type Metrics interface {
 // MetricsProvider provides external API for metrics access
 type MetricsProvider interface {
 	SortBy(k Key, ascending bool) []Metrics
+	// IsSilenced reports whether the target's (display name) failure beep is muted
+	IsSilenced(name string) bool
 }
 
 // MetricsSystemManager provides system-level operations
@@ -47,7 +49,6 @@ type MetricsSystemManager interface {
 	// ToggleSilence mutes/unmutes the failure beep for one target and returns
 	// the new state. Probing and statistics are unaffected.
 	ToggleSilence(name string) bool
-	IsSilenced(name string) bool
 }
 
 // MetricsEventRecorder handles internal event recording
