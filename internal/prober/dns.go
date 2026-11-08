@@ -127,17 +127,22 @@ func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
 	server := p.config.Server
 	port := p.config.Port
 	if serverPart != "" {
-		if strings.Contains(serverPart, ":") {
-			host, portStr, err := net.SplitHostPort(serverPart)
-			if err != nil {
-				return nil, fmt.Errorf("invalid server:port format: %w", err)
-			}
+		host, portStr, err := splitServerPort(serverPart)
+		if err != nil {
+			return nil, err
+		}
+		if host != "" {
 			server = host
-			if p, err := strconv.Atoi(portStr); err == nil {
-				port = p
+		}
+		if portStr != "" {
+			p, err := strconv.Atoi(portStr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid port %q: must be a number between 1 and 65535", portStr)
 			}
-		} else {
-			server = serverPart
+			if p < 1 || p > 65535 {
+				return nil, fmt.Errorf("invalid port %d: must be between 1 and 65535", p)
+			}
+			port = p
 		}
 	}
 
@@ -149,6 +154,10 @@ func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
 	if len(queryParts) > 1 && queryParts[1] != "" {
 		recordType = strings.ToUpper(queryParts[1])
 	}
+	if t, ok := dns.StringToType[strings.ToUpper(recordType)]; !ok || t == 0 {
+		return nil, fmt.Errorf("unsupported record type: %q", recordType)
+	}
+	recordType = strings.ToUpper(recordType)
 	return &DNSTarget{
 		Server:         server,
 		Port:           port,
@@ -194,11 +203,24 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 	m.RecursionDesired = p.config.RecursionDesired
 
 	// Send DNS query using pre-resolved server IP
-	server := fmt.Sprintf("%s:%d", target.ServerIP, target.Port)
+	server := net.JoinHostPort(target.ServerIP, strconv.Itoa(target.Port))
 	r, rtt, err := c.Exchange(m, server)
 	if err != nil {
 		result <- errorEvent(key, key, now, err)
 		return
+	}
+
+	// A truncated UDP answer is incomplete: retry over TCP.
+	if r.Truncated && !target.UseTCP {
+		tc := new(dns.Client)
+		tc.Timeout = timeout
+		tc.Net = "tcp"
+		r2, rtt2, err := tc.Exchange(m, server)
+		if err != nil {
+			result <- errorEvent(key, key, now, fmt.Errorf("DNS response truncated, TCP retry failed: %w", err))
+			return
+		}
+		r, rtt = r2, rtt+rtt2
 	}
 
 	// Check DNS response
