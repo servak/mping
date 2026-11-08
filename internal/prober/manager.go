@@ -16,7 +16,9 @@ type ProbeManager interface {
 	Stop()
 }
 
-// probeManager implements ProbeManager interface
+// probeManager implements ProbeManager interface. A manager runs once: Run
+// may be called at most once, and Stop (before, during or after Run) ends it
+// for good and closes the event channel.
 type probeManager struct {
 	config      map[string]*ProberConfig
 	defaultType string
@@ -24,7 +26,8 @@ type probeManager struct {
 	eventChan   chan *Event
 	wg          sync.WaitGroup
 	mu          sync.Mutex
-	running     bool
+	started     bool // Run has started the probers
+	stopped     bool // Stop has been called; the event channel is closed
 	cancel      context.CancelFunc
 }
 
@@ -43,8 +46,11 @@ func (pm *probeManager) AddTargets(targets ...string) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	if pm.running {
+	if pm.started {
 		return fmt.Errorf("ProbeManager is already running")
+	}
+	if pm.stopped {
+		return fmt.Errorf("ProbeManager is stopped")
 	}
 
 	// Route each target to appropriate prober
@@ -57,27 +63,30 @@ func (pm *probeManager) AddTargets(targets ...string) error {
 	return nil
 }
 
-// Run starts the probing operations
+// Run starts the probers and blocks until ctx is done or Stop is called. It
+// returns nil at once when Stop was called before.
 func (pm *probeManager) Run(ctx context.Context, interval, timeout time.Duration) error {
 	pm.mu.Lock()
-	if pm.running {
+	if pm.started {
 		pm.mu.Unlock()
 		return fmt.Errorf("ProbeManager is already running")
 	}
-	pm.running = true
-
-	// Check if any probers exist
+	if pm.stopped {
+		pm.mu.Unlock()
+		return nil
+	}
 	if len(pm.probers) == 0 {
 		pm.mu.Unlock()
 		return fmt.Errorf("no probers with targets")
 	}
+	pm.started = true
 
 	// Create cancelable context for this run
 	runCtx, cancel := context.WithCancel(ctx)
 	pm.cancel = cancel
-	pm.mu.Unlock()
 
-	// Start all probers
+	// Start all probers under the lock, so that a concurrent Stop either
+	// sees none of them or waits for all of them
 	for _, prober := range pm.probers {
 		pm.wg.Add(1)
 		go func(p Prober) {
@@ -85,8 +94,9 @@ func (pm *probeManager) Run(ctx context.Context, interval, timeout time.Duration
 			p.Start(pm.eventChan, interval, timeout)
 		}(prober)
 	}
+	pm.mu.Unlock()
 
-	// Wait for context cancellation
+	// Wait for context cancellation (Stop cancels it too)
 	<-runCtx.Done()
 	pm.Stop()
 
@@ -98,32 +108,35 @@ func (pm *probeManager) Events() <-chan *Event {
 	return pm.eventChan
 }
 
-// Stop stops all probing operations
+// Stop stops all probers, waits for them to finish and closes the event
+// channel. It may be called before Run and any number of times.
 func (pm *probeManager) Stop() {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	if !pm.running {
+	if pm.stopped {
 		return
 	}
+	pm.stopped = true
 
 	// Cancel context to signal stop
 	if pm.cancel != nil {
 		pm.cancel()
 	}
 
-	// Stop all probers
+	// Stop all probers concurrently: each may wait for its last replies.
+	// Probers that never started just release their resources.
+	var stops sync.WaitGroup
 	for _, prober := range pm.probers {
-		prober.Stop()
+		stops.Go(prober.Stop)
 	}
+	stops.Wait()
 
 	// Wait for goroutines to finish
 	pm.wg.Wait()
 
 	// Close event channel
 	close(pm.eventChan)
-
-	pm.running = false
 }
 
 // routeTarget routes a single target to appropriate prober, creating prober if needed

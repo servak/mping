@@ -37,7 +37,7 @@ func TestProbeManagerDetailedScenarios(t *testing.T) {
 		}
 
 		// Simulate running state
-		pm.(*probeManager).running = true
+		pm.(*probeManager).started = true
 
 		// Try to add more targets while running
 		err = pm.AddTargets("http://google.com")
