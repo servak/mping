@@ -15,7 +15,7 @@ const (
 
 type (
 	TCPProber struct {
-		targets map[string]tcpTarget // key (ip:port) -> display name and source
+		targets map[string]tcpTarget // key (target as given) -> address, display name and source
 		config  *TCPConfig
 		// sources caches the source address per family (index 1 for IPv6)
 		sources [2]*net.TCPAddr
@@ -24,7 +24,8 @@ type (
 	}
 
 	tcpTarget struct {
-		name  string       // display name (host:port as given)
+		name  string       // display name (target as given)
+		addr  string       // resolved ip:port to dial
 		local *net.TCPAddr // source address; nil without source_interface
 	}
 
@@ -76,7 +77,7 @@ func (p *TCPProber) Accept(target string) error {
 			return fmt.Errorf("source_interface %q for %s: %w", p.config.SourceInterface, target, err)
 		}
 	}
-	p.targets[ipPort] = tcpTarget{name: target, local: local}
+	p.targets[target] = tcpTarget{name: target, addr: ipPort, local: local}
 
 	return nil
 }
@@ -93,7 +94,7 @@ func (p *TCPProber) Stop() {
 }
 
 func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Duration) {
-	// target is already in "ip:port" format from Accept method
+	// target is the key given to Accept; the address was resolved there
 	now := time.Now()
 	t := p.targets[target]
 	name := t.name
@@ -108,7 +109,7 @@ func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Du
 	}
 
 	// Attempt TCP connection using pre-resolved IP:port
-	conn, err := dialer.Dial("tcp", target)
+	conn, err := dialer.Dial("tcp", t.addr)
 	rtt := time.Since(now)
 
 	if err != nil {

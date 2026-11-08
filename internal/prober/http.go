@@ -1,10 +1,12 @@
 package prober
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -15,6 +17,10 @@ import (
 const (
 	HTTP  ProbeType = "http"
 	HTTPS ProbeType = "https"
+
+	// maxBodyBytes caps how much of a response body is read. It bounds memory
+	// for huge or endless bodies; expect_body can only match within this size.
+	maxBodyBytes = 1 << 20
 )
 
 type (
@@ -33,6 +39,10 @@ type (
 		ExpectBody  string            `yaml:"expect_body,omitempty"`
 		TLS         *TLSConfig        `yaml:"tls,omitempty"`
 		RedirectOFF bool              `yaml:"redirect_off,omitempty"`
+		// KeepAlive reuses connections between probes. By default every probe
+		// opens a fresh connection so the RTT always includes DNS, TCP and TLS
+		// setup; with keep_alive only the first probe pays for them.
+		KeepAlive bool `yaml:"keep_alive,omitempty"`
 	}
 
 	TLSConfig struct {
@@ -75,10 +85,23 @@ func NewHTTPProber(probeType ProbeType, cfg *HTTPConfig, prefix string) *HTTPPro
 	// Determine TLS skip verification setting (default: skip)
 	skipVerify := cfg.TLS.ShouldSkipVerify()
 
+	// Per-prober TLS config. With a Host header override, SNI and certificate
+	// verification must use that name rather than the URL host.
+	tlsCfg := &tls.Config{InsecureSkipVerify: skipVerify}
+	for k, v := range cfg.Header {
+		if strings.EqualFold(k, "Host") {
+			if h, _, err := net.SplitHostPort(v); err == nil {
+				v = h
+			}
+			tlsCfg.ServerName = strings.Trim(v, "[]")
+		}
+	}
+
 	client := &http.Client{
 		Transport: &customTransport{
 			transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: skipVerify},
+				TLSClientConfig:   tlsCfg,
+				DisableKeepAlives: !cfg.KeepAlive,
 			},
 			headers: cfg.Header,
 		},
@@ -174,9 +197,13 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 	if err != nil {
-		fail(err)
+		if isTimeoutErr(err) {
+			r <- failureEvent(target, target, TIMEOUT, now, time.Since(now), "timeout")
+		} else {
+			fail(err)
+		}
 		return
 	}
 	if !p.isExpectedStatusCode(resp.StatusCode) {
@@ -211,6 +238,13 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 
 		r <- successEvent(target, target, now, time.Since(now), details)
 	}
+}
+
+// isTimeoutErr reports whether err is a timeout or deadline error, including
+// the ones raised while reading a response body.
+func isTimeoutErr(err error) bool {
+	var ne net.Error
+	return errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout())
 }
 
 func (p *HTTPProber) Start(r chan *Event, interval, timeout time.Duration) error {

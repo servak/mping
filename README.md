@@ -418,6 +418,7 @@ prober:
       headers:                    # Custom headers (optional)
         User-Agent: "mping/1.0"
       redirect_off: false         # Disable redirect following
+      keep_alive: false           # Reuse connections between probes (default: false)
   
   # HTTPS configuration
   https:
@@ -427,6 +428,7 @@ prober:
       expect_body: ""
       headers: {}
       redirect_off: false
+      keep_alive: false           # false: every probe opens a new connection (RTT includes DNS+TCP+TLS)
       tls:
         skip_verify: true         # Skip TLS certificate verification (default: true when omitted)
   

@@ -101,11 +101,11 @@ func TestTCPSourceIPLiteral(t *testing.T) {
 	if err := p.Accept("tcp://" + addr); err != nil {
 		t.Fatalf("Accept() with an IPv4 source = %v", err)
 	}
-	if got := p.targets[addr].local; got == nil || got.IP.String() != "127.0.0.1" {
+	if got := p.targets["tcp://"+addr].local; got == nil || got.IP.String() != "127.0.0.1" {
 		t.Errorf("source address = %v, want 127.0.0.1", got)
 	}
 	events := make(chan *Event, 10)
-	p.sendProbe(events, addr, time.Second)
+	p.sendProbe(events, "tcp://"+addr, time.Second)
 	close(events)
 	var last *Event
 	for e := range events {

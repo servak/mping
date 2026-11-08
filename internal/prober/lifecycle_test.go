@@ -345,7 +345,7 @@ func lifecycleCases() []lifecycleCase {
 			if err := p.Accept("tcp://" + addr); err != nil {
 				t.Fatal(err)
 			}
-			return p, []string{addr}
+			return p, []string{"tcp://" + addr}
 		}},
 		{"dns", func(t *testing.T) (Prober, []string) {
 			addr := startDNSServer(t)
