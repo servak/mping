@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math/rand/v2"
 	"net"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -114,21 +114,34 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, er
 	return newICMPProber(t, c, []byte(cfg.Body), prefix), nil
 }
 
-// echoIDs counts the ICMP probers created in this process.
-var echoIDs atomic.Uint32
+// echoIDs counts the ICMP probers created in this process, and echoIDBase
+// is a random per-process start for their echo IDs.
+var (
+	echoIDs    atomic.Uint32
+	echoIDBase = uint16(rand.Uint32())
+)
 
 // nextEchoID returns the echo ID for a new prober. A raw ICMP socket
 // receives the echo replies of every socket on the host, and the probers
 // in one process ping with the same sequence numbers, so the echo ID is
-// what tells their replies apart: each prober gets its own, derived from
-// the process ID so that concurrent mping processes differ too.
+// what tells their replies apart: each prober gets its own, counting up
+// from a random per-process base. The random base keeps concurrent mping
+// processes apart (PID-derived IDs overlap for neighbouring PIDs), and the
+// path tracer (internal/trace) draws its echo IDs from its own random base
+// too, so the two rarely meet. ID 0 is skipped; the counter wraps after
+// 65535 probers, far more than one process creates.
 //
 // The probers only use raw sockets. Datagram ICMP sockets (Linux
 // "ping" sockets) would need different matching: the kernel rewrites the
 // echo ID to the socket's port and delivers each socket only its own
 // replies, so the ID check in recvPkts would have to be skipped there.
 func nextEchoID() int {
-	return (os.Getpid() + int(echoIDs.Add(1)-1)) & 0xffff
+	for {
+		id := echoIDBase + uint16(echoIDs.Add(1)-1)
+		if id != 0 {
+			return int(id)
+		}
+	}
 }
 
 func newICMPProber(t ProbeType, c packetConn, body []byte, prefix string) *ICMPProber {
@@ -146,14 +159,29 @@ func newICMPProber(t ProbeType, c packetConn, body []byte, prefix string) *ICMPP
 	}
 }
 
-// isDefault reports whether p is one of the built-in icmpv4/icmpv6 probers,
+// isBuiltin reports whether p is one of the built-in icmpv4/icmpv6 probers,
 // whose targets are keyed and shown by their bare address.
-func (p *ICMPProber) isDefault() bool {
+func (p *ICMPProber) isBuiltin() bool {
 	return p.prefix == string(p.version)
 }
 
+// Accept adds a target written with the prober's scheme ("my-ping://host",
+// "icmpv4://host" or the legacy "icmpv4:host"). The targets of a custom
+// prober are keyed and shown with its scheme.
 func (p *ICMPProber) Accept(target string) error {
-	// "my-ping://host", "icmpv4://host" or the legacy "icmpv4:host"
+	return p.accept(target, false)
+}
+
+// acceptPlain adds a target the user wrote without a scheme, routed here
+// because p is the default prober. Like the targets of the built-in
+// probers, it is shown by its bare address whichever prober is the
+// default; only its key carries the scheme of a custom prober, so that it
+// does not merge with the same address probed by another prober.
+func (p *ICMPProber) acceptPlain(target string) error {
+	return p.accept(target, true)
+}
+
+func (p *ICMPProber) accept(target string, plain bool) error {
 	hostname, ok := cutPrefix(target, p.prefix)
 	if !ok {
 		return ErrNotAccepted
@@ -177,23 +205,38 @@ func (p *ICMPProber) Accept(target string) error {
 		return nil // Already exists, no need to add again
 	}
 
-	// Generate display name
-	displayName := ipStr
-	if net.ParseIP(hostname) == nil {
-		displayName = fmt.Sprintf("%s(%s)", hostname, ipStr)
-	}
-
 	// The built-in probers key their targets by address. Any other ICMP
 	// prober (e.g. one with TTL=1) may probe the same address, so its key
-	// and name carry its own prefix to keep the two apart in the stats.
-	key := ipStr
-	if !p.isDefault() {
-		key = p.prefix + "://" + ipStr
-		displayName = p.prefix + "://" + displayName
+	// carries its own prefix to keep the two apart in the stats, and so
+	// does its display name for targets written with its scheme.
+	key, displayName := ipStr, icmpDisplayName(hostname, ipStr, "")
+	if !p.isBuiltin() {
+		key = icmpDisplayName(ipStr, ipStr, p.prefix)
+		if !plain {
+			displayName = icmpDisplayName(hostname, ipStr, p.prefix)
+		}
 	}
 	p.targets[ipStr] = icmpTarget{key: key, name: displayName}
 
 	return nil
+}
+
+// icmpDisplayName formats a target as its address, or "host(address)" when
+// it was given by name, behind "prefix://" when prefix is set. A prefixed
+// bare IPv6 address is bracketed (my-v6://[2001:db8::1]) so that it parses
+// as a URL host rather than as a host and port.
+func icmpDisplayName(hostname, ipStr, prefix string) string {
+	name := ipStr
+	if net.ParseIP(hostname) == nil && hostname != ipStr {
+		name = fmt.Sprintf("%s(%s)", hostname, ipStr)
+	}
+	if prefix == "" {
+		return name
+	}
+	if name == ipStr && strings.Contains(ipStr, ":") {
+		name = "[" + ipStr + "]"
+	}
+	return prefix + "://" + name
 }
 
 func (p *ICMPProber) addTable(runCnt int, sentTime time.Time) {
@@ -358,14 +401,18 @@ func (p *ICMPProber) failed(runCnt int, addr string, err error) *Event {
 }
 
 // checkTimeout drops the rounds older than the timeout and returns TIMEOUT
-// events for their unanswered targets, plus the number of rounds still
-// waiting for replies.
-func (p *ICMPProber) checkTimeout() (events []*Event, pending int) {
+// events for their unanswered targets, the number of rounds still waiting
+// for replies and when the oldest of those times out (zero if none).
+func (p *ICMPProber) checkTimeout() (events []*Event, pending int, next time.Time) {
 	now := time.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for rt, table := range p.tables {
-		if rt.sentTime.Add(p.timeout).After(now) {
+		d := rt.sentTime.Add(p.timeout)
+		if d.After(now) {
+			if next.IsZero() || d.Before(next) {
+				next = d
+			}
 			continue
 		}
 		for t, res := range table {
@@ -376,29 +423,15 @@ func (p *ICMPProber) checkTimeout() (events []*Event, pending int) {
 		}
 		delete(p.tables, rt)
 	}
-	return events, len(p.tables)
-}
-
-// nextDeadline returns when the oldest outstanding round times out, and
-// false when no round is outstanding.
-func (p *ICMPProber) nextDeadline() (time.Time, bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	var next time.Time
-	for rt := range p.tables {
-		if d := rt.sentTime.Add(p.timeout); next.IsZero() || d.Before(next) {
-			next = d
-		}
-	}
-	return next, !next.IsZero()
+	return events, len(p.tables), next
 }
 
 // expire reports the rounds that timed out and returns the number of rounds
 // still outstanding. It arms deadline for the next timeout, if any.
 func (p *ICMPProber) expire(r chan *Event, deadline *time.Timer) int {
-	events, pending := p.checkTimeout()
+	events, pending, next := p.checkTimeout()
 	emit(r, events...)
-	if next, ok := p.nextDeadline(); ok {
+	if !next.IsZero() {
 		deadline.Reset(time.Until(next))
 	}
 	return pending

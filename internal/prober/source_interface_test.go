@@ -82,23 +82,61 @@ func TestTCPLocalAddrFamily(t *testing.T) {
 	}
 }
 
-// A source interface that cannot be used fails the probe instead of being
-// silently ignored.
+// A source interface that cannot be used is rejected when the target is
+// added, not reported as a FAILED probe every round.
 func TestTCPProberBadSourceInterface(t *testing.T) {
 	addr := startTCPServer(t)
 	p := NewTCPProber(&TCPConfig{SourceInterface: "nonexistent-interface"}, "tcp")
-	if err := p.Accept("tcp://" + addr); err != nil {
-		t.Fatal(err)
+	err := p.Accept("tcp://" + addr)
+	if err == nil || !strings.Contains(err.Error(), "nonexistent-interface") {
+		t.Errorf("Accept() with a bad source interface = %v, want an error naming it", err)
 	}
-	events := make(chan *Event, 100)
+}
+
+// source_interface may be an IP address of the target's family; one of the
+// other family is rejected at Accept.
+func TestTCPSourceIPLiteral(t *testing.T) {
+	addr := startTCPServer(t) // 127.0.0.1:port
+	p := NewTCPProber(&TCPConfig{SourceInterface: "127.0.0.1"}, "tcp")
+	if err := p.Accept("tcp://" + addr); err != nil {
+		t.Fatalf("Accept() with an IPv4 source = %v", err)
+	}
+	if got := p.targets[addr].local; got == nil || got.IP.String() != "127.0.0.1" {
+		t.Errorf("source address = %v, want 127.0.0.1", got)
+	}
+	events := make(chan *Event, 10)
 	p.sendProbe(events, addr, time.Second)
 	close(events)
-	var results []*Event
+	var last *Event
 	for e := range events {
-		results = append(results, e)
+		last = e
 	}
-	last := results[len(results)-1]
-	if last.Result != FAILED || !strings.Contains(last.Message, "nonexistent-interface") {
-		t.Errorf("probe with a bad source interface = %+v, want FAILED", last)
+	if last.Result != SUCCESS {
+		t.Errorf("probe from 127.0.0.1 = %+v, want SUCCESS", last)
+	}
+
+	p6 := NewTCPProber(&TCPConfig{SourceInterface: "::1"}, "tcp")
+	if err := p6.Accept("tcp://" + addr); err == nil {
+		t.Error("Accept() of an IPv4 target with an IPv6 source succeeded, want an error")
+	}
+}
+
+// The source address is resolved once per family, not once per target.
+func TestTCPSourceResolvedOncePerFamily(t *testing.T) {
+	orig := lookupInterfaceIP
+	t.Cleanup(func() { lookupInterfaceIP = orig })
+	calls := 0
+	lookupInterfaceIP = func(name string, v6, skipLoopback bool) (*net.IPAddr, error) {
+		calls++
+		return &net.IPAddr{IP: net.ParseIP("127.0.0.1")}, nil
+	}
+	p := NewTCPProber(&TCPConfig{SourceInterface: "lo0"}, "tcp")
+	for _, tgt := range []string{"tcp://127.0.0.1:1", "tcp://127.0.0.1:2", "tcp://127.0.0.2:3"} {
+		if err := p.Accept(tgt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 1 {
+		t.Errorf("interface looked up %d times, want 1", calls)
 	}
 }

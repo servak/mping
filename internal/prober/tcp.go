@@ -15,10 +15,17 @@ const (
 
 type (
 	TCPProber struct {
-		targets map[string]string // key (ip:port) -> displayName (host:port)
+		targets map[string]tcpTarget // key (ip:port) -> display name and source
 		config  *TCPConfig
+		// sources caches the source address per family (index 1 for IPv6)
+		sources [2]*net.TCPAddr
 		prefix  string
 		loop    *runLoop
+	}
+
+	tcpTarget struct {
+		name  string       // display name (host:port as given)
+		local *net.TCPAddr // source address; nil without source_interface
 	}
 
 	TCPConfig struct {
@@ -34,7 +41,7 @@ func (cfg *TCPConfig) Validate() error {
 
 func NewTCPProber(cfg *TCPConfig, prefix string) *TCPProber {
 	return &TCPProber{
-		targets: make(map[string]string),
+		targets: make(map[string]tcpTarget),
 		config:  cfg,
 		prefix:  prefix,
 		loop:    newRunLoop(),
@@ -61,14 +68,22 @@ func (p *TCPProber) Accept(target string) error {
 	ip := ips[0]
 	ipPort := net.JoinHostPort(ip.String(), port)
 
-	p.targets[ipPort] = target // key -> displayName mapping
+	// Resolve the source address now, so that an unusable source_interface
+	// fails at startup rather than every probe
+	var local *net.TCPAddr
+	if p.config != nil && p.config.SourceInterface != "" {
+		if local, err = p.localAddr(ipPort); err != nil {
+			return fmt.Errorf("source_interface %q for %s: %w", p.config.SourceInterface, target, err)
+		}
+	}
+	p.targets[ipPort] = tcpTarget{name: target, local: local}
 
 	return nil
 }
 
 func (p *TCPProber) Start(result chan *Event, interval, timeout time.Duration) error {
 	return runPeriodic(p.loop, result, TCP, interval, slices.Sorted(maps.Keys(p.targets)),
-		func(target string) (string, string) { return target, p.targets[target] },
+		func(target string) (string, string) { return target, p.targets[target].name },
 		func(target string) { p.sendProbe(result, target, timeout) })
 }
 
@@ -80,22 +95,16 @@ func (p *TCPProber) Stop() {
 func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Duration) {
 	// target is already in "ip:port" format from Accept method
 	now := time.Now()
-	name := p.targets[target]
+	t := p.targets[target]
+	name := t.name
 	result <- sentEvent(target, name, now)
 
-	// Create dialer with timeout
+	// Create dialer with timeout, bound to the source address resolved by Accept
 	dialer := &net.Dialer{
 		Timeout: timeout,
 	}
-
-	// Set source interface if specified
-	if p.config.SourceInterface != "" {
-		local, err := p.localAddr(target)
-		if err != nil {
-			result <- failureEvent(target, name, FAILED, now, 0, err.Error())
-			return
-		}
-		dialer.LocalAddr = local
+	if t.local != nil {
+		dialer.LocalAddr = t.local
 	}
 
 	// Attempt TCP connection using pre-resolved IP:port
@@ -115,8 +124,11 @@ func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Du
 // lookupInterfaceIP is interfaceIP, replaceable in tests.
 var lookupInterfaceIP = interfaceIP
 
-// localAddr returns the source address on the configured interface in the
-// address family of target (an "ip:port" from Accept).
+// localAddr returns the source address for target (an "ip:port" from
+// Accept) in its address family, resolved once per family. The configured
+// source_interface is an IP address, which must be of the target's family,
+// or an interface name, whose address of that family is used (a global
+// unicast one preferred).
 func (p *TCPProber) localAddr(target string) (*net.TCPAddr, error) {
 	host, _, err := net.SplitHostPort(target)
 	if err != nil {
@@ -127,7 +139,35 @@ func (p *TCPProber) localAddr(target string) (*net.TCPAddr, error) {
 		return nil, err
 	}
 	v6 := ip.Is6() && !ip.Is4In6()
-	a, err := lookupInterfaceIP(p.config.SourceInterface, v6, true)
+	fam := 0
+	if v6 {
+		fam = 1
+	}
+	if a := p.sources[fam]; a != nil {
+		return a, nil
+	}
+	a, err := resolveTCPSource(p.config.SourceInterface, v6)
+	if err != nil {
+		return nil, err
+	}
+	p.sources[fam] = a
+	return a, nil
+}
+
+// resolveTCPSource resolves a source_interface (an IP address or an
+// interface name) to a TCP source address of the given family.
+func resolveTCPSource(src string, v6 bool) (*net.TCPAddr, error) {
+	if ip, err := netip.ParseAddr(src); err == nil {
+		if (ip.Is6() && !ip.Is4In6()) != v6 {
+			fam := "IPv4"
+			if v6 {
+				fam = "IPv6"
+			}
+			return nil, fmt.Errorf("source address %s cannot reach an %s target", src, fam)
+		}
+		return &net.TCPAddr{IP: net.IP(ip.Unmap().AsSlice()), Zone: ip.Zone()}, nil
+	}
+	a, err := lookupInterfaceIP(src, v6, true)
 	if err != nil {
 		return nil, err
 	}

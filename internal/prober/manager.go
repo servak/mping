@@ -153,13 +153,39 @@ func (pm *probeManager) routeTarget(target string) error {
 		return fmt.Errorf("failed to get prober for %s: %w", proberType, err)
 	}
 
-	// Accept transformed target in prober (prober handles its own prefix)
-	err = prober.Accept(transformedTarget)
+	// Accept transformed target in prober (prober handles its own prefix).
+	// A target written without a scheme went to the default prober; one
+	// that shows such targets differently is told so.
+	if pa, ok := prober.(plainAccepter); ok && !hasScheme(target, pm.config) {
+		err = pa.acceptPlain(transformedTarget)
+	} else {
+		err = prober.Accept(transformedTarget)
+	}
 	if err != nil {
 		return fmt.Errorf("prober %s rejected target %s: %w", proberType, transformedTarget, err)
 	}
 
 	return nil
+}
+
+// plainAccepter is implemented by probers that name the targets written
+// without a scheme (and routed to them as the default prober) differently
+// from those written with their scheme.
+type plainAccepter interface {
+	acceptPlain(target string) error
+}
+
+// hasScheme reports whether target names its prober: "name://target", or
+// the legacy "name:target" with a configured name.
+func hasScheme(target string, config map[string]*ProberConfig) bool {
+	if strings.Contains(target, "://") {
+		return true
+	}
+	if prefix, _, ok := strings.Cut(target, ":"); ok {
+		_, exists := config[prefix]
+		return exists
+	}
+	return false
 }
 
 // transformTarget transforms target with appropriate prefix and returns (transformedTarget, proberType)

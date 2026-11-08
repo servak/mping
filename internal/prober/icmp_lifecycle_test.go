@@ -228,13 +228,13 @@ func TestICMPProberTableEvents(t *testing.T) {
 	if e := p.success(1, "192.0.2.1", msg, nil, 0); e != nil {
 		t.Errorf("unknown address: success() = %+v, want nil", e)
 	}
-	if events, pending := p.checkTimeout(); len(events) != 0 || pending != 1 {
-		t.Errorf("checkTimeout() before timeout = %d events, %d pending", len(events), pending)
+	if events, pending, next := p.checkTimeout(); len(events) != 0 || pending != 1 || next.IsZero() {
+		t.Errorf("checkTimeout() before timeout = %d events, %d pending, next %v", len(events), pending, next)
 	}
 
 	p.timeout = 0
-	events, pending := p.checkTimeout()
-	if pending != 0 || len(events) != 1 {
+	events, pending, next := p.checkTimeout()
+	if pending != 0 || len(events) != 1 || !next.IsZero() {
 		t.Fatalf("checkTimeout() = %d events, %d pending; want 1, 0", len(events), pending)
 	}
 	if e := events[0]; e.Result != TIMEOUT || e.Key != "127.0.0.2" || e.DisplayName != "localhost(127.0.0.2)" {

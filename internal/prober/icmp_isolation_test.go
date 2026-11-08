@@ -116,7 +116,7 @@ func TestICMPProberLateReply(t *testing.T) {
 	if e == nil || e.Result != TIMEOUT {
 		t.Fatalf("late reply: success() = %+v, want TIMEOUT", e)
 	}
-	if events, pending := p.checkTimeout(); len(events) != 0 || pending != 0 {
+	if events, pending, _ := p.checkTimeout(); len(events) != 0 || pending != 0 {
 		t.Errorf("checkTimeout() after the late reply = %d events, %d pending; want 0, 0", len(events), pending)
 	}
 }
