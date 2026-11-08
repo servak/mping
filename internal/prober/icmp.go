@@ -598,11 +598,12 @@ func resolveSourceInterface(sourceInterface string, probeType ProbeType) (string
 	}
 
 	// Otherwise it is an interface name. IPv6 skips loopback addresses
-	// (::1); IPv4 accepts any address, including 127.0.0.1 on "lo".
+	// (::1); IPv4 accepts any address, including 127.0.0.1 on "lo". A
+	// link-local IPv6 address comes with its zone (fe80::1%en0).
 	v6 := probeType == ICMPV6
-	ip, err := interfaceIP(sourceInterface, v6, v6)
+	addr, err := interfaceIP(sourceInterface, v6, v6)
 	if err != nil {
 		return "", err
 	}
-	return ip.String(), nil
+	return addr.String(), nil
 }

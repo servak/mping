@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"net/netip"
 	"slices"
 	"time"
 )
@@ -89,10 +90,12 @@ func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Du
 
 	// Set source interface if specified
 	if p.config.SourceInterface != "" {
-		// As before, an interface without a usable address is ignored
-		if ip, err := interfaceIP(p.config.SourceInterface, false, true); err == nil {
-			dialer.LocalAddr = &net.TCPAddr{IP: ip}
+		local, err := p.localAddr(target)
+		if err != nil {
+			result <- failureEvent(target, name, FAILED, now, 0, err.Error())
+			return
 		}
+		dialer.LocalAddr = local
 	}
 
 	// Attempt TCP connection using pre-resolved IP:port
@@ -107,6 +110,28 @@ func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Du
 	// Close connection immediately after successful establishment
 	conn.Close()
 	result <- successEvent(target, name, now, rtt, nil) // TCP has no details
+}
+
+// lookupInterfaceIP is interfaceIP, replaceable in tests.
+var lookupInterfaceIP = interfaceIP
+
+// localAddr returns the source address on the configured interface in the
+// address family of target (an "ip:port" from Accept).
+func (p *TCPProber) localAddr(target string) (*net.TCPAddr, error) {
+	host, _, err := net.SplitHostPort(target)
+	if err != nil {
+		return nil, err
+	}
+	ip, err := netip.ParseAddr(host) // may carry a zone
+	if err != nil {
+		return nil, err
+	}
+	v6 := ip.Is6() && !ip.Is4In6()
+	a, err := lookupInterfaceIP(p.config.SourceInterface, v6, true)
+	if err != nil {
+		return nil, err
+	}
+	return &net.TCPAddr{IP: a.IP, Zone: a.Zone}, nil
 }
 
 func (p *TCPProber) parseTarget(target string) (host, port string, err error) {
