@@ -1,7 +1,8 @@
 package stats
 
 import (
-	"sort"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -97,6 +98,10 @@ func (mm *metricsManager) SuccessWithDetails(host string, rtt time.Duration, sen
 	m := mm.getMetrics(host)
 
 	mm.mu.Lock()
+	if sentTime.Before(m.resetAt) {
+		mm.mu.Unlock()
+		return // probe sent before the last reset
+	}
 	m.Success(rtt, sentTime)
 	if m.history != nil {
 		m.history.AddEntry(HistoryEntry{
@@ -115,6 +120,10 @@ func (mm *metricsManager) Failed(host string, sentTime time.Time, msg string) {
 	m := mm.getMetrics(host)
 
 	mm.mu.Lock()
+	if sentTime.Before(m.resetAt) {
+		mm.mu.Unlock()
+		return // probe sent before the last reset
+	}
 	name := m.Name
 	m.Fail(sentTime, msg)
 	if m.history != nil {
@@ -134,11 +143,16 @@ func (mm *metricsManager) Failed(host string, sentTime time.Time, msg string) {
 	}
 }
 
-func (mm *metricsManager) Sent(host string) {
+// Sent counts a sent probe. Probes sent before the last reset are dropped,
+// like their results, so a SENT event queued before a reset cannot inflate
+// Total afterwards.
+func (mm *metricsManager) Sent(host string, sentTime time.Time) {
 	m := mm.getMetrics(host)
 
 	mm.mu.Lock()
-	m.Sent()
+	if !sentTime.Before(m.resetAt) {
+		m.Sent()
+	}
 	mm.mu.Unlock()
 }
 
@@ -154,7 +168,7 @@ func (mm *metricsManager) Subscribe(res <-chan *prober.Event) <-chan struct{} {
 			case prober.REGISTER:
 				mm.autoRegister(r.Key, r.DisplayName, string(r.ProbeType))
 			case prober.SENT:
-				mm.Sent(r.Key)
+				mm.Sent(r.Key, r.SentTime)
 			case prober.SUCCESS:
 				mm.SuccessWithDetails(r.Key, r.Rtt, r.SentTime, r.Details)
 			case prober.TIMEOUT:
@@ -196,16 +210,15 @@ func (mm *metricsManager) SortBy(k Key, ascending bool) []Metrics {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 	now := time.Now()
-	var res []Metrics
-	for _, m := range mm.metrics {
-		res = append(res, m.settledSnapshot(now))
+	type item struct {
+		key string
+		m   Metrics
+	}
+	items := make([]item, 0, len(mm.metrics))
+	for key, m := range mm.metrics {
+		items = append(items, item{key, m.settledSnapshot(now)})
 	}
 
-	if k != Host {
-		sort.SliceStable(res, func(i, j int) bool {
-			return res[i].GetName() < res[j].GetName()
-		})
-	}
 	// less must be a strict ordering: descending order swaps the operands
 	// instead of negating the result, which would make equal elements
 	// "less" than each other and reorder them on every call.
@@ -230,16 +243,34 @@ func (mm *metricsManager) SortBy(k Key, ascending bool) []Metrics {
 		}
 		return false
 	}
-	sort.SliceStable(res, func(i, j int) bool {
+	// One sort: primary key, then display name, then key as tie-breakers
+	slices.SortFunc(items, func(a, b item) int {
 		// Unmeasured RTTs (zero) always go last, whatever the direction
-		if zi, zj := rttFor(k, res[i]) == 0, rttFor(k, res[j]) == 0; zi != zj {
-			return zj
+		if za, zb := rttFor(k, a.m) == 0, rttFor(k, b.m) == 0; za != zb {
+			if zb {
+				return -1
+			}
+			return 1
 		}
-		if ascending {
-			return less(res[i], res[j])
+		x, y := a.m, b.m
+		if !ascending {
+			x, y = y, x
 		}
-		return less(res[j], res[i])
+		if less(x, y) {
+			return -1
+		}
+		if less(y, x) {
+			return 1
+		}
+		if c := strings.Compare(a.m.GetName(), b.m.GetName()); c != 0 {
+			return c
+		}
+		return strings.Compare(a.key, b.key)
 	})
+	res := make([]Metrics, len(items))
+	for i, it := range items {
+		res[i] = it.m
+	}
 	return res
 }
 

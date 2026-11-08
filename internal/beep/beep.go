@@ -2,6 +2,7 @@ package beep
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -12,54 +13,102 @@ const (
 	DefaultDebounceInterval = 500 * time.Millisecond
 )
 
-// Beeper manages beep sound playback with debouncing
+// Beeper manages beep sound playback with debouncing. The zero value is
+// ready to use (enabled, writing to os.Stdout, no debounce); use NewBeeper
+// for the default debounce interval. Call Close to stop the worker goroutine.
 type Beeper struct {
-	enabled      bool
+	disabled     bool // inverted so that the zero value is enabled
 	debounceTime time.Duration
 	lastBeepTime time.Time
 	mu           sync.Mutex
+	out          io.Writer
+	queue        chan struct{}
+	stop         chan struct{}
+	done         chan struct{}
+	initOnce     sync.Once
+	closeOnce    sync.Once
 }
 
 // NewBeeper creates a new Beeper instance
 func NewBeeper() *Beeper {
 	return &Beeper{
-		enabled:      true, // Default is ON
 		debounceTime: DefaultDebounceInterval,
+		out:          os.Stdout,
 	}
 }
 
-// Beep plays a beep sound if enabled and debounce time has passed
-// This function is non-blocking and thread-safe
-func (b *Beeper) Beep() {
-	go func() {
+// init lazily prepares the queue and starts the worker, so that a zero-value
+// Beeper works too.
+func (b *Beeper) init() {
+	b.initOnce.Do(func() {
 		b.mu.Lock()
-		defer b.mu.Unlock()
+		if b.out == nil {
+			b.out = os.Stdout
+		}
+		b.mu.Unlock()
+		b.queue = make(chan struct{}, 1)
+		b.stop = make(chan struct{})
+		b.done = make(chan struct{})
+		go b.worker()
+	})
+}
 
-		// Skip if disabled
-		if !b.enabled {
+// Beep requests a beep sound. It never blocks: requests are handed to a
+// single worker through a one-slot queue and extra requests are dropped.
+func (b *Beeper) Beep() {
+	b.init()
+	select {
+	case b.queue <- struct{}{}:
+	default: // a beep is already pending
+	}
+}
+
+// closeWait bounds how long Close waits for the worker to exit.
+const closeWait = 200 * time.Millisecond
+
+// Close stops the worker goroutine and waits (up to closeWait) for it to
+// exit. It is idempotent; Beep after Close is a harmless no-op.
+func (b *Beeper) Close() {
+	b.init()
+	b.closeOnce.Do(func() { close(b.stop) })
+	// Wait briefly for the worker; if it is stuck writing to a blocked
+	// terminal, don't hang the caller (e.g. app shutdown) on it.
+	select {
+	case <-b.done:
+	case <-time.After(closeWait):
+	}
+}
+
+func (b *Beeper) worker() {
+	defer close(b.done)
+	for {
+		select {
+		case <-b.stop:
 			return
+		case <-b.queue:
 		}
-
-		// Check debounce time
+		b.mu.Lock()
 		now := time.Now()
-		if now.Sub(b.lastBeepTime) < b.debounceTime {
-			return // Skip if within debounce period
+		play := !b.disabled && now.Sub(b.lastBeepTime) >= b.debounceTime
+		if play {
+			b.lastBeepTime = now
 		}
-
-		// Play beep sound
-		if err := b.playBeep(); err != nil {
+		out := b.out
+		b.mu.Unlock()
+		if !play {
+			continue
+		}
+		// Write outside the lock so a blocked stdout cannot freeze Toggle
+		if err := playBeep(out); err != nil {
 			// Log error but don't propagate
-			// This ensures beep failures don't affect main processing
 			fmt.Fprintf(os.Stderr, "beep: failed to play sound: %v\n", err)
 		}
-
-		b.lastBeepTime = now
-	}()
+	}
 }
 
 // playBeep outputs the system bell character
-func (b *Beeper) playBeep() error {
-	_, err := fmt.Print("\a")
+func playBeep(out io.Writer) error {
+	_, err := fmt.Fprint(out, "\a")
 	return err
 }
 
@@ -67,15 +116,15 @@ func (b *Beeper) playBeep() error {
 func (b *Beeper) Toggle() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.enabled = !b.enabled
-	return b.enabled
+	b.disabled = !b.disabled
+	return !b.disabled
 }
 
 // IsEnabled returns current beep sound state
 func (b *Beeper) IsEnabled() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.enabled
+	return !b.disabled
 }
 
 // GetLastBeepTime returns the last beep time (for testing)

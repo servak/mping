@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"sort"
 	"time"
 
 	"github.com/servak/mping/internal/prober"
@@ -25,6 +26,9 @@ type TargetHistory struct {
 
 // NewTargetHistory creates a new TargetHistory
 func NewTargetHistory(size int) *TargetHistory {
+	if size < 1 {
+		size = 1
+	}
 	return &TargetHistory{
 		entries: make([]HistoryEntry, size),
 		size:    size,
@@ -33,13 +37,50 @@ func NewTargetHistory(size int) *TargetHistory {
 	}
 }
 
-// AddEntry adds a new history entry
+// AddEntry adds a new history entry. Entries are kept ordered by Timestamp
+// (send time), so a late result for an older probe is inserted before newer
+// ones instead of being appended at the newest end.
 func (th *TargetHistory) AddEntry(entry HistoryEntry) {
+	if th.count > 0 {
+		newest := th.entries[(th.index-1+th.size)%th.size]
+		if entry.Timestamp.Before(newest.Timestamp) {
+			th.insertOrdered(entry)
+			return
+		}
+	}
 	th.entries[th.index] = entry
 	th.index = (th.index + 1) % th.size
 	if th.count < th.size {
 		th.count++
 	}
+}
+
+// insertOrdered inserts an entry that is older than the newest one at its
+// chronological position, dropping the oldest entry if the buffer is full.
+func (th *TargetHistory) insertOrdered(entry HistoryEntry) {
+	// at returns the i-th entry counting from the oldest
+	at := func(i int) int { return (th.index - th.count + i + th.size*2) % th.size }
+	// position (from the oldest) after any entries with an equal timestamp
+	pos := sort.Search(th.count, func(i int) bool { return th.entries[at(i)].Timestamp.After(entry.Timestamp) })
+	if th.count == th.size {
+		// Full: drop the oldest by shifting the older part one slot back,
+		// then place the entry at pos-1 (an entry older than all is dropped).
+		if pos == 0 {
+			return
+		}
+		for i := 0; i < pos-1; i++ {
+			th.entries[at(i)] = th.entries[at(i+1)]
+		}
+		th.entries[at(pos-1)] = entry
+		return
+	}
+	// Not full: shift the newer part one slot forward, then insert.
+	for i := th.count; i > pos; i-- {
+		th.entries[at(i)] = th.entries[at(i-1)]
+	}
+	th.entries[at(pos)] = entry
+	th.count++
+	th.index = (th.index + 1) % th.size
 }
 
 // GetRecentEntries retrieves the latest n entries (newest first)
