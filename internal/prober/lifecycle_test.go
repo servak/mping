@@ -303,9 +303,12 @@ func startNTPServer(t *testing.T) string {
 				continue
 			}
 			resp := make([]byte, 48)
-			resp[0] = 0x1C // LI=0, VN=3, mode=4 (server)
-			resp[1] = 2    // stratum
+			resp[0] = 0x1C                // LI=0, VN=3, mode=4 (server)
+			resp[1] = 2                   // stratum
+			copy(resp[24:32], buf[40:48]) // origin = client's transmit time
 			sec, frac := ntpTimeFromTime(time.Now())
+			binary.BigEndian.PutUint32(resp[32:36], sec)
+			binary.BigEndian.PutUint32(resp[36:40], frac)
 			binary.BigEndian.PutUint32(resp[40:44], sec)
 			binary.BigEndian.PutUint32(resp[44:48], frac)
 			_, _ = pc.WriteTo(resp, addr)

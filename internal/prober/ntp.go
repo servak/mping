@@ -1,11 +1,13 @@
 package prober
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"maps"
 	"net"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,10 +18,11 @@ const (
 
 type (
 	NTPProber struct {
-		targets map[string]string // server address -> display name
-		config  *NTPConfig
-		prefix  string
-		loop    *runLoop
+		targets  map[string]string // server address -> display name
+		resolved map[string]string // server address -> resolved IP:port, looked up once at Accept
+		config   *NTPConfig
+		prefix   string
+		loop     *runLoop
 	}
 
 	NTPConfig struct {
@@ -63,10 +66,11 @@ func (cfg *NTPConfig) Validate() error {
 
 func NewNTPProber(cfg *NTPConfig, prefix string) *NTPProber {
 	return &NTPProber{
-		targets: make(map[string]string),
-		config:  cfg,
-		prefix:  prefix,
-		loop:    newRunLoop(),
+		targets:  make(map[string]string),
+		resolved: make(map[string]string),
+		config:   cfg,
+		prefix:   prefix,
+		loop:     newRunLoop(),
 	}
 }
 
@@ -81,15 +85,17 @@ func (p *NTPProber) Accept(target string) error {
 		return fmt.Errorf("invalid NTP target: %w", err)
 	}
 
-	// Validate NTP server by resolving its address
-	_, err = net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", server, port))
+	// Resolve the server once; probes reuse the address so that DNS lookups
+	// neither add latency to every probe nor skew the timestamps.
+	serverAddr := net.JoinHostPort(server, strconv.Itoa(port))
+	udpAddr, err := net.ResolveUDPAddr("udp", serverAddr)
 	if err != nil {
-		return fmt.Errorf("failed to resolve NTP server '%s:%d': %w", server, port, err)
+		return fmt.Errorf("failed to resolve NTP server '%s': %w", serverAddr, err)
 	}
 
 	// Store target with server:port as key for uniqueness
-	serverAddr := fmt.Sprintf("%s:%d", server, port)
 	p.targets[serverAddr] = target
+	p.resolved[serverAddr] = udpAddr.String()
 
 	return nil
 }
@@ -104,19 +110,17 @@ func (p *NTPProber) parseTarget(target string) (string, int, error) {
 	port := p.config.Port
 
 	if target != "" {
-		if strings.Contains(target, ":") {
-			host, portStr, err := net.SplitHostPort(target)
-			if err != nil {
-				return "", 0, fmt.Errorf("invalid server:port format: %w", err)
-			}
-			server = host
-			if p, err := net.LookupPort("udp", portStr); err == nil {
-				port = p
-			} else {
+		host, portStr, err := splitServerPort(target)
+		if err != nil {
+			return "", 0, err
+		}
+		server = host
+		if portStr != "" {
+			p, err := net.LookupPort("udp", portStr)
+			if err != nil || p <= 0 || p > 65535 {
 				return "", 0, fmt.Errorf("invalid port: %s", portStr)
 			}
-		} else {
-			server = target
+			port = p
 		}
 	}
 
@@ -143,15 +147,13 @@ func (p *NTPProber) sendProbe(result chan *Event, serverAddr string, timeout tim
 	displayName := p.targets[serverAddr]
 	result <- sentEvent(serverAddr, displayName, now)
 
-	// Parse server address
-	host, portStr, err := net.SplitHostPort(serverAddr)
-	if err != nil {
-		result <- errorEvent(serverAddr, displayName, now, fmt.Errorf("invalid server address: %w", err))
-		return
+	// Use the address resolved at Accept time so no DNS lookup happens here.
+	dest, ok := p.resolved[serverAddr]
+	if !ok {
+		dest = serverAddr
 	}
 
-	// Connect to NTP server
-	conn, err := net.DialTimeout("udp", net.JoinHostPort(host, portStr), timeout)
+	conn, err := net.DialTimeout("udp", dest, timeout)
 	if err != nil {
 		result <- errorEvent(serverAddr, displayName, now, err)
 		return
@@ -161,34 +163,54 @@ func (p *NTPProber) sendProbe(result chan *Event, serverAddr string, timeout tim
 	// Set deadline for the entire operation
 	conn.SetDeadline(time.Now().Add(timeout))
 
-	// Create and send NTP request
+	// Create and send NTP request; T1 is taken right before the write.
 	req := &ntpPacket{
 		Settings: 0x1B, // leap indicator=0, version=3, mode=3 (client)
 	}
+	t1 := time.Now()
+	req.TxTimeSec, req.TxTimeFrac = ntpTimeFromTime(t1)
 
-	// Set transmit timestamp
-	req.TxTimeSec, req.TxTimeFrac = ntpTimeFromTime(now)
-
-	err = binary.Write(conn, binary.BigEndian, req)
-	if err != nil {
+	var reqBuf bytes.Buffer
+	_ = binary.Write(&reqBuf, binary.BigEndian, req)
+	if _, err = conn.Write(reqBuf.Bytes()); err != nil {
 		result <- errorEvent(serverAddr, displayName, now, fmt.Errorf("failed to send NTP request: %w", err))
 		return
 	}
 
-	// Read response
-	var resp ntpPacket
-	err = binary.Read(conn, binary.BigEndian, &resp)
+	// Read the response as a single datagram.
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	t4 := time.Now() // T4 is taken right after the read
 	if err != nil {
 		result <- errorEvent(serverAddr, displayName, now, fmt.Errorf("failed to read NTP response: %w", err))
 		return
 	}
+	if n < ntpPacketSize {
+		result <- errorEvent(serverAddr, displayName, now, fmt.Errorf("short NTP response: %d bytes (need %d)", n, ntpPacketSize))
+		return
+	}
+	var resp ntpPacket
+	if err := binary.Read(bytes.NewReader(buf[:ntpPacketSize]), binary.BigEndian, &resp); err != nil {
+		result <- errorEvent(serverAddr, displayName, now, fmt.Errorf("failed to parse NTP response: %w", err))
+		return
+	}
 
-	// Calculate RTT and offset
-	rtt := time.Since(now)
+	if err := validateNTPResponse(&resp, req); err != nil {
+		result <- errorEvent(serverAddr, displayName, now, err)
+		return
+	}
 
-	// Convert NTP timestamp to time.Time
-	serverTime := ntpTimeToTime(resp.TxTimeSec, resp.TxTimeFrac)
-	offset := serverTime.Sub(now.Add(rtt / 2))
+	// RFC 5905: offset = ((T2-T1)+(T3-T4))/2, delay = (T4-T1)-(T3-T2)
+	t2 := ntpTimeToTime(resp.RxTimeSec, resp.RxTimeFrac)
+	t3 := ntpTimeToTime(resp.TxTimeSec, resp.TxTimeFrac)
+	if resp.RxTimeSec == 0 && resp.RxTimeFrac == 0 {
+		t2 = t3 // server did not report a receive time; assume no processing delay
+	}
+	offset := (t2.Sub(t1) + t3.Sub(t4)) / 2
+	rtt := t4.Sub(t1) - t3.Sub(t2)
+	if rtt < 0 {
+		rtt = 0
+	}
 
 	// Check if offset exceeds maximum allowed
 	if p.config.MaxOffset > 0 && offset.Abs() > p.config.MaxOffset {
@@ -198,6 +220,32 @@ func (p *NTPProber) sendProbe(result chan *Event, serverAddr string, timeout tim
 
 	// Success
 	result <- successEvent(serverAddr, displayName, now, rtt, ntpDetails(serverAddr, displayName, &resp, offset))
+}
+
+const ntpPacketSize = 48
+
+// validateNTPResponse rejects responses that cannot be trusted as an answer to req.
+func validateNTPResponse(resp, req *ntpPacket) error {
+	if mode := resp.Settings & 0x07; mode != 4 {
+		return fmt.Errorf("invalid NTP response: mode %d (expected 4, server)", mode)
+	}
+	if resp.Stratum == 0 {
+		code := strings.TrimRight(string([]byte{
+			byte(resp.ReferenceID >> 24), byte(resp.ReferenceID >> 16),
+			byte(resp.ReferenceID >> 8), byte(resp.ReferenceID),
+		}), "\x00 ")
+		return fmt.Errorf("NTP server sent Kiss-o'-Death (stratum 0), code %q", code)
+	}
+	if li := resp.Settings >> 6; li == 3 {
+		return fmt.Errorf("NTP server is unsynchronized (leap indicator 3)")
+	}
+	if resp.OrigTimeSec != req.TxTimeSec || resp.OrigTimeFrac != req.TxTimeFrac {
+		return fmt.Errorf("invalid NTP response: origin timestamp does not match the request")
+	}
+	if resp.TxTimeSec == 0 && resp.TxTimeFrac == 0 {
+		return fmt.Errorf("invalid NTP response: transmit timestamp is zero")
+	}
+	return nil
 }
 
 // ntpDetails describes a successful NTP response.
@@ -241,7 +289,13 @@ func ntpTimeToTime(sec, frac uint32) time.Time {
 	const ntpEpochOffset = 2208988800 // seconds between 1900 and 1970
 	const ntpFracScale = 1 << 32      // 2^32 for NTP fraction conversion
 
-	unix := int64(sec) - ntpEpochOffset
+	// NTP seconds wrap every 2^32 s (era 0 ends in Feb 2036). Values below
+	// 2^31 would be dates before 1968, so they are taken as era 1.
+	full := int64(sec)
+	if sec < 1<<31 {
+		full += 1 << 32
+	}
+	unix := full - ntpEpochOffset
 	nsec := int64(frac) * 1000000000 / ntpFracScale
 
 	return time.Unix(unix, nsec)
