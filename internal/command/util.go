@@ -2,9 +2,7 @@ package command
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"regexp"
@@ -12,19 +10,37 @@ import (
 	"strings"
 )
 
+// maxTargets caps how many targets a single expansion (bracket range or CIDR)
+// and the overall target list may produce, so that typos such as 0.0.0.0/0 or
+// [1-100000000] fail fast instead of exhausting memory.
+const maxTargets = 65536
+
 // ExpandTargets processes target specifications through a pipeline of expansions
-func ExpandTargets(args []string, filePath string) []string {
-	targets := collectTargets(args, filePath)
-	targets = parseBrackets(targets)
-	targets = parseCIDR(targets)
-	return targets
+func ExpandTargets(args []string, filePath string) ([]string, error) {
+	targets, err := collectTargets(args, filePath)
+	if err != nil {
+		return nil, err
+	}
+	if targets, err = parseBrackets(targets); err != nil {
+		return nil, err
+	}
+	if targets, err = parseCIDR(targets); err != nil {
+		return nil, err
+	}
+	if len(targets) > maxTargets {
+		return nil, errTooManyTargets(len(targets))
+	}
+	return targets, nil
 }
 
-func parseBrackets(_hosts []string) []string {
+func parseBrackets(_hosts []string) ([]string, error) {
 	hosts := []string{}
 	bracketRegex := regexp.MustCompile(`\[([^\]]+)\]`)
 
 	for _, h := range _hosts {
+		if len(hosts) > maxTargets {
+			return nil, errTooManyTargets(len(hosts))
+		}
 		matches := bracketRegex.FindAllStringSubmatch(h, -1)
 		if len(matches) == 0 {
 			hosts = append(hosts, h)
@@ -32,14 +48,24 @@ func parseBrackets(_hosts []string) []string {
 		}
 
 		// Generate all combinations for this host
-		expanded := expandHost(h, matches)
+		expanded, err := expandHost(h, matches)
+		if err != nil {
+			return nil, err
+		}
 		hosts = append(hosts, expanded...)
+		if len(hosts) > maxTargets {
+			return nil, errTooManyTargets(len(hosts))
+		}
 	}
 
-	return hosts
+	return hosts, nil
 }
 
-func expandHost(host string, matches [][]string) []string {
+func errTooManyTargets(n int) error {
+	return fmt.Errorf("too many targets (%d): expansion is limited to %d", n, maxTargets)
+}
+
+func expandHost(host string, matches [][]string) ([]string, error) {
 	results := []string{host}
 
 	for _, match := range matches {
@@ -57,7 +83,11 @@ func expandHost(host string, matches [][]string) []string {
 
 		if strings.Contains(content, "-") && !strings.Contains(content, ",") {
 			// Range expansion: [1-10], [01-05]
-			expansions = expandRange(content)
+			var err error
+			expansions, err = expandRange(content)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", host, err)
+			}
 			// Check if expansion was successful (not just returning original content)
 			isValidExpansion = len(expansions) != 1 || expansions[0] != content
 		} else if strings.Contains(content, ",") {
@@ -76,6 +106,9 @@ func expandHost(host string, matches [][]string) []string {
 		}
 
 		// Apply expansions to all current results
+		if len(results)*len(expansions) > maxTargets {
+			return nil, fmt.Errorf("%s: %w", host, errTooManyTargets(len(results)*len(expansions)))
+		}
 		var newResults []string
 		for _, result := range results {
 			for _, expansion := range expansions {
@@ -85,13 +118,13 @@ func expandHost(host string, matches [][]string) []string {
 		results = newResults
 	}
 
-	return results
+	return results, nil
 }
 
-func expandRange(content string) []string {
+func expandRange(content string) ([]string, error) {
 	parts := strings.Split(content, "-")
 	if len(parts) != 2 {
-		return []string{content} // Invalid range format
+		return []string{content}, nil // Invalid range format
 	}
 
 	startStr, endStr := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
@@ -103,13 +136,16 @@ func expandRange(content string) []string {
 	if startErr != nil || endErr != nil {
 		// Try character range (a-z, A-Z)
 		if len(startStr) == 1 && len(endStr) == 1 {
-			return expandCharRange(startStr[0], endStr[0])
+			return expandCharRange(startStr[0], endStr[0]), nil
 		}
-		return []string{content} // Invalid range
+		return []string{content}, nil // Invalid range
 	}
 
 	if start > end {
-		return []string{content} // Invalid range
+		return []string{content}, nil // Invalid range
+	}
+	if end-start >= maxTargets {
+		return nil, errTooManyTargets(end - start + 1)
 	}
 
 	// Determine zero-padding from the start string
@@ -127,7 +163,7 @@ func expandRange(content string) []string {
 		}
 	}
 
-	return result
+	return result, nil
 }
 
 func expandCharRange(start, end byte) []string {
@@ -152,7 +188,7 @@ func expandList(content string) []string {
 	return result
 }
 
-func parseCIDR(_hosts []string) []string {
+func parseCIDR(_hosts []string) ([]string, error) {
 	hosts := []string{}
 	for _, h := range _hosts {
 		ip, ipnet, err := net.ParseCIDR(h)
@@ -161,12 +197,26 @@ func parseCIDR(_hosts []string) []string {
 			continue
 		}
 
-		for i := ip.Mask(ipnet.Mask); ipnet.Contains(i); ipInc(i) {
-			hosts = append(hosts, i.String())
+		ones, bits := ipnet.Mask.Size()
+		hostBits := bits - ones
+		if hostBits > 16 { // 2^16 == maxTargets
+			return nil, fmt.Errorf("%s: too many targets (2^%d addresses): expansion is limited to %d", h, hostBits, maxTargets)
+		}
+		count := 1 << hostBits
+		if len(hosts)+count > maxTargets {
+			return nil, fmt.Errorf("%s: %w", h, errTooManyTargets(len(hosts)+count))
+		}
+
+		// Iterate by count rather than ipnet.Contains so the last address of
+		// the address space cannot wrap around and loop forever.
+		cur := ip.Mask(ipnet.Mask)
+		for i := 0; i < count; i++ {
+			hosts = append(hosts, cur.String())
+			ipInc(cur)
 		}
 	}
 
-	return hosts
+	return hosts, nil
 }
 
 func ipInc(ip net.IP) {
@@ -178,46 +228,49 @@ func ipInc(ip net.IP) {
 	}
 }
 
-func file2hostnames(fp *os.File) []string {
+func file2hostnames(fp *os.File) ([]string, error) {
 	hosts := []string{}
-	reader := bufio.NewReaderSize(fp, 4096)
+	scanner := bufio.NewScanner(fp)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	// Fixed regex: only match # or ; at start of line or after whitespace
 	// This prevents breaking URLs like http://example.com
 	r := regexp.MustCompile(`(?:^|\s)[#;].*`)
 
-	for {
-		lb, _, err := reader.ReadLine()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-
-		line := r.ReplaceAllString(string(lb), "")
-		line = strings.Trim(line, "\t \n")
+	for scanner.Scan() {
+		line := r.ReplaceAllString(scanner.Text(), "")
+		line = strings.Trim(line, "\t \n\r")
 		if line == "" {
 			continue
 		}
 		hosts = append(hosts, line)
 	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
 
-	return hosts
+	return hosts, nil
 }
 
 // collectTargets gathers targets from command-line arguments and optional file
-func collectTargets(args []string, filePath string) []string {
+func collectTargets(args []string, filePath string) ([]string, error) {
 	targets := []string{}
 
 	// Load targets from file if specified
 	if filePath != "" {
 		fp, err := os.Open(filePath)
-		if err == nil {
-			targets = file2hostnames(fp)
-			fp.Close() // Critical fix: close file to prevent resource leak
+		if err != nil {
+			return nil, fmt.Errorf("failed to open target file: %w", err)
+		}
+		targets, err = file2hostnames(fp)
+		fp.Close() // Critical fix: close file to prevent resource leak
+		if err != nil {
+			return nil, fmt.Errorf("failed to read target file %q: %w", filePath, err)
 		}
 	}
 
 	// Append command-line arguments
 	targets = append(targets, args...)
-	return targets
+	return targets, nil
 }
 
 // isIPv6Literal reports whether s is an IPv6 address, optionally with a zone

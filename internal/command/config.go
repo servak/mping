@@ -32,9 +32,9 @@ func NewPrintConfigCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			cfg, err := config.LoadFile(path)
-			if cfg == nil {
-				return fmt.Errorf("failed to load config %q: %w", path, err)
+			cfg, err := loadConfig(path, flags.Changed("config"))
+			if err != nil {
+				return err
 			}
 			cmd.Print(config.Marshal(cfg))
 			return nil
