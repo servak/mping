@@ -110,9 +110,15 @@ func (a *TUIApp) setupKeyBindings() {
 			return event
 		}
 
-		// When filter input is visible, let it handle its own keys
+		// While the filter input has focus it handles its own keys. If the
+		// bar is still open but focus moved away (e.g. a mouse click on the
+		// list), close it so the main bindings, Esc included, keep working.
 		if a.layout.IsFilterShown() {
-			return event
+			if a.layout.GetFilterInput().HasFocus() {
+				return event
+			}
+			a.layout.HideFilterInput()
+			a.layout.RestoreFocus()
 		}
 
 		// Main screen key bindings
@@ -173,6 +179,7 @@ func (a *TUIApp) setupKeyBindings() {
 func (a *TUIApp) setupHelpModal() {
 	helpModal := a.createHelpModal()
 	a.layout.AddModal("help", helpModal)
+	a.layout.RegisterThemedModal(helpModal)
 }
 
 // createHelpModal creates help modal content
@@ -210,7 +217,7 @@ Press 'h' or Esc to close           `
 		SetText(helpText).
 		AddButtons([]string{"Close"}).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-			// Button press handling is done by parent
+			a.hideHelp()
 		})
 }
 
@@ -321,7 +328,9 @@ func (a *TUIApp) toggleSilence() {
 	if a.notifier == nil {
 		return
 	}
-	if host := a.state.GetSelectedHost(); host != "" {
-		a.notifier.ToggleSilence(host)
+	// Use the highlighted row: the selected host may be hidden by the filter
+	// while the list highlights another row.
+	if m, ok := a.layout.GetHostListPanel().CurrentSelectedMetric(); ok {
+		a.notifier.ToggleSilence(m.GetName())
 	}
 }

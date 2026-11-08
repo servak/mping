@@ -56,6 +56,9 @@ type LayoutManager struct {
 	// Current layout state
 	mode DisplayMode
 
+	config *shared.Config
+	modals []*tview.Modal // modals restyled when the theme changes
+
 	// Callbacks
 	focusCallback func()
 }
@@ -63,7 +66,8 @@ type LayoutManager struct {
 // NewLayoutManager creates a new LayoutManager
 func NewLayoutManager(uiState *state.UIState, mm stats.MetricsManager, notifier Notifier, config *shared.Config, interval, timeout time.Duration) *LayoutManager {
 	layout := &LayoutManager{
-		mode: ListOnly,
+		mode:   ListOnly,
+		config: config,
 	}
 
 	layout.setupPanels(uiState, mm, notifier, config, interval, timeout)
@@ -90,10 +94,30 @@ func (l *LayoutManager) setupPanels(uiState *state.UIState, mm stats.MetricsProv
 	l.pathTracer = newPathTracer(interval, timeout)
 
 	// Setup filter input with theme-aware colors
-	theme := config.GetTheme()
-	l.filterInput = tview.NewInputField().
-		SetLabel("Filter: ").
-		SetLabelColor(tcell.GetColor(theme.Primary))
+	l.filterInput = tview.NewInputField().SetLabel("Filter: ")
+	l.applyTheme()
+}
+
+// applyTheme restyles the widgets that are not redrawn by a panel Update
+func (l *LayoutManager) applyTheme() {
+	theme := l.config.GetTheme()
+	l.filterInput.SetLabelColor(tcell.GetColor(theme.Primary))
+	for _, m := range l.modals {
+		styleModal(m, theme)
+	}
+}
+
+func styleModal(m *tview.Modal, theme *shared.Theme) {
+	m.SetBackgroundColor(tcell.GetColor(theme.Background)).
+		SetTextColor(tcell.GetColor(theme.Primary)).
+		SetButtonBackgroundColor(tcell.GetColor(theme.SelectionBg)).
+		SetButtonTextColor(tcell.GetColor(theme.SelectionFg))
+}
+
+// RegisterThemedModal makes the modal follow theme changes
+func (l *LayoutManager) RegisterThemedModal(m *tview.Modal) {
+	l.modals = append(l.modals, m)
+	styleModal(m, l.config.GetTheme())
 }
 
 // setupLayout configures the main layout structure
@@ -185,15 +209,15 @@ func (l *LayoutManager) setMode(mode DisplayMode) {
 
 	if mode == ListWithDetail {
 		// Get currently selected metrics and set them in the detail panel
-		if m, ok := l.hostList.CurrentSelectedMetric(); ok {
-			l.hostDetail.SetMetrics(m)
-		}
+		m, _ := l.hostList.CurrentSelectedMetric()
+		l.hostDetail.SetMetrics(m)
 	}
 	l.rebuild()
 }
 
 // UpdateAll refreshes all panels
 func (l *LayoutManager) UpdateAll() {
+	l.applyTheme()
 	l.header.Update()
 	l.footer.Update()
 	l.hostList.Update()
@@ -202,9 +226,10 @@ func (l *LayoutManager) UpdateAll() {
 	m, ok := l.hostList.CurrentSelectedMetric()
 	switch l.mode {
 	case ListWithDetail:
-		if ok {
-			l.hostDetail.SetMetrics(m)
+		if !ok {
+			m = nil // nothing listed (e.g. the filter matches no host)
 		}
+		l.hostDetail.SetMetrics(m)
 		l.hostDetail.Update()
 	case ListWithPath:
 		target, proto := "", trace.ProtoICMP

@@ -4,6 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
+
 	"github.com/servak/mping/internal/beep"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/stats/statstest"
@@ -170,7 +173,7 @@ func TestTUIAppBeepKeysUseNotifier(t *testing.T) {
 		t.Error("toggleBeep did not disable the beep")
 	}
 
-	app.state.SetSelectedHost("quiet")
+	app.layout.UpdateAll() // highlights the only row
 	app.toggleSilence()
 	if !n.IsSilenced("quiet") {
 		t.Error("toggleSilence did not silence the selected host")
@@ -183,4 +186,81 @@ func TestTUIAppBeepKeysWithoutNotifier(t *testing.T) {
 	// Must not panic
 	app.toggleBeep()
 	app.toggleSilence()
+}
+
+// Regression: with the selected host hidden by the filter the list highlights
+// the first visible row; m used to mute the hidden selected host instead.
+func TestToggleSilenceMutesHighlightedRow(t *testing.T) {
+	mm := statstest.NewQuietManager()
+	statstest.Register(t, mm, "visible", "hidden")
+	n := beep.NewNotifier()
+	app := NewTUIApp(mm, n, shared.DefaultConfig(), time.Second, time.Second)
+
+	app.state.SetSelectedHost("hidden")
+	app.state.SetFilter("visible")
+	app.layout.UpdateAll()
+
+	app.toggleSilence()
+	if n.IsSilenced("hidden") {
+		t.Error("toggleSilence muted the host hidden by the filter")
+	}
+	if !n.IsSilenced("visible") {
+		t.Error("toggleSilence did not mute the highlighted host")
+	}
+
+	// Nothing listed: no-op
+	app.state.SetFilter("no-such-host")
+	app.layout.UpdateAll()
+	app.toggleSilence()
+	if !n.IsSilenced("visible") {
+		t.Error("toggleSilence with an empty list must not change anything")
+	}
+}
+
+// Regression: clicking the list while the filter bar was open moved focus
+// away but left the bar "shown", so every key was passed through and Esc/q/v
+// stopped working.
+func TestKeysWorkAfterFilterLosesFocus(t *testing.T) {
+	mm := statstest.NewQuietManager()
+	statstest.Register(t, mm, "a")
+	app := NewTUIApp(mm, nil, shared.DefaultConfig(), time.Second, time.Second)
+	capture := app.app.GetInputCapture()
+
+	app.state.SetFilter("a")
+	app.showFilter()
+	// While the input has focus, keys go to it
+	if ev := capture(tcell.NewEventKey(tcell.KeyRune, 'v', tcell.ModNone)); ev == nil {
+		t.Fatal("keys must reach the focused filter input")
+	}
+
+	// A mouse click on the list focuses the table
+	app.app.SetFocus(app.layout.GetHostListPanel().GetView())
+
+	if ev := capture(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)); ev != nil {
+		t.Errorf("Esc was not handled: %v", ev)
+	}
+	if app.layout.IsFilterShown() {
+		t.Error("filter bar should close once it lost focus")
+	}
+	if app.state.GetFilter() != "" {
+		t.Errorf("Esc should clear the active filter, got %q", app.state.GetFilter())
+	}
+	if ev := capture(tcell.NewEventKey(tcell.KeyRune, 'v', tcell.ModNone)); ev != nil {
+		t.Error("main key bindings must work again")
+	}
+}
+
+// Regression: the help modal's Close button did nothing.
+func TestHelpModalCloseButton(t *testing.T) {
+	app := NewTUIApp(statstest.NewQuietManager(), nil, shared.DefaultConfig(), time.Second, time.Second)
+	app.showHelp()
+	if !app.isHelpVisible() {
+		t.Fatal("help should be visible")
+	}
+	app.layout.GetRoot().InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(p tview.Primitive) {
+		app.app.SetFocus(p)
+	})
+	if app.isHelpVisible() {
+		t.Error("Enter on the Close button should hide the help")
+	}
 }

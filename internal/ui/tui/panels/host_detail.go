@@ -59,10 +59,13 @@ func (h *HostDetailPanel) Update() {
 // SetMetrics sets the current metrics object directly
 func (h *HostDetailPanel) SetMetrics(metrics stats.Metrics) {
 	h.currentMetrics = metrics
-	if metrics != nil {
-		h.currentHost = metrics.GetName()
-		h.container.SetTitle(" Host Details: " + h.currentHost + " ")
+	if metrics == nil {
+		h.currentHost = ""
+		h.container.SetTitle(" Host Details ")
+		return
 	}
+	h.currentHost = metrics.GetName()
+	h.container.SetTitle(" Host Details: " + tview.Escape(h.currentHost) + " ")
 }
 
 // GetView returns the underlying tview component
