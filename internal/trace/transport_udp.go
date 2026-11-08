@@ -6,7 +6,6 @@ import (
 	"net"
 	"runtime"
 	"sync"
-	"syscall"
 	"time"
 
 	"golang.org/x/net/icmp"
@@ -23,10 +22,10 @@ const (
 	// It is odd (prime) so that the ports of one TTL in successive rounds
 	// also differ in their low bits, which simple ECMP hashes look at.
 	udpRoundStride = maxHops + 1
-	// minUDPPortRange / maxUDPPortRange bound the number of destination
-	// ports (flows) UDP probes rotate through, see udpPortRange.
-	minUDPPortRange = 64
-	maxUDPPortRange = 1024
+	// maxUDPPortRange is the most destination ports (flows) UDP probes
+	// rotate through: every port from UDPBasePort up to 65535. It is not a
+	// multiple of udpRoundStride, see udpPortRange.
+	maxUDPPortRange = 65536 - UDPBasePort
 
 	// sendRetries is how often a send is retried when the socket reports an
 	// earlier ICMP error instead of sending (Linux with IP_RECVERR)
@@ -56,22 +55,26 @@ func udpProbePayload(ttl int) []byte {
 // than maxHops), so (w+1)*udpRoundStride ports guarantee that no probe of
 // the last w rounds shares a port with one of this round, and a late reply
 // is never credited to another TTL. The range is coprime with the stride so
-// that every TTL cycles through all ports.
+// that every TTL cycles through all ports. Past maxUDPPortRange (a timeout
+// of more than about 1000 intervals) the tracer counts probes older than
+// udpPortWindow rounds as lost instead, which keeps the guarantee.
 func udpPortRange(interval, timeout time.Duration) int {
 	w := 2
 	if interval > 0 && timeout > 0 {
-		w = int((timeout+interval-1)/interval) + 1
+		w = int(min((timeout+interval-1)/interval, maxUDPPortRange)) + 1
 	}
-	n := max(minUDPPortRange, (w+1)*udpRoundStride)
-	if n > maxUDPPortRange {
-		// Huge timeouts: reuse within the timeout is still caught by the
-		// TTL check of replies (udpProbePayload)
-		n = maxUDPPortRange
-	}
+	n := min((w+1)*udpRoundStride, maxUDPPortRange)
 	for gcd(n, udpRoundStride) != 1 {
 		n++
 	}
 	return n
+}
+
+// udpPortWindow returns how many rounds back from the current one no probe
+// shares a port with it, for the given number of ports: the largest w with
+// udpRoundStride*w + maxHops-1 < ports (see udpPortRange).
+func udpPortWindow(ports int) int {
+	return (ports - maxHops) / udpRoundStride
 }
 
 func gcd(a, b int) int {
@@ -91,7 +94,7 @@ func gcd(a, b int) int {
 // (a new source port per connection) may take. Ports repeat every `ports`
 // rounds, so per-branch statistics accumulate.
 func udpPort(ports, round, ttl int) uint16 {
-	return uint16(UDPBasePort + ((udpRoundStride*round+ttl-1)%ports+ports)%ports)
+	return uint16(UDPBasePort + (udpRoundStride*round+ttl-1)%ports) // round >= 0, ttl >= 1
 }
 
 // errUDPUnsupported is returned when ICMP errors for UDP probes cannot be
@@ -194,17 +197,6 @@ func (t *udpTransport) send(ttl int, port uint16) error {
 	}
 }
 
-// isICMPErrno reports whether err is the errno Linux derives from an ICMP
-// error (Time Exceeded, Port / Host / Net Unreachable)
-func isICMPErrno(err error) bool {
-	for _, e := range []syscall.Errno{syscall.ECONNREFUSED, syscall.EHOSTUNREACH, syscall.ENETUNREACH, syscall.EPROTO} {
-		if errors.Is(err, e) {
-			return true
-		}
-	}
-	return false
-}
-
 func (t *udpTransport) receive(deliver func(reply, string, time.Time)) {
 	if t.icmp == nil {
 		t.receiveErrQueue(deliver)
@@ -218,9 +210,18 @@ func (t *udpTransport) receive(deliver func(reply, string, time.Time)) {
 		}
 		now := time.Now()
 		r, err := parseUDPReply(t.v6, buf[:n])
-		if err != nil || r.id != t.srcPort || !sameAddr(t.dst, r.dst) {
+		if err != nil || !t.accept(r) {
 			continue // not a reply to our probes
 		}
 		deliver(r, peerIP(peer), now)
 	}
+}
+
+// accept reports whether the ICMP error r quotes one of our probes: our
+// source port, and a TTL that the tracer checks against the probe pending
+// under the destination port. Load balancers and DNAT often leave the
+// quoted destination unrewritten, so it is only checked when the TTL is
+// unknown and the ports alone could match another socket's datagram.
+func (t *udpTransport) accept(r reply) bool {
+	return r.id == t.srcPort && (r.ttl != 0 || sameAddr(t.dst, r.dst))
 }

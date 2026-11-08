@@ -138,8 +138,9 @@ func TestEchoIDAvoidsProberID(t *testing.T) {
 	}
 }
 
-// Replies with our echo ID but about another destination (another mping
-// process using the same ID) are ignored
+// The echo ID decides whether a reply is ours. Replies from, or quoting, an
+// address other than the destination are accepted: DNAT and load balancers
+// answer from another address or leave the quoted destination unrewritten.
 func TestICMPAccept(t *testing.T) {
 	for _, v6 := range []bool{false, true} {
 		dst, other := net.ParseIP("192.0.2.1"), net.ParseIP("198.51.100.1")
@@ -154,7 +155,7 @@ func TestICMPAccept(t *testing.T) {
 			}
 			return ip.To4()
 		}
-		tp := &icmpTransport{v6: v6, dst: dst, id: 42, checkID: true}
+		tp := &icmpTransport{v6: v6, id: 42, checkID: true}
 		teType := icmp.Type(ipv4.ICMPTypeTimeExceeded)
 		if v6 {
 			teType = ipv6.ICMPTypeTimeExceeded
@@ -172,20 +173,25 @@ func TestICMPAccept(t *testing.T) {
 		tests := []struct {
 			name string
 			r    reply
-			peer net.Addr
 			want bool
 		}{
-			{"echo reply from the destination", echo, &net.IPAddr{IP: dst}, true},
-			{"echo reply from another host", echo, &net.IPAddr{IP: other}, false},
-			{"echo reply with another ID", reply{kind: kindEchoReply, id: 43, seq: 3}, &net.IPAddr{IP: dst}, false},
-			{"time exceeded for our probe", te(dst, 42), &net.IPAddr{IP: other}, true},
-			{"time exceeded for another destination", te(other, 42), &net.IPAddr{IP: other}, false},
-			{"time exceeded with another ID", te(dst, 43), &net.IPAddr{IP: other}, false},
+			{"echo reply from the destination", echo, true},
+			{"echo reply from another host (DNAT)", echo, true},
+			{"echo reply with another ID", reply{kind: kindEchoReply, id: 43, seq: 3}, false},
+			{"time exceeded for our probe", te(dst, 42), true},
+			{"time exceeded quoting another destination (DNAT)", te(other, 42), true},
+			{"time exceeded with another ID", te(dst, 43), false},
 		}
 		for _, tt := range tests {
-			if got := tp.accept(tt.r, tt.peer); got != tt.want {
+			if got := tp.accept(tt.r); got != tt.want {
 				t.Errorf("v6=%v %s: accept = %v, want %v", v6, tt.name, got, tt.want)
 			}
+		}
+		// Linux datagram sockets: the kernel already matched the reply
+		// by its own echo ID
+		dgram := &icmpTransport{v6: v6, id: 42}
+		if !dgram.accept(te(other, 7)) || !dgram.accept(reply{kind: kindEchoReply, id: 7, seq: 3}) {
+			t.Errorf("v6=%v: datagram socket rejected a reply", v6)
 		}
 	}
 }

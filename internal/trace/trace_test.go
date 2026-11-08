@@ -106,9 +106,14 @@ func TestProbeLimit(t *testing.T) {
 	}
 
 	reached := withReplies(1, 3)
-	reached.reached, reached.maxTTL = true, 12
+	reached.reached, reached.confirmed, reached.maxTTL = true, true, 12
 	if got := reached.probeLimitLocked(); got != 12 {
 		t.Errorf("destination at 12: limit = %d, want 12", got)
+	}
+	// a destination that stopped answering: look past it
+	reached.confirmed = false
+	if got := reached.probeLimitLocked(); got != 12+maxUnknownHops {
+		t.Errorf("unconfirmed destination at 12: limit = %d, want %d", got, 12+maxUnknownHops)
 	}
 }
 
@@ -197,20 +202,107 @@ func TestUnequalECMPPathsStable(t *testing.T) {
 	}
 }
 
-// A shorter path is adopted once the old routers have been silent a while
+// A shorter path is adopted once the old routers have been silent for the
+// path window (and not before: that is the hysteresis of the path length)
 func TestShorterPathFound(t *testing.T) {
 	tr := newTestTracer()
 	for round := 1; round <= 5; round++ {
 		tr.routers(round, 3)
 		tr.answer(4, round, "dst", kindEchoReply)
 	}
-	for round := 6; round <= 6+staleAfterRounds; round++ {
+	for round := 6; round <= 5+minPathWindow; round++ {
 		tr.routers(round, 1)
 		for ttl := 2; ttl <= 4; ttl++ {
 			tr.answer(ttl, round, "dst", kindEchoReply)
 		}
+		if !tr.reached || tr.maxTTL != 4 {
+			t.Fatalf("round %d: reached=%v maxTTL=%d, want 4 until the window passed", round, tr.reached, tr.maxTTL)
+		}
 	}
+	tr.rounds++
+	tr.updateReachLocked()
 	if !tr.reached || tr.maxTTL != 2 {
 		t.Errorf("reached=%v maxTTL=%d, want 2", tr.reached, tr.maxTTL)
+	}
+}
+
+// runPath drives tr like sendRound for rounds from..to: every TTL up to
+// the probe limit is answered by answer (skipped when it returns "")
+func (tr *Tracer) runPath(from, to int, answer func(round, ttl int) (string, replyKind), each func(round int)) {
+	for round := from; round <= to; round++ {
+		tr.rounds = round
+		tr.updateReachLocked()
+		for ttl := 1; ttl <= tr.probeLimitLocked(); ttl++ {
+			if addr, kind := answer(round, ttl); addr != "" {
+				tr.answer(ttl, round, addr, kind)
+			}
+		}
+		if each != nil {
+			each(round)
+		}
+	}
+}
+
+// ECMP branches of different lengths (destination at TTL 5 or 7, the long
+// branch taking a fraction of the flows) must settle on the longest branch
+// and stay there; TTL 6, where no branch ends, is never the destination.
+func TestUnequalECMPBranchesStable(t *testing.T) {
+	for _, share := range []uint32{2, 4, 8, 16} {
+		tr := newTestTracer()
+		tr.cfg.Proto = ProtoUDP
+		tr.udpPorts = udpPortRange(time.Second, time.Second)
+		changes, prev := 0, 0
+		tr.runPath(1, 3600, func(round, ttl int) (string, replyKind) {
+			end := 5
+			if testHash(udpPort(tr.udpPorts, round, ttl))%share == 0 {
+				end = 7
+			}
+			if ttl >= end {
+				return "dst", kindUnreachable
+			}
+			return fmt.Sprintf("r%d", ttl), kindTimeExceed
+		}, func(round int) {
+			cur := 0
+			if tr.reached {
+				cur = tr.maxTTL
+			}
+			if round > 1 && cur != prev {
+				changes++
+			}
+			prev = cur
+			if round > tr.udpPorts && cur != 7 {
+				t.Fatalf("long branch 1/%d, round %d: destination %d, want 7", share, round, cur)
+			}
+		})
+		if changes > 2 {
+			t.Errorf("long branch 1/%d: destination changed %d times", share, changes)
+		}
+	}
+}
+
+// The path gets longer behind silent hops (12 -> 18, TTL 13..17 silent),
+// after a first round that saw the destination at TTL 12..16. The old end
+// answers expire and the tracer looks past the silent destination TTL.
+func TestLongerPathBehindSilentHops(t *testing.T) {
+	tr := newTestTracer()
+	tr.routers(1, 11)
+	for ttl := 12; ttl <= 16; ttl++ {
+		tr.answer(ttl, 1, "dst", kindUnreachable)
+	}
+	for round := 2; round <= 5; round++ {
+		tr.routers(round, 11)
+		tr.answer(12, round, "dst", kindUnreachable)
+	}
+	tr.runPath(6, 6+2*endExpireRounds, func(round, ttl int) (string, replyKind) {
+		switch {
+		case ttl <= 12:
+			return fmt.Sprintf("r%d", ttl), kindTimeExceed
+		case ttl >= 18:
+			return "dst", kindUnreachable
+		}
+		return "", 0
+	}, nil)
+	if !tr.reached || !tr.confirmed || tr.maxTTL != 18 || tr.probeLimitLocked() != 18 {
+		t.Errorf("reached=%v confirmed=%v maxTTL=%d limit=%d, want 18", tr.reached, tr.confirmed, tr.maxTTL, tr.probeLimitLocked())
 	}
 }

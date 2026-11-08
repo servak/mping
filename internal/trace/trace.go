@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"net"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -35,11 +34,30 @@ const (
 	// TTL. Further responders are still counted in the hop totals.
 	maxRespondersPerHop = 16
 
-	// staleAfterRounds is how many rounds a responder may stay silent before
-	// it is flagged Stale; hideAfterRounds is when it is dropped from the
-	// snapshot (it stays in the hop totals).
+	// staleAfterRounds is how many revisits a responder may miss before it
+	// is flagged Stale; hideAfterRounds is when it is dropped from the
+	// snapshot (it stays in the hop totals) and may be evicted from a full
+	// table. A revisit is the number of rounds the responder (or, until it
+	// has been seen twice, the hop's responders) is usually seen apart: 1
+	// for a single path, about N for N ECMP branches, so the thresholds are
+	// rounds on a single path and scale with the branches of a UDP trace.
 	staleAfterRounds = 10
 	hideAfterRounds  = 30
+
+	// The destination is the TTL after the farthest Time Exceeded seen in
+	// the last pathWindow rounds (the end of the longest ECMP branch). The
+	// window is twice the number of flows (UDP ports; each TTL uses every
+	// flow once per cycle, so every branch shows up within it), clamped to
+	// [minPathWindow, maxPathWindow]. It is the hysteresis of the path
+	// length: a shorter path is adopted only once the far hops have been
+	// silent for that long.
+	minPathWindow = 2 * hideAfterRounds
+	maxPathWindow = 600
+	// endExpireRounds is how long an answer from the end of the path (echo
+	// reply / unreachable) at a TTL keeps that TTL a destination candidate.
+	// A destination not answering for staleAfterRounds is unconfirmed:
+	// probing then goes up to maxUnknownHops past it to find a longer path.
+	endExpireRounds = hideAfterRounds
 )
 
 // Proto is the protocol of the probes
@@ -83,12 +101,15 @@ type Hop struct {
 	Addr   string // dominant responder: most replies, ties to the earliest seen ("" if none)
 	Name   string // reverse DNS name of Addr, if resolved
 	Others int    // number of other visible responders (len(Responders)-1)
-	Sent   int    // probes that have been answered or timed out
-	Recv   int
-	Last   time.Duration
-	Avg    time.Duration
-	Best   time.Duration
-	Worst  time.Duration
+	// Untracked counts replies from responders that found the per-hop
+	// responder table full of live responders; they are only in the totals
+	Untracked int
+	Sent      int // probes that have been answered or timed out
+	Recv      int
+	Last      time.Duration
+	Avg       time.Duration
+	Best      time.Duration
+	Worst     time.Duration
 
 	// Responders lists every visible responder in first-seen order
 	Responders []Responder
@@ -104,7 +125,7 @@ type Responder struct {
 	Avg   time.Duration
 	Best  time.Duration
 	Worst time.Duration
-	Stale bool // not seen for more than staleAfterRounds rounds
+	Stale bool // missed more than staleAfterRounds revisits
 }
 
 // Loss returns the loss percentage of settled probes
@@ -162,6 +183,7 @@ type hopStats struct {
 	sum        float64
 	resp       map[string]*respStats
 	order      []string // responder addresses in first-seen order
+	untracked  int      // replies not credited to a responder (table full)
 
 	// rounds of the latest probe to this TTL answered by the end of the
 	// path (echo reply / unreachable) and by a Time Exceeded (0 = never)
@@ -183,13 +205,14 @@ func (h *hopStats) record(addr string, rtt time.Duration, round, now int) {
 
 	r := h.resp[addr]
 	if r == nil {
-		if len(h.order) >= maxRespondersPerHop && !h.evictStale(now) {
-			return // counted in the hop totals only
+		if len(h.order) >= maxRespondersPerHop && !h.evictHidden(now) {
+			h.untracked++ // counted in the hop totals only
+			return
 		}
 		if h.resp == nil {
 			h.resp = map[string]*respStats{}
 		}
-		r = &respStats{firstRound: round}
+		r = &respStats{firstRound: round, lastRound: round}
 		h.resp[addr] = r
 		h.order = append(h.order, addr)
 	}
@@ -207,17 +230,51 @@ func (h *hopStats) record(addr string, rtt time.Duration, round, now int) {
 	}
 }
 
-// evictStale drops the responder silent for the longest time if it is at
-// least stale (hidden responders are the oldest, so they go first), making
-// room for a new one. It reports whether a responder was dropped.
-func (h *hopStats) evictStale(now int) bool {
-	victim := -1
-	for i, addr := range h.order {
-		if victim < 0 || h.resp[addr].lastRound < h.resp[h.order[victim]].lastRound {
-			victim = i
+// defaultRevisit is the revisit interval (see staleAfterRounds) of a
+// responder seen only once: the mean of the other responders' intervals, 1
+// if none is known yet.
+func (h *hopStats) defaultRevisit() float64 {
+	sum, n := 0.0, 0
+	for _, addr := range h.order {
+		if r := h.resp[addr]; r.recv >= 2 {
+			sum += r.revisit(1)
+			n++
 		}
 	}
-	if victim < 0 || now-h.resp[h.order[victim]].lastRound <= staleAfterRounds {
+	if n == 0 {
+		return 1
+	}
+	return sum / float64(n)
+}
+
+// revisit returns how many rounds apart r is seen on average (def until it
+// has been seen in two rounds)
+func (r *respStats) revisit(def float64) float64 {
+	if r.recv < 2 || r.lastRound <= r.firstRound {
+		return def
+	}
+	return max(1, float64(r.lastRound-r.firstRound)/float64(r.recv-1))
+}
+
+// silence returns how many revisits r has missed by round now
+func (r *respStats) silence(now int, def float64) float64 {
+	return float64(now-r.lastRound) / r.revisit(def)
+}
+
+// evictHidden drops the responder that missed the most revisits if it is
+// hidden (see hideAfterRounds), making room for a new one. Live and merely
+// stale responders are kept: with more ECMP branches than table slots the
+// extra responders are counted in the hop totals only, instead of every
+// branch evicting another one in turn. It reports whether one was dropped.
+func (h *hopStats) evictHidden(now int) bool {
+	def := h.defaultRevisit()
+	victim, most := -1, float64(hideAfterRounds)
+	for i, addr := range h.order {
+		if s := h.resp[addr].silence(now, def); s > most {
+			victim, most = i, s
+		}
+	}
+	if victim < 0 {
 		return false
 	}
 	delete(h.resp, h.order[victim])
@@ -254,15 +311,17 @@ type Tracer struct {
 	dst net.IP
 	tp  transport
 
-	mu       sync.Mutex
-	seq      uint16
-	udpPorts int                 // destination ports UDP probes rotate through
-	pending  map[uint16]inflight // by probe key: ICMP echo seq / UDP dst port
-	hops     []hopStats          // index = ttl-1
-	maxTTL   int                 // the destination's distance once known, else maxHops
-	reached  bool
-	rounds   int
-	names    map[string]string // reverse DNS cache ("" = lookup in progress/failed)
+	mu        sync.Mutex
+	seq       uint16
+	udpPorts  int                 // destination ports UDP probes rotate through
+	udpWindow int                 // rounds whose UDP ports never collide, see udpPortWindow
+	pending   map[uint16]inflight // by probe key: ICMP echo seq / UDP dst port
+	hops      []hopStats          // index = ttl-1
+	maxTTL    int                 // the destination's distance once known, else maxHops
+	reached   bool
+	confirmed bool // the destination answered at maxTTL within staleAfterRounds
+	rounds    int
+	names     map[string]string // reverse DNS cache ("" = lookup in progress/failed)
 
 	onEvent func(probeEvent) // test hook, called with mu held
 
@@ -297,15 +356,17 @@ func New(target string, cfg Config) (*Tracer, error) {
 
 func newTracer(cfg Config, dst net.IP, tp transport) *Tracer {
 	cfg = cfg.withDefaults()
+	ports := udpPortRange(cfg.Interval, cfg.Timeout)
 	return &Tracer{
-		cfg:      cfg,
-		dst:      dst,
-		tp:       tp,
-		udpPorts: udpPortRange(cfg.Interval, cfg.Timeout),
-		pending:  map[uint16]inflight{},
-		hops:     make([]hopStats, maxHops),
-		maxTTL:   maxHops,
-		names:    map[string]string{},
+		cfg:       cfg,
+		dst:       dst,
+		tp:        tp,
+		udpPorts:  ports,
+		udpWindow: udpPortWindow(ports),
+		pending:   map[uint16]inflight{},
+		hops:      make([]hopStats, maxHops),
+		maxTTL:    maxHops,
+		names:     map[string]string{},
 	}
 }
 
@@ -366,10 +427,7 @@ func (t *Tracer) drain(recvDone <-chan struct{}, err error) error {
 // mtr) so that a round never reaches routers as a burst.
 func (t *Tracer) sendRound(ctx context.Context) error {
 	t.mu.Lock()
-	t.expire(time.Now())
-	t.rounds++
-	round := t.rounds
-	t.updateReachLocked()
+	round := t.startRoundLocked(time.Now())
 	maxTTL := t.probeLimitLocked()
 	t.mu.Unlock()
 
@@ -413,21 +471,22 @@ func (t *Tracer) sendRound(ctx context.Context) error {
 	return nil
 }
 
-// isTransientSendErr reports whether a failed send only loses that probe:
-// the errnos a send reports for a local routing problem, a firewall rule,
-// full buffers or an ICMP error of an earlier probe. Anything else (a broken
-// socket) ends the trace.
-func isTransientSendErr(err error) bool {
-	for _, e := range []syscall.Errno{
-		syscall.ENETUNREACH, syscall.EHOSTUNREACH, syscall.ENETDOWN, syscall.EHOSTDOWN,
-		syscall.ENOBUFS, syscall.ENOMEM, syscall.EAGAIN, syscall.EPERM, syscall.EACCES,
-		syscall.ECONNREFUSED, syscall.EPROTO, syscall.EMSGSIZE, syscall.EADDRNOTAVAIL,
-	} {
-		if errors.Is(err, e) {
-			return true
+// startRoundLocked starts the next round at now: probes past their timeout
+// are lost, and so are UDP probes older than the port window (huge timeouts,
+// see udpPortRange), so that no port of a pending probe is reused this
+// round. It returns the new round.
+func (t *Tracer) startRoundLocked(now time.Time) int {
+	t.expire(now)
+	t.rounds++
+	if t.cfg.Proto == ProtoUDP && t.udpWindow > 0 {
+		for key, p := range t.pending {
+			if t.rounds-p.round > t.udpWindow {
+				t.loseLocked(key, p)
+			}
 		}
 	}
-	return false
+	t.updateReachLocked()
+	return t.rounds
 }
 
 // probeKeyLocked returns the key of the next probe: the next echo sequence
@@ -483,36 +542,53 @@ func (t *Tracer) handle(r reply, addr string, now time.Time) {
 	}
 }
 
-// updateReachLocked re-evaluates where the path ends. The destination is the
-// nearest TTL answered by the end of the path (echo reply / unreachable)
-// unless a Time Exceeded came from that TTL or beyond after that answer or
-// within the last staleAfterRounds rounds: then the path goes on past it (a
-// transient unreachable, a longer route, or a longer ECMP branch). With no
-// such TTL the destination is unknown again and probing goes beyond.
+// pathWindowLocked returns the path window in rounds, see minPathWindow
+func (t *Tracer) pathWindowLocked() int {
+	flows := 1 // ICMP: a single flow
+	if t.cfg.Proto == ProtoUDP {
+		flows = t.udpPorts
+	}
+	return min(max(2*flows, minPathWindow), maxPathWindow)
+}
+
+// updateReachLocked re-evaluates where the path ends. Every ECMP branch ends
+// past the farthest TTL that sent a Time Exceeded within the path window, so
+// the destination is the first TTL beyond it answered by the end of the path
+// (echo reply / unreachable) within endExpireRounds. That is the end of the
+// longest branch: shorter branches also reach the destination there, so it
+// is answered every round, and the farthest Time Exceeded keeps being
+// refreshed by the longest branch. A path that gets longer is noticed by a
+// Time Exceeded at or past the destination, or by the destination falling
+// silent (unconfirmed, probing goes past it; see probeLimitLocked) while a
+// farther TTL answers. With no such TTL the destination is unknown again.
 func (t *Tracer) updateReachLocked() {
-	dst, newestTE := 0, 0
-	for i := len(t.hops) - 1; i >= 0; i-- {
-		h := &t.hops[i]
-		newestTE = max(newestTE, h.lastTE) // newest Time Exceeded at TTL >= i+1
-		if h.lastEnd == 0 {
-			continue
+	recent := func(round, window int) bool { return round > 0 && t.rounds-round <= window }
+	window := t.pathWindowLocked()
+	farthestTE := 0
+	for i := range t.hops {
+		if recent(t.hops[i].lastTE, window) {
+			farthestTE = i + 1
 		}
-		if newestTE > 0 && (newestTE > h.lastEnd || t.rounds-newestTE < staleAfterRounds) {
-			continue
+	}
+	dst := 0
+	for i := farthestTE; i < len(t.hops); i++ {
+		if recent(t.hops[i].lastEnd, endExpireRounds) {
+			dst = i + 1
+			break
 		}
-		dst = i + 1
 	}
 	t.reached = dst > 0
-	t.maxTTL = maxHops
+	t.maxTTL, t.confirmed = maxHops, false
 	if t.reached {
 		t.maxTTL = dst
+		t.confirmed = recent(t.hops[dst-1].lastEnd, staleAfterRounds)
 	}
 }
 
 // farthestResponderLocked returns the highest TTL that has replied (0 if none)
 func (t *Tracer) farthestResponderLocked() int {
 	last := 0
-	for i := 0; i < t.maxTTL; i++ {
+	for i := range t.hops {
 		if t.hops[i].recv > 0 {
 			last = i + 1
 		}
@@ -521,13 +597,17 @@ func (t *Tracer) farthestResponderLocked() int {
 }
 
 // probeLimitLocked returns the highest TTL to probe this round: the
-// destination once it is known, otherwise maxUnknownHops past the farthest
-// hop that has replied.
+// destination while it answers; maxUnknownHops past it while it does not
+// (the path may have got longer behind silent hops); maxUnknownHops past
+// the farthest hop that has replied while the destination is unknown.
 func (t *Tracer) probeLimitLocked() int {
-	if t.reached {
+	switch {
+	case t.reached && t.confirmed:
 		return t.maxTTL
+	case t.reached:
+		return min(maxHops, t.maxTTL+maxUnknownHops)
 	}
-	return min(t.maxTTL, t.farthestResponderLocked()+maxUnknownHops)
+	return min(maxHops, t.farthestResponderLocked()+maxUnknownHops)
 }
 
 // expire counts pending probes sent before now-Timeout as lost
@@ -591,12 +671,13 @@ func (t *Tracer) Snapshot() Result {
 	for i := 0; i < last; i++ {
 		h := &t.hops[i]
 		hop := Hop{
-			TTL:   i + 1,
-			Sent:  h.sent,
-			Recv:  h.recv,
-			Last:  h.last,
-			Best:  h.best,
-			Worst: h.worst,
+			TTL:       i + 1,
+			Sent:      h.sent,
+			Recv:      h.recv,
+			Untracked: h.untracked,
+			Last:      h.last,
+			Best:      h.best,
+			Worst:     h.worst,
 		}
 		if h.recv > 0 {
 			hop.Avg = time.Duration(h.sum / float64(h.recv))
@@ -604,8 +685,9 @@ func (t *Tracer) Snapshot() Result {
 		dominant := -1
 		// The most recently seen responder (earliest seen on ties) is never
 		// hidden, so a rate-limited hop that replies only now and then keeps
-		// its address. Others are hidden once silent for hideAfterRounds and
-		// a more recent responder exists (the path moved).
+		// its address. Others are hidden once they missed hideAfterRounds
+		// revisits and a more recent responder exists (the path moved).
+		def := h.defaultRevisit()
 		latest := ""
 		for _, addr := range h.order {
 			if latest == "" || h.resp[addr].lastRound > h.resp[latest].lastRound {
@@ -614,8 +696,8 @@ func (t *Tracer) Snapshot() Result {
 		}
 		for _, addr := range h.order {
 			r := h.resp[addr]
-			age := t.rounds - r.lastRound
-			if age > hideAfterRounds && addr != latest {
+			silence := r.silence(t.rounds, def)
+			if silence > hideAfterRounds && addr != latest {
 				continue
 			}
 			resp := Responder{
@@ -626,7 +708,7 @@ func (t *Tracer) Snapshot() Result {
 				Avg:   time.Duration(r.sum / float64(r.recv)),
 				Best:  r.best,
 				Worst: r.worst,
-				Stale: age > staleAfterRounds,
+				Stale: silence > staleAfterRounds,
 			}
 			// strict > keeps the earliest seen responder on ties
 			if dominant < 0 || resp.Recv > hop.Responders[dominant].Recv {

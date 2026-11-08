@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net"
-	"net/netip"
 	"os"
 	"runtime"
 	"sync"
@@ -58,7 +57,6 @@ type icmpTransport struct {
 	v6      bool
 	raw     bool
 	conn    *icmp.PacketConn
-	dst     net.IP
 	dstAddr net.Addr
 	id      uint16
 	checkID bool
@@ -70,7 +68,7 @@ type icmpTransport struct {
 // datagram ICMP socket; on macOS the fallback still receives Time Exceeded
 // messages, on Linux only the destination may be visible without privileges.
 func newICMPTransport(dst *net.IPAddr, v6 bool) (*icmpTransport, error) {
-	t := &icmpTransport{v6: v6, dst: dst.IP, id: nextEchoID()}
+	t := &icmpTransport{v6: v6, id: nextEchoID()}
 	rawNet, dgramNet, laddr := "ip4:icmp", "udp4", "0.0.0.0"
 	if v6 {
 		rawNet, dgramNet, laddr = "ip6:ipv6-icmp", "udp6", "::"
@@ -130,41 +128,24 @@ func (t *icmpTransport) receive(deliver func(reply, string, time.Time)) {
 		}
 		now := time.Now()
 		r, err := parseReply(t.v6, buf[:n])
-		if err != nil || !t.accept(r, peer) {
+		if err != nil || !t.accept(r) {
 			continue
 		}
 		deliver(r, peerIP(peer), now)
 	}
 }
 
-// accept reports whether r (received from peer) answers one of our probes:
-// the echo ID matches (where the kernel keeps it) and the echo reply comes
-// from, or the ICMP error quotes a datagram to, the traced destination. A
-// process pinging or tracing another host with the same echo ID is ignored.
-func (t *icmpTransport) accept(r reply, peer net.Addr) bool {
-	if t.checkID && r.id != t.id {
-		return false // another process or tracer
-	}
-	if r.kind == kindEchoReply {
-		ip, ok := addrIP(peer)
-		return ok && sameAddr(t.dst, ip)
-	}
-	return r.dst.IsValid() && sameAddr(t.dst, r.dst)
+// accept reports whether r answers one of our probes: the echo ID matches,
+// where the kernel keeps it; elsewhere (Linux datagram sockets) the kernel
+// has already matched the reply to our socket by its own ID. The tracer then
+// matches the sequence to a pending probe. Addresses are not checked: DNAT
+// and load balancers answer echo requests from another address, and often
+// leave the destination of the quoted datagram unrewritten.
+func (t *icmpTransport) accept(r reply) bool {
+	return !t.checkID || r.id == t.id
 }
 
-func addrIP(a net.Addr) (netip.Addr, bool) {
-	var ip net.IP
-	switch v := a.(type) {
-	case *net.IPAddr:
-		ip = v.IP
-	case *net.UDPAddr:
-		ip = v.IP
-	default:
-		return netip.Addr{}, false
-	}
-	return netip.AddrFromSlice(ip)
-}
-
+// peerIP returns the address of a reply's sender
 func peerIP(a net.Addr) string {
 	switch v := a.(type) {
 	case *net.IPAddr:

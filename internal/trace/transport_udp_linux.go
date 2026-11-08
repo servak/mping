@@ -82,10 +82,16 @@ func (t *udpTransport) receiveErrQueue(deliver func(reply, string, time.Time)) {
 		default:
 			continue
 		}
-		if !sameAddr(t.dst, dstAddr) {
+		// The kernel returns the payload quoted by the ICMP error, so the
+		// TTL check only works when the router quoted more than the 8 bytes
+		// of the UDP header (RFC 792 minimum; RFC 1812 asks for more). With
+		// a short quote the TTL is unknown and the port scheme (no port is
+		// reused while a probe on it is pending) is what keeps replies on
+		// their hop; the quoted destination is then checked as well.
+		ttl := errQueuePayloadTTL(buf[:n])
+		if ttl == 0 && !sameAddr(t.dst, dstAddr) {
 			continue
 		}
-		ttl := errQueuePayloadTTL(buf[:n])
 		msgs, err := unix.ParseSocketControlMessage(oob[:oobn])
 		if err != nil {
 			continue

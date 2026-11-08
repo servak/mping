@@ -227,14 +227,81 @@ func TestResponderCapEvictsSilent(t *testing.T) {
 	if n := len(tr.hops[0].order); n > maxRespondersPerHop {
 		t.Errorf("%d responders tracked, cap %d", n, maxRespondersPerHop)
 	}
-	// stale (not yet hidden) responders make room too, oldest first
+	// stale (not yet hidden) responders are kept; the newcomer is only
+	// counted in the hop totals
 	tr = newTestTracer()
 	for i := 0; i < maxRespondersPerHop; i++ {
 		tr.inject(1, 1+i, fmt.Sprintf("10.0.0.%d", i), ms(1))
 	}
 	tr.inject(1, 1+maxRespondersPerHop+staleAfterRounds, "10.9.9.9", ms(1))
 	hop = tr.Snapshot().Hops[0]
-	if findResponder(hop, "10.9.9.9") == nil || findResponder(hop, "10.0.0.0") != nil || findResponder(hop, "10.0.0.15") == nil {
+	if findResponder(hop, "10.9.9.9") != nil || findResponder(hop, "10.0.0.0") == nil || hop.Untracked != 1 {
+		t.Errorf("untracked = %d, responders = %+v", hop.Untracked, hop.Responders)
+	}
+	// the hidden one goes first once it is hidden
+	tr.inject(1, 2+hideAfterRounds, "10.9.9.9", ms(1))
+	hop = tr.Snapshot().Hops[0]
+	if findResponder(hop, "10.9.9.9") == nil || findResponder(hop, "10.0.0.0") != nil || findResponder(hop, "10.0.0.1") == nil {
 		t.Errorf("responders = %+v", hop.Responders)
 	}
+}
+
+// With more ECMP branches than table slots, each branch is seen only every
+// ~branches rounds. Live responders must not evict each other in turn (they
+// would never accumulate statistics); the extra branches only count in the
+// hop totals.
+func TestManyECMPBranchesKeepResponders(t *testing.T) {
+	const branches = 20
+	tr := newTestTracer()
+	ports := udpPortRange(time.Second, time.Second)
+	evicted := 0
+	for round := 1; round <= 2000; round++ {
+		addr := fmt.Sprintf("10.0.0.%d", testHash(udpPort(ports, round, 1))%branches)
+		_, known := tr.hops[0].resp[addr]
+		full := len(tr.hops[0].order) == maxRespondersPerHop
+		tr.inject(1, round, addr, ms(1))
+		if !known && full && tr.hops[0].resp[addr] != nil {
+			evicted++
+		}
+	}
+	hop := tr.Snapshot().Hops[0]
+	tracked := 0
+	for _, r := range hop.Responders {
+		tracked += r.Recv
+		if r.Stale {
+			t.Errorf("live responder flagged stale: %+v", r)
+		}
+	}
+	if evicted > 0 || len(hop.Responders) != maxRespondersPerHop {
+		t.Errorf("evictions = %d, visible = %d", evicted, len(hop.Responders))
+	}
+	if tracked+hop.Untracked != hop.Recv || tracked < hop.Recv*maxRespondersPerHop/branches*3/4 {
+		t.Errorf("responder recv %d + untracked %d of hop recv %d", tracked, hop.Untracked, hop.Recv)
+	}
+}
+
+// Stale and hidden thresholds scale with how often a responder is seen: a
+// branch of a 16-way ECMP hop is not stale after 10 rounds of silence
+func TestStaleScalesWithRevisits(t *testing.T) {
+	tr := newTestTracer()
+	for r := 1; r <= 160; r += 16 {
+		tr.inject(1, r, "branch", ms(1))
+	}
+	tr.rounds = 145 + 15*staleAfterRounds
+	if r := findResponder(tr.Snapshot().Hops[0], "branch"); r == nil || r.Stale {
+		t.Errorf("responder = %+v, want live", r)
+	}
+	tr.rounds = 145 + 16*staleAfterRounds + 1
+	if r := findResponder(tr.Snapshot().Hops[0], "branch"); r == nil || !r.Stale {
+		t.Errorf("responder = %+v, want stale", r)
+	}
+}
+
+// testHash is a stand-in for a router's ECMP hash of the L4 ports
+func testHash(p uint16) uint32 {
+	x := uint32(p) * 2654435761
+	x ^= x >> 15
+	x *= 2246822519
+	x ^= x >> 13
+	return x
 }

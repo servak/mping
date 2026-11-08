@@ -170,25 +170,38 @@ func TestParseExtendedErr(t *testing.T) {
 }
 
 func TestUDPPortRotation(t *testing.T) {
-	for _, c := range []struct{ interval, timeout time.Duration }{
-		{time.Second, time.Second},
-		{time.Second, 3 * time.Second},
-		{200 * time.Millisecond, time.Second},
-		{5 * time.Millisecond, time.Second},
+	for _, c := range []struct {
+		interval, timeout time.Duration
+		capped            bool
+	}{
+		{time.Second, time.Second, false},
+		{time.Second, 3 * time.Second, false},
+		{200 * time.Millisecond, time.Second, false},
+		{5 * time.Millisecond, time.Second, false},
+		{time.Second, 40 * time.Second, false}, // past the old cap of 1024 ports
+		{time.Millisecond, 2 * time.Second, true},
+		{time.Second, 24 * time.Hour, true},
 	} {
 		ports := udpPortRange(c.interval, c.timeout)
+		window := udpPortWindow(ports)
 		// rounds a probe may stay pending, see udpPortRange
-		window := int((c.timeout+c.interval-1)/c.interval) + 1
-		if ports > maxUDPPortRange+udpRoundStride {
+		pending := int((c.timeout+c.interval-1)/c.interval) + 1
+		if UDPBasePort+ports-1 > 65535 || gcd(ports, udpRoundStride) != 1 {
 			t.Fatalf("%v/%v: %d ports", c.interval, c.timeout, ports)
 		}
-		if (window+1)*maxHops <= maxUDPPortRange {
-			for round := window + 1; round <= 3*ports; round++ {
+		if capped := window < pending; capped != c.capped {
+			t.Errorf("%v/%v: %d ports cover %d rounds, probes pending for %d", c.interval, c.timeout, ports, window, pending)
+		}
+		// Probes of the last window rounds and this one never share a
+		// port. The pattern only shifts by udpRoundStride per round, so a
+		// few rounds (and the wrap of the range) cover all cases.
+		for _, from := range []int{window + 1, ports - 2} {
+			for round := from; round < from+5; round++ {
 				seen := map[uint16]int{}
 				for back := 0; back <= window; back++ {
 					for ttl := 1; ttl <= maxHops; ttl++ {
 						p := udpPort(ports, round-back, ttl)
-						if p < UDPBasePort || p >= UDPBasePort+uint16(ports) {
+						if int(p) < UDPBasePort || int(p) >= UDPBasePort+ports {
 							t.Fatalf("udpPort(%d, %d, %d) = %d out of range", ports, round, ttl, p)
 						}
 						if prev, ok := seen[p]; ok {
@@ -369,8 +382,8 @@ func TestUDPPortUnreachableEndsPath(t *testing.T) {
 func sendRoundAt(tr *Tracer, round int, start time.Time) (aliased int) {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
-	tr.expire(start)
-	tr.rounds = round
+	tr.rounds = round - 1
+	tr.startRoundLocked(start)
 	gap := tr.cfg.Interval / maxHops
 	for ttl := 1; ttl <= maxHops; ttl++ {
 		before := len(tr.pending)
@@ -388,9 +401,12 @@ func TestUDPPortNotReusedWhilePending(t *testing.T) {
 		{time.Second, time.Second},
 		{time.Second, 3 * time.Second}, // the TUI with a 3s probe timeout
 		{500 * time.Millisecond, 2 * time.Second},
+		{time.Second, 40 * time.Second},     // more ports than the old cap of 1024
+		{time.Millisecond, 2 * time.Second}, // past the port range: the window applies
 	} {
 		tr := newTracer(Config{NoDNS: true, Proto: ProtoUDP, Interval: c.interval, Timeout: c.timeout}, []byte{192, 0, 2, 10}, nil)
-		for round := 1; round <= 3*tr.udpPorts; round++ {
+		rounds := min(3*tr.udpPorts, tr.udpWindow+50)
+		for round := 1; round <= rounds; round++ {
 			start := testEpoch.Add(time.Duration(round-1) * c.interval)
 			if n := sendRoundAt(tr, round, start); n > 0 {
 				t.Fatalf("%v/%v: round %d reused the port of %d pending probe(s)", c.interval, c.timeout, round, n)
@@ -465,5 +481,56 @@ func TestUDPReplyChecks(t *testing.T) {
 	r, err := parseUDPReply(true, marshal(t, icmp.Message{Type: ipv6.ICMPTypeTimeExceeded, Body: &icmp.TimeExceeded{Data: q}}))
 	if err != nil || !sameAddr(dst, r.dst) || sameAddr(net.ParseIP("2001:db8::11"), r.dst) {
 		t.Errorf("v6 quoted destination = %v, %v", r.dst, err)
+	}
+}
+
+// Past the port range, probes older than the port window count as lost
+// whatever the timeout, so the port of a pending probe is never reused
+func TestUDPPortWindowLosesOldProbes(t *testing.T) {
+	tr := newTracer(Config{NoDNS: true, Proto: ProtoUDP, Interval: time.Millisecond, Timeout: time.Hour}, []byte{192, 0, 2, 10}, nil)
+	lost := 0
+	tr.onEvent = func(e probeEvent) {
+		if e.outcome == outcomeLost {
+			lost++
+		}
+	}
+	for round := 1; round <= tr.udpWindow+1; round++ {
+		sendRoundAt(tr, round, testEpoch.Add(time.Duration(round)*time.Millisecond))
+	}
+	if lost != 0 {
+		t.Fatalf("%d probes lost within the window", lost)
+	}
+	sendRoundAt(tr, tr.udpWindow+2, testEpoch)
+	if lost != maxHops {
+		t.Errorf("lost = %d, want the %d probes of round 1", lost, maxHops)
+	}
+	for _, p := range tr.pending {
+		if p.round == 1 {
+			t.Fatalf("probe of round 1 still pending")
+		}
+	}
+}
+
+// Behind DNAT / load balancers the quoted destination is often not the
+// traced address. Our source port plus the TTL encoded in the probe length
+// identify the probe; the address is only checked when the TTL is unknown.
+func TestUDPAcceptQuotedDestination(t *testing.T) {
+	tp := &udpTransport{dst: net.IPv4(192, 0, 2, 10), srcPort: 50000}
+	other := netip.MustParseAddr("198.51.100.1")
+	ours := netip.MustParseAddr("192.0.2.10")
+	for _, c := range []struct {
+		name string
+		r    reply
+		want bool
+	}{
+		{"our probe", reply{id: 50000, ttl: 3, dst: ours}, true},
+		{"DNAT: quoted destination not rewritten", reply{id: 50000, ttl: 3, dst: other}, true},
+		{"another source port", reply{id: 50001, ttl: 3, dst: ours}, false},
+		{"TTL unknown, our destination", reply{id: 50000, dst: ours}, true},
+		{"TTL unknown, another destination", reply{id: 50000, dst: other}, false},
+	} {
+		if got := tp.accept(c.r); got != c.want {
+			t.Errorf("%s: accept = %v, want %v", c.name, got, c.want)
+		}
 	}
 }
