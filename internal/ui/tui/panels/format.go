@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rivo/tview"
+
 	"github.com/servak/mping/internal/prober"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/ui/shared"
@@ -67,7 +69,7 @@ func FormatHostDetail(metric stats.Metrics, theme *shared.Theme) string {
 		{"RTT p50/p95/p99", accent, df(pct[0]) + " / " + df(pct[1]) + " / " + df(pct[2])},
 		{"Last Success", accent, tf(metric.GetLastSuccTime())},
 		{"Last Failure", accent, tf(metric.GetLastFailTime())},
-		{"Last Error", accent, metric.GetLastFailDetail()},
+		{"Last Error", accent, tview.Escape(metric.GetLastFailDetail())},
 	}, theme)
 
 	basicInfo += "\n\n" + FormatOutages(metric, theme)
@@ -144,11 +146,11 @@ func FormatHistory(metric stats.Metrics, theme *shared.Theme) string {
 			statusColor = theme.Error
 			// Show error message for failed entries
 			if entry.Error != "" {
-				details = fmt.Sprintf("[%s]%s[%s]", theme.Error, entry.Error, theme.Primary)
+				details = fmt.Sprintf("[%s]%s[%s]", theme.Error, tview.Escape(entry.Error), theme.Primary)
 			}
 		} else {
 			// Show probe-specific details for successful entries
-			details = formatProbeDetails(entry.Details)
+			details = tview.Escape(formatProbeDetails(entry.Details))
 		}
 
 		fmt.Fprintf(&sb, "[%s]%-8s[%s] [%s]%-6s[%s] %-7s %s\n",

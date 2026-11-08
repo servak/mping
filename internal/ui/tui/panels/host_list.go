@@ -249,7 +249,7 @@ func listColumns(td *shared.TableData, theme *shared.Theme, now time.Time) []lis
 			header: td.Headers[i],
 			align:  tviewAlign(c.Align),
 			host:   c.ID == shared.ColumnHost,
-			cell:   func(r shared.Row) string { return r.Cells[i] },
+			cell:   func(r shared.Row) string { return tview.Escape(r.Cells[i]) }, // host names and fail reasons are remote data
 		}
 		if c.ID == shared.ColumnLastFailTime {
 			lc.cell = func(r shared.Row) string { return FormatLastFailCell(r.Metric, now, theme) }
