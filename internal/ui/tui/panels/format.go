@@ -191,8 +191,12 @@ func formatProbeDetails(details *prober.ProbeDetails) string {
 		return "icmp ping"
 	case "http", "https":
 		if details.HTTP != nil {
-			return fmt.Sprintf("status=%d size=%d",
-				details.HTTP.StatusCode, details.HTTP.ResponseSize)
+			plus := ""
+			if details.HTTP.SizeTruncated {
+				plus = "+"
+			}
+			return fmt.Sprintf("status=%d size=%d%s",
+				details.HTTP.StatusCode, details.HTTP.ResponseSize, plus)
 		}
 		return "http probe"
 	case "dns":

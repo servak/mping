@@ -22,10 +22,12 @@ type ICMPDetails struct {
 }
 
 type HTTPDetails struct {
-	StatusCode   int               `json:"status_code"`
-	ResponseSize int64             `json:"response_size"`
-	Headers      map[string]string `json:"headers,omitempty"`
-	Redirects    []string          `json:"redirects,omitempty"`
+	StatusCode   int   `json:"status_code"`
+	ResponseSize int64 `json:"response_size"`
+	// SizeTruncated: the body was larger than ResponseSize, which is a lower bound.
+	SizeTruncated bool              `json:"size_truncated,omitempty"`
+	Headers       map[string]string `json:"headers,omitempty"`
+	Redirects     []string          `json:"redirects,omitempty"`
 }
 
 type DNSDetails struct {

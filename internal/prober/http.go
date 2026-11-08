@@ -1,10 +1,12 @@
 package prober
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -15,6 +17,15 @@ import (
 const (
 	HTTP  ProbeType = "http"
 	HTTPS ProbeType = "https"
+
+	// maxBodyBytes caps how much of a response body is read. It bounds memory
+	// for huge or endless bodies; expect_body can only match within this size.
+	maxBodyBytes = 1 << 20
+
+	// maxCountBytes bounds how much of a body is read (and discarded) to
+	// report its size when Content-Length is unknown. Larger bodies are
+	// reported as maxCountBytes with SizeTruncated set.
+	maxCountBytes = 64 << 20
 )
 
 type (
@@ -33,6 +44,11 @@ type (
 		ExpectBody  string            `yaml:"expect_body,omitempty"`
 		TLS         *TLSConfig        `yaml:"tls,omitempty"`
 		RedirectOFF bool              `yaml:"redirect_off,omitempty"`
+		// KeepAlive reuses connections between probes. By default every probe
+		// opens a fresh connection so the RTT always includes DNS, TCP and TLS
+		// setup; with keep_alive only the first probe pays for them.
+		// No omitempty: the setting stays visible in `config print` / `config init`.
+		KeepAlive bool `yaml:"keep_alive"`
 	}
 
 	TLSConfig struct {
@@ -41,10 +57,20 @@ type (
 		SkipVerify *bool `yaml:"skip_verify,omitempty"`
 	}
 
+	// customTransport adds the configured headers. The Host header is handled
+	// specially: it (and the TLS server name, via hostTransport) applies only
+	// to requests for the host the probe started with, never to a redirect
+	// target on another host.
 	customTransport struct {
-		transport http.RoundTripper
-		headers   map[string]string
+		transport     http.RoundTripper // no Host override: SNI follows the URL host
+		hostTransport http.RoundTripper // ServerName = host override
+		headers       map[string]string
+		host          string // resolved Host override; "" if none
 	}
+
+	// origHostKey carries the host of the originally requested URL in the
+	// request context (redirected requests inherit it).
+	origHostKey struct{}
 )
 
 // ShouldSkipVerify reports whether TLS certificate verification should be skipped.
@@ -75,15 +101,24 @@ func NewHTTPProber(probeType ProbeType, cfg *HTTPConfig, prefix string) *HTTPPro
 	// Determine TLS skip verification setting (default: skip)
 	skipVerify := cfg.TLS.ShouldSkipVerify()
 
-	client := &http.Client{
-		Transport: &customTransport{
-			transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: skipVerify},
-			},
-			headers: cfg.Header,
-		},
-		CheckRedirect: rd,
+	host := hostOverride(cfg.Header)
+	newTransport := func(serverName string) *http.Transport {
+		return &http.Transport{
+			TLSClientConfig:   &tls.Config{InsecureSkipVerify: skipVerify, ServerName: serverName},
+			DisableKeepAlives: !cfg.KeepAlive,
+		}
 	}
+	ct := &customTransport{transport: newTransport(""), headers: cfg.Header, host: host}
+	if host != "" {
+		// With a Host header override, SNI and certificate verification use
+		// that name instead of the URL host.
+		name := host
+		if h, _, err := net.SplitHostPort(name); err == nil {
+			name = h
+		}
+		ct.hostTransport = newTransport(strings.Trim(name, "[]"))
+	}
+	client := &http.Client{Transport: ct, CheckRedirect: rd}
 	return &HTTPProber{
 		client:    client,
 		targets:   make([]string, 0),
@@ -163,26 +198,39 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 	// Convert target to actual HTTP URL
 	scheme, rest := p.resolveURL(target)
 	actualURL := scheme + "://" + rest
-	resp, err := p.client.Get(actualURL)
-	if err != nil {
+	failErr := func(err error) {
 		if classifyErr(err) == TIMEOUT {
 			r <- failureEvent(target, target, TIMEOUT, now, time.Since(now), "timeout")
 		} else {
 			fail(err)
 		}
+	}
+	req, err := http.NewRequest(http.MethodGet, actualURL, nil)
+	if err != nil {
+		fail(err)
+		return
+	}
+	req = req.WithContext(context.WithValue(req.Context(), origHostKey{}, req.URL.Host))
+	resp, err := p.client.Do(req)
+	if err != nil {
+		failErr(err)
 		return
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, size, sizeTruncated, bodyTruncated, err := readBody(resp)
 	if err != nil {
-		fail(err)
+		failErr(err)
 		return
 	}
 	if !p.isExpectedStatusCode(resp.StatusCode) {
 		fail(fmt.Errorf("unexpected status code: %d", resp.StatusCode))
 	} else if p.config.ExpectBody != "" && p.config.ExpectBody != strings.TrimRight(string(body), "\n") {
-		fail(errors.New("invalid body"))
+		msg := "invalid body"
+		if bodyTruncated {
+			msg += " (response body truncated at 1 MiB)"
+		}
+		fail(errors.New(msg))
 	} else {
 		// Create HTTP detail information
 		headers := make(map[string]string)
@@ -202,15 +250,46 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 		details := &ProbeDetails{
 			ProbeType: scheme,
 			HTTP: &HTTPDetails{
-				StatusCode:   resp.StatusCode,
-				ResponseSize: int64(len(body)),
-				Headers:      headers,
-				Redirects:    redirects,
+				StatusCode:    resp.StatusCode,
+				ResponseSize:  size,
+				SizeTruncated: sizeTruncated,
+				Headers:       headers,
+				Redirects:     redirects,
 			},
 		}
 
 		r <- successEvent(target, target, now, time.Since(now), details)
 	}
+}
+
+// readBody reads up to maxBodyBytes of the body for expect_body matching and
+// determines the real response size. With a known Content-Length that is the
+// size; otherwise the remainder is read and discarded, up to maxCountBytes,
+// beyond which the size is reported as maxCountBytes with sizeTruncated set.
+// bodyTruncated reports that body is cut at maxBodyBytes.
+func readBody(resp *http.Response) (body []byte, size int64, sizeTruncated, bodyTruncated bool, err error) {
+	body, err = io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes+1))
+	if err != nil {
+		return nil, 0, false, false, err
+	}
+	if len(body) <= maxBodyBytes {
+		return body, int64(len(body)), false, false, nil
+	}
+	body = body[:maxBodyBytes]
+	if resp.ContentLength >= 0 {
+		return body, resp.ContentLength, false, true, nil
+	}
+	// maxBodyBytes+1 bytes are already read; one byte past the cap shows
+	// that the body is larger than maxCountBytes.
+	n, err := io.Copy(io.Discard, io.LimitReader(resp.Body, maxCountBytes-maxBodyBytes))
+	if err != nil {
+		return nil, 0, false, false, err
+	}
+	size = maxBodyBytes + 1 + n
+	if size > maxCountBytes {
+		return body, maxCountBytes, true, true, nil
+	}
+	return body, size, false, true, nil
 }
 
 func (p *HTTPProber) Start(r chan *Event, interval, timeout time.Duration) error {
@@ -227,6 +306,22 @@ func (p *HTTPProber) Stop() {
 	p.client.CloseIdleConnections()
 }
 
+// hostOverride returns the value of the Host entry in headers, matched
+// case-insensitively. Validate rejects several entries; if there still are
+// some, the lexically smallest key wins so the result is deterministic.
+func hostOverride(headers map[string]string) string {
+	var keys []string
+	for k := range headers {
+		if http.CanonicalHeaderKey(k) == "Host" {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	return headers[slices.Min(keys)]
+}
+
 func (c *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if len(c.headers) == 0 {
 		return c.transport.RoundTrip(req)
@@ -234,18 +329,45 @@ func (c *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// A RoundTripper must not modify the caller's request.
 	req = req.Clone(req.Context())
 	for k, v := range c.headers {
-		// net/http ignores Header["Host"]; the Host header is taken from req.Host.
-		if strings.EqualFold(k, "Host") {
-			req.Host = v
-			continue
+		if http.CanonicalHeaderKey(k) == "Host" {
+			continue // handled below
 		}
 		req.Header.Set(k, v)
 	}
-	return c.transport.RoundTrip(req)
+	tr := c.transport
+	// net/http ignores Header["Host"]; the Host header is taken from req.Host.
+	// Override it (and SNI) only for the original host, not for redirects
+	// that leave it.
+	if c.host != "" {
+		if orig, _ := req.Context().Value(origHostKey{}).(string); orig == "" || orig == req.URL.Host {
+			req.Host = c.host
+			tr = c.hostTransport
+		}
+	}
+	return tr.RoundTrip(req)
+}
+
+// CloseIdleConnections closes idle keep-alive connections of the inner
+// transports (http.Client.CloseIdleConnections looks for this method).
+func (c *customTransport) CloseIdleConnections() {
+	for _, tr := range []http.RoundTripper{c.transport, c.hostTransport} {
+		if ci, ok := tr.(interface{ CloseIdleConnections() }); ok {
+			ci.CloseIdleConnections()
+		}
+	}
 }
 
 // Validate validates the HTTP configuration
 func (cfg *HTTPConfig) Validate() error {
+	hosts := 0
+	for k := range cfg.Header {
+		if http.CanonicalHeaderKey(k) == "Host" {
+			hosts++
+		}
+	}
+	if hosts > 1 {
+		return errors.New("headers: multiple Host entries (differing only in case); specify Host once")
+	}
 	if cfg.ExpectCodes != "" {
 		if !IsValidCodePattern(cfg.ExpectCodes) {
 			return fmt.Errorf("invalid expect_codes pattern: %s", cfg.ExpectCodes)

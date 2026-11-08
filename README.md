@@ -418,6 +418,7 @@ prober:
       headers:                    # Custom headers (optional)
         User-Agent: "mping/1.0"
       redirect_off: false         # Disable redirect following
+      keep_alive: false           # Reuse connections between probes (default: false; see note below)
   
   # HTTPS configuration
   https:
@@ -427,9 +428,19 @@ prober:
       expect_body: ""
       headers: {}
       redirect_off: false
+      keep_alive: false           # false: every probe opens a new connection (RTT includes DNS+TCP+TLS)
       tls:
         skip_verify: true         # Skip TLS certificate verification (default: true when omitted)
   
+  # HTTP keep_alive trade-off: by default every probe opens a new connection, so
+  # the RTT includes DNS, TCP and TLS setup and a stuck connection never skews
+  # results. At very short intervals with many targets this costs a connection
+  # (and a TIME_WAIT socket / TLS handshake) per probe. Set keep_alive: true to
+  # measure request latency only; only the first probe then pays for setup.
+  # A "Host" header is sent as the request Host and TLS SNI for the original
+  # target only (not for redirects to other hosts); specify it once.
+  # expect_body matches within the first 1 MiB; response size is counted up to 64 MiB.
+
   # TCP configuration
   tcp:
     probe: tcp

@@ -15,7 +15,7 @@ const (
 
 type (
 	TCPProber struct {
-		targets map[string]tcpTarget // key (ip:port) -> display name and source
+		targets map[string]tcpTarget // key (target as given, also its display name) -> address and source
 		config  *TCPConfig
 		// sources caches the source address per family (index 1 for IPv6)
 		sources [2]*net.TCPAddr
@@ -24,7 +24,7 @@ type (
 	}
 
 	tcpTarget struct {
-		name  string       // display name (host:port as given)
+		addr  string       // resolved ip:port to dial
 		local *net.TCPAddr // source address; nil without source_interface
 	}
 
@@ -76,14 +76,14 @@ func (p *TCPProber) Accept(target string) error {
 			return fmt.Errorf("source_interface %q for %s: %w", p.config.SourceInterface, target, err)
 		}
 	}
-	p.targets[ipPort] = tcpTarget{name: target, local: local}
+	p.targets[target] = tcpTarget{addr: ipPort, local: local}
 
 	return nil
 }
 
 func (p *TCPProber) Start(result chan *Event, interval, timeout time.Duration) error {
 	return runPeriodic(p.loop, result, TCP, interval, slices.Sorted(maps.Keys(p.targets)),
-		func(target string) (string, string) { return target, p.targets[target].name },
+		func(target string) (string, string) { return target, target },
 		func(target string) { p.sendProbe(result, target, timeout) })
 }
 
@@ -93,10 +93,10 @@ func (p *TCPProber) Stop() {
 }
 
 func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Duration) {
-	// target is already in "ip:port" format from Accept method
+	// target is the key given to Accept; the address was resolved there
 	now := time.Now()
 	t := p.targets[target]
-	name := t.name
+	name := target
 	result <- sentEvent(target, name, now)
 
 	// Create dialer with timeout, bound to the source address resolved by Accept
@@ -108,7 +108,7 @@ func (p *TCPProber) sendProbe(result chan *Event, target string, timeout time.Du
 	}
 
 	// Attempt TCP connection using pre-resolved IP:port
-	conn, err := dialer.Dial("tcp", target)
+	conn, err := dialer.Dial("tcp", t.addr)
 	rtt := time.Since(now)
 
 	if err != nil {
