@@ -2,8 +2,10 @@ package prober
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,6 +46,10 @@ type (
 	}
 )
 
+// supportedDNSRecordTypes lists the record types mping can query. Both
+// DNSConfig.Validate and target parsing use it.
+var supportedDNSRecordTypes = []string{"A", "AAAA", "CNAME", "MX", "NS", "PTR", "SOA", "SRV", "TXT"}
+
 // Validate validates the DNS configuration
 func (cfg *DNSConfig) Validate() error {
 	if cfg.Server == "" {
@@ -55,9 +61,8 @@ func (cfg *DNSConfig) Validate() error {
 	}
 
 	// Validate record type
-	validTypes := []string{"A", "AAAA", "CNAME", "MX", "NS", "PTR", "SOA", "SRV", "TXT"}
-	if !slices.Contains(validTypes, strings.ToUpper(cfg.RecordType)) {
-		return fmt.Errorf("invalid DNS record type: %s (supported: %s)", cfg.RecordType, strings.Join(validTypes, ", "))
+	if !slices.Contains(supportedDNSRecordTypes, strings.ToUpper(cfg.RecordType)) {
+		return fmt.Errorf("invalid DNS record type: %s (supported: %s)", cfg.RecordType, strings.Join(supportedDNSRecordTypes, ", "))
 	}
 
 	// Validate expect codes pattern if specified
@@ -127,17 +132,22 @@ func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
 	server := p.config.Server
 	port := p.config.Port
 	if serverPart != "" {
-		if strings.Contains(serverPart, ":") {
-			host, portStr, err := net.SplitHostPort(serverPart)
-			if err != nil {
-				return nil, fmt.Errorf("invalid server:port format: %w", err)
-			}
+		host, portStr, err := splitServerPort(serverPart)
+		if err != nil {
+			return nil, err
+		}
+		if host != "" {
 			server = host
-			if p, err := strconv.Atoi(portStr); err == nil {
-				port = p
+		}
+		if portStr != "" {
+			n, err := strconv.Atoi(portStr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid port %q: must be a number between 1 and 65535", portStr)
 			}
-		} else {
-			server = serverPart
+			if n < 1 || n > 65535 {
+				return nil, fmt.Errorf("invalid port %d: must be between 1 and 65535", n)
+			}
+			port = n
 		}
 	}
 
@@ -145,9 +155,12 @@ func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {
 	queryParts := strings.Split(queryPart, "/")
 	domain := queryParts[0]
 	recordType := p.config.RecordType
-
 	if len(queryParts) > 1 && queryParts[1] != "" {
-		recordType = strings.ToUpper(queryParts[1])
+		recordType = queryParts[1]
+	}
+	recordType = strings.ToUpper(recordType)
+	if !slices.Contains(supportedDNSRecordTypes, recordType) {
+		return nil, fmt.Errorf("unsupported record type: %q (supported: %s)", recordType, strings.Join(supportedDNSRecordTypes, ", "))
 	}
 	return &DNSTarget{
 		Server:         server,
@@ -184,21 +197,36 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 
 	// Create DNS query
 	m := new(dns.Msg)
-	qtype := dns.StringToType[target.RecordType]
-	if qtype == 0 {
-		result <- errorEvent(key, key, now, fmt.Errorf("unsupported record type: %s", target.RecordType))
-		return
-	}
-
-	m.SetQuestion(dns.Fqdn(target.Domain), qtype)
+	// RecordType was validated against supportedDNSRecordTypes at parse time.
+	m.SetQuestion(dns.Fqdn(target.Domain), dns.StringToType[target.RecordType])
 	m.RecursionDesired = p.config.RecursionDesired
 
 	// Send DNS query using pre-resolved server IP
-	server := fmt.Sprintf("%s:%d", target.ServerIP, target.Port)
+	server := net.JoinHostPort(target.ServerIP, strconv.Itoa(target.Port))
 	r, rtt, err := c.Exchange(m, server)
 	if err != nil {
-		result <- errorEvent(key, key, now, err)
+		result <- dnsErrorEvent(key, now, err)
 		return
+	}
+
+	// A truncated UDP answer is incomplete: retry over TCP. The retry only gets
+	// what is left of the timeout budget so the probe never exceeds it, and the
+	// reported RTT is the total wall time of the probe (UDP attempt plus retry).
+	if r.Truncated && !target.UseTCP {
+		remaining := timeout - time.Since(now)
+		if remaining <= 0 {
+			result <- dnsErrorEvent(key, now, fmt.Errorf("DNS response truncated, no time left for TCP retry: %w", os.ErrDeadlineExceeded))
+			return
+		}
+		tc := new(dns.Client)
+		tc.Timeout = remaining
+		tc.Net = "tcp"
+		r2, _, err := tc.Exchange(m, server)
+		if err != nil {
+			result <- dnsErrorEvent(key, now, fmt.Errorf("DNS response truncated, TCP retry failed: %w", err))
+			return
+		}
+		r, rtt = r2, time.Since(now)
 	}
 
 	// Check DNS response
@@ -209,6 +237,16 @@ func (p *DNSProber) sendProbe(result chan *Event, target *DNSTarget, timeout tim
 
 	// Success
 	result <- successEvent(key, key, now, rtt, p.details(target, r))
+}
+
+// dnsErrorEvent is errorEvent, except that a timeout is recognised even when
+// err wraps it (classifyErr only looks at the outermost error).
+func dnsErrorEvent(key string, sent time.Time, err error) *Event {
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return failureEvent(key, key, TIMEOUT, sent, 0, err.Error())
+	}
+	return errorEvent(key, key, sent, err)
 }
 
 // details describes a successful DNS response.

@@ -92,9 +92,9 @@ func isValidSinglePattern(pattern string) bool {
 		if len(parts) != 2 {
 			return false
 		}
-		_, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
-		_, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
-		return err1 == nil && err2 == nil
+		start, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+		end, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+		return err1 == nil && err2 == nil && start <= end
 	}
 
 	// Single code pattern
