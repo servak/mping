@@ -91,17 +91,14 @@ type options struct {
 	extra   []string // extra flags
 }
 
-// mping runs "mping batch -o json" and decodes the report. Without a config
-// a nonexistent path is passed so ~/.mping.yml never affects the test.
+// mping runs "mping batch -o json" and decodes the report. A config file is
+// always passed (empty when opts.config is unset) so ~/.mping.yml never
+// affects the test; an explicit -c path must exist.
 func mping(t *testing.T, opts options, targets ...string) result {
 	t.Helper()
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "absent.yml")
-	if opts.config != "" {
-		cfgPath = filepath.Join(dir, "mping.yml")
-		if err := os.WriteFile(cfgPath, []byte(opts.config), 0o600); err != nil {
-			t.Fatal(err)
-		}
+	cfgPath := filepath.Join(t.TempDir(), "mping.yml")
+	if err := os.WriteFile(cfgPath, []byte(opts.config), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	timeout := opts.timeout
 	if timeout == "" {
