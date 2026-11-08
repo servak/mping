@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"sort"
 	"time"
 
 	"github.com/servak/mping/internal/prober"
@@ -25,6 +26,9 @@ type TargetHistory struct {
 
 // NewTargetHistory creates a new TargetHistory
 func NewTargetHistory(size int) *TargetHistory {
+	if size < 1 {
+		size = 1
+	}
 	return &TargetHistory{
 		entries: make([]HistoryEntry, size),
 		size:    size,
@@ -33,13 +37,42 @@ func NewTargetHistory(size int) *TargetHistory {
 	}
 }
 
-// AddEntry adds a new history entry
+// AddEntry adds a new history entry. Entries are kept ordered by Timestamp
+// (send time), so a late result for an older probe is inserted before newer
+// ones instead of being appended at the newest end.
 func (th *TargetHistory) AddEntry(entry HistoryEntry) {
+	if th.count > 0 {
+		newest := th.entries[(th.index-1+th.size)%th.size]
+		if entry.Timestamp.Before(newest.Timestamp) {
+			th.insertOrdered(entry)
+			return
+		}
+	}
 	th.entries[th.index] = entry
 	th.index = (th.index + 1) % th.size
 	if th.count < th.size {
 		th.count++
 	}
+}
+
+// insertOrdered inserts an entry that is older than the newest one at its
+// chronological position, dropping the oldest entry if the buffer is full.
+func (th *TargetHistory) insertOrdered(entry HistoryEntry) {
+	list := make([]HistoryEntry, 0, th.count+1)
+	for i := th.count - 1; i >= 0; i-- {
+		list = append(list, th.entries[(th.index-1-i+th.size)%th.size])
+	}
+	// after any entries with an equal timestamp
+	pos := sort.Search(len(list), func(i int) bool { return list[i].Timestamp.After(entry.Timestamp) })
+	list = append(list, HistoryEntry{})
+	copy(list[pos+1:], list[pos:])
+	list[pos] = entry
+	if len(list) > th.size {
+		list = list[len(list)-th.size:]
+	}
+	copy(th.entries, list)
+	th.count = len(list)
+	th.index = th.count % th.size
 }
 
 // GetRecentEntries retrieves the latest n entries (newest first)

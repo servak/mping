@@ -97,6 +97,10 @@ func (mm *metricsManager) SuccessWithDetails(host string, rtt time.Duration, sen
 	m := mm.getMetrics(host)
 
 	mm.mu.Lock()
+	if sentTime.Before(m.resetAt) {
+		mm.mu.Unlock()
+		return // probe sent before the last reset
+	}
 	m.Success(rtt, sentTime)
 	if m.history != nil {
 		m.history.AddEntry(HistoryEntry{
@@ -115,6 +119,10 @@ func (mm *metricsManager) Failed(host string, sentTime time.Time, msg string) {
 	m := mm.getMetrics(host)
 
 	mm.mu.Lock()
+	if sentTime.Before(m.resetAt) {
+		mm.mu.Unlock()
+		return // probe sent before the last reset
+	}
 	name := m.Name
 	m.Fail(sentTime, msg)
 	if m.history != nil {
@@ -196,16 +204,20 @@ func (mm *metricsManager) SortBy(k Key, ascending bool) []Metrics {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 	now := time.Now()
-	var res []Metrics
-	for _, m := range mm.metrics {
-		res = append(res, m.settledSnapshot(now))
+	keys := make([]string, 0, len(mm.metrics))
+	for key := range mm.metrics {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	// Tie-break deterministically: by display name, then by key
+	sort.SliceStable(keys, func(i, j int) bool {
+		return mm.metrics[keys[i]].Name < mm.metrics[keys[j]].Name
+	})
+	res := make([]Metrics, 0, len(keys))
+	for _, key := range keys {
+		res = append(res, mm.metrics[key].settledSnapshot(now))
 	}
 
-	if k != Host {
-		sort.SliceStable(res, func(i, j int) bool {
-			return res[i].GetName() < res[j].GetName()
-		})
-	}
 	// less must be a strict ordering: descending order swaps the operands
 	// instead of negating the result, which would make equal elements
 	// "less" than each other and reorder them on every call.

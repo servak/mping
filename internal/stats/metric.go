@@ -56,16 +56,19 @@ type metrics struct {
 	LastFailDetail string
 	history        *TargetHistory // 履歴情報
 	outage         *outageTracker
+	resetAt        time.Time // results of probes sent before this are stale
 }
 
 func (m *metrics) Success(rtt time.Duration, sentTime time.Time) {
 	m.Successful++
-	m.LastSuccTime = sentTime
+	if sentTime.After(m.LastSuccTime) {
+		m.LastSuccTime = sentTime
+	}
 	m.LastRTT = rtt
 	m.TotalRTT += rtt
 	m.sumSquaredRTT += float64(rtt) * float64(rtt)
 	m.AverageRTT = m.TotalRTT / time.Duration(m.Successful)
-	if m.MinimumRTT == 0 || rtt < m.MinimumRTT {
+	if m.Successful == 1 || rtt < m.MinimumRTT {
 		m.MinimumRTT = rtt
 	}
 	if rtt > m.MaximumRTT {
@@ -76,8 +79,11 @@ func (m *metrics) Success(rtt time.Duration, sentTime time.Time) {
 
 func (m *metrics) Fail(sentTime time.Time, msg string) {
 	m.Failed++
-	m.LastFailTime = sentTime
-	m.LastFailDetail = msg
+	// a late result of an older probe must not overwrite newer failure info
+	if !sentTime.Before(m.LastFailTime) {
+		m.LastFailTime = sentTime
+		m.LastFailDetail = msg
+	}
 	m.loss()
 }
 
@@ -90,6 +96,7 @@ func (m *metrics) Sent() {
 }
 
 func (m *metrics) Reset() {
+	m.resetAt = time.Now()
 	m.Total = 0
 	m.Successful = 0
 	m.Failed = 0

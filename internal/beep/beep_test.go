@@ -1,6 +1,7 @@
 package beep
 
 import (
+	"runtime"
 	"testing"
 	"time"
 )
@@ -105,4 +106,34 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 
 	// If we get here without deadlock or panic, the test passes
+}
+
+type blockingWriter struct{ release chan struct{} }
+
+func (w *blockingWriter) Write(p []byte) (int, error) {
+	<-w.release
+	return len(p), nil
+}
+
+func TestBeepDoesNotBlockWhenOutputBlocked(t *testing.T) {
+	w := &blockingWriter{release: make(chan struct{})}
+	defer close(w.release)
+	b := NewBeeper()
+	b.out = w
+	b.debounceTime = 0
+	before := runtime.NumGoroutine()
+	for i := 0; i < 200; i++ {
+		b.Beep()
+	}
+	time.Sleep(50 * time.Millisecond)
+	done := make(chan struct{})
+	go func() { b.Toggle(); b.IsEnabled(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Toggle/IsEnabled blocked by a stuck stdout")
+	}
+	if n := runtime.NumGoroutine() - before; n > 5 {
+		t.Errorf("goroutines piled up: +%d", n)
+	}
 }
