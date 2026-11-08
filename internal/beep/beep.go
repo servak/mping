@@ -63,12 +63,20 @@ func (b *Beeper) Beep() {
 	}
 }
 
-// Close stops the worker goroutine and waits for it to exit. It is
-// idempotent; Beep after Close is a harmless no-op.
+// closeWait bounds how long Close waits for the worker to exit.
+const closeWait = 200 * time.Millisecond
+
+// Close stops the worker goroutine and waits (up to closeWait) for it to
+// exit. It is idempotent; Beep after Close is a harmless no-op.
 func (b *Beeper) Close() {
 	b.init()
 	b.closeOnce.Do(func() { close(b.stop) })
-	<-b.done
+	// Wait briefly for the worker; if it is stuck writing to a blocked
+	// terminal, don't hang the caller (e.g. app shutdown) on it.
+	select {
+	case <-b.done:
+	case <-time.After(closeWait):
+	}
 }
 
 func (b *Beeper) worker() {
