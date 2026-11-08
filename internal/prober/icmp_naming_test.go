@@ -4,28 +4,51 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/servak/mping/internal/icmpid"
 	"github.com/servak/mping/internal/trace"
 )
 
-// Echo IDs of the probers in one process are distinct and never 0.
-func TestNextEchoIDDistinct(t *testing.T) {
-	seen := make(map[int]bool)
-	for range 1000 {
-		id := nextEchoID()
-		if id <= 0 || id > 0xffff {
-			t.Fatalf("nextEchoID() = %d, out of range", id)
+// Probers and path tracers draw their echo IDs from one process-wide
+// allocator: the IDs held at once are distinct and never 0, also while
+// tracers churn (they restart on every target change), and a stopped
+// prober releases its ID.
+func TestEchoIDsDisjointFromTracer(t *testing.T) {
+	var probers []*ICMPProber
+	held := make(map[uint16]bool)
+	for i := range 200 {
+		p := newTestProber(t, ICMPV4, newFakeICMPConn(), nil, "icmpv4")
+		probers = append(probers, p)
+		id := uint16(p.runID)
+		if id == 0 || p.runID > 0xffff || held[id] {
+			t.Fatalf("prober echo ID %d: zero, out of range or duplicate", p.runID)
 		}
-		if seen[id] {
-			t.Fatalf("nextEchoID() returned %d twice", id)
+		held[id] = true
+		// a tracer starting and stopping between probers (trace uses
+		// icmpid.Acquire / Release for its transports)
+		lease, err := icmpid.Acquire()
+		if err != nil {
+			t.Fatal(err)
 		}
-		seen[id] = true
+		tr := lease.ID()
+		if tr == 0 || held[tr] {
+			t.Fatalf("tracer echo ID %#x: zero or held by a prober", tr)
+		}
+		if i%2 == 0 {
+			lease.Release()
+		} else {
+			held[tr] = true
+			defer lease.Release()
+		}
+	}
+	for _, p := range probers {
+		p.Stop()
 	}
 }
 
 // A custom ICMPv6 prober brackets bare addresses in its keys and names, so
 // that URL-style parsing (as by the path tracer) finds the whole address.
 func TestICMPCustomV6NameParses(t *testing.T) {
-	p := newICMPProber(ICMPV6, newFakeICMPConn(), nil, "myv6")
+	p := newTestProber(t, ICMPV6, newFakeICMPConn(), nil, "myv6")
 	if err := p.Accept("myv6://2001:db8::1"); err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +73,7 @@ func TestICMPCustomDefaultPlainTargets(t *testing.T) {
 		"icmpv4": {Probe: ICMPV4, ICMP: &ICMPConfig{}},
 	}
 	pm := NewProbeManager(config, "ping").(*probeManager)
-	p := newICMPProber(ICMPV4, newFakeICMPConn(), nil, "ping")
+	p := newTestProber(t, ICMPV4, newFakeICMPConn(), nil, "ping")
 	pm.probers["ping"] = p
 	if err := pm.AddTargets("127.0.0.1", "ping://127.0.0.2", "ping:127.0.0.3"); err != nil {
 		t.Fatal(err)
@@ -65,4 +88,15 @@ func TestICMPCustomDefaultPlainTargets(t *testing.T) {
 			t.Errorf("target %s = %+v, want %+v", ip, got, w)
 		}
 	}
+}
+
+// newTestProber builds a prober with an echo ID from the process-wide
+// allocator.
+func newTestProber(t testing.TB, typ ProbeType, c packetConn, body []byte, prefix string) *ICMPProber {
+	t.Helper()
+	lease, err := icmpid.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newICMPProber(typ, c, body, prefix, lease)
 }

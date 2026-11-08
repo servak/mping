@@ -47,11 +47,11 @@ func TestICMPProbersDoNotShareReplies(t *testing.T) {
 	lost.noReply = true // e.g. TTL=1: the requests never reach the target
 	ok := host.newConn()
 
-	pLost := newICMPProber(ICMPV4, lost, []byte("x"), "ttl1")
+	pLost := newTestProber(t, ICMPV4, lost, []byte("x"), "ttl1")
 	if err := pLost.Accept("ttl1://127.0.0.1"); err != nil {
 		t.Fatal(err)
 	}
-	pOK := newICMPProber(ICMPV4, ok, []byte("x"), "icmpv4")
+	pOK := newTestProber(t, ICMPV4, ok, []byte("x"), "icmpv4")
 	if err := pOK.Accept("icmpv4://127.0.0.1"); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestICMPProberKeys(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.target, func(t *testing.T) {
-			p := newICMPProber(ICMPV4, newFakeICMPConn(), nil, tc.prefix)
+			p := newTestProber(t, ICMPV4, newFakeICMPConn(), nil, tc.prefix)
 			if err := p.Accept(tc.target); err != nil {
 				t.Fatal(err)
 			}
@@ -105,7 +105,7 @@ func TestICMPProberKeys(t *testing.T) {
 // A reply arriving after the timeout is a TIMEOUT, reported once, never a
 // SUCCESS with an RTT above the timeout.
 func TestICMPProberLateReply(t *testing.T) {
-	p := newICMPProber(ICMPV4, newFakeICMPConn(), nil, "icmpv4")
+	p := newTestProber(t, ICMPV4, newFakeICMPConn(), nil, "icmpv4")
 	if err := p.Accept("icmpv4://127.0.0.1"); err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,8 @@ import (
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
+
+	"github.com/servak/mping/internal/icmpid"
 )
 
 func echoRequest(t *testing.T, v6 bool, id, seq int) []byte {
@@ -126,15 +128,41 @@ func TestParseReplyRejects(t *testing.T) {
 	}
 }
 
-func TestEchoIDAvoidsProberID(t *testing.T) {
-	pid := 0x12345
-	if id := echoID(0x2344, 1, pid); id == uint16(pid&0xffff) {
-		t.Errorf("echo ID %#x equals the ICMP prober ID", id)
+// A tracer's echo ID is leased from the shared allocator for as long as the
+// transport is open; closing releases it, and closing twice must not release
+// the lease of a later owner of the same ID.
+func TestICMPTransportEchoIDLease(t *testing.T) {
+	alloc := icmpid.New(1, 0, nil)
+	old := acquireID
+	acquireID = alloc.Acquire
+	defer func() { acquireID = old }()
+
+	tp, err := newICMPTransport(&net.IPAddr{IP: net.IPv4(127, 0, 0, 1)}, false)
+	if err != nil {
+		t.Skipf("no ICMP socket: %v", err)
 	}
-	// IDs follow the random base, not the pid: a tracer of one process
-	// must not take the prober ID of the next one (pid+1)
-	if a, b := echoID(0x1000, 1, pid), echoID(0x1000, 1, pid+1); a != b {
-		t.Errorf("echo ID depends on the pid: %#x / %#x", a, b)
+	if tp.id == 0 || tp.lease == nil || tp.lease.ID() != tp.id {
+		t.Fatalf("echo ID %#x not backed by a lease", tp.id)
+	}
+	_ = tp.close()
+	// No quarantine: walking the whole space hands the closed ID to a new
+	// owner (the last ID acquired before exhaustion).
+	var owner *icmpid.Lease
+	for {
+		l, err := alloc.Acquire()
+		if err != nil {
+			break
+		}
+		if l.ID() == tp.id {
+			owner = l
+		}
+	}
+	if owner == nil {
+		t.Fatalf("echo ID %#x not reacquirable after close", tp.id)
+	}
+	_ = tp.close() // second close must not release the new owner's lease
+	if _, err := alloc.Acquire(); err == nil {
+		t.Fatalf("second close released the new owner's ID %#x", tp.id)
 	}
 }
 

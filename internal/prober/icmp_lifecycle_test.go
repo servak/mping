@@ -131,7 +131,7 @@ func (c *fakeICMPConn) isClosed() bool {
 
 func newFakeICMPProber(t *testing.T, conn *fakeICMPConn) *ICMPProber {
 	t.Helper()
-	p := newICMPProber(ICMPV4, conn, []byte("fake"), "icmpv4")
+	p := newTestProber(t, ICMPV4, conn, []byte("fake"), "icmpv4")
 	if err := p.Accept("icmpv4://127.0.0.1"); err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestICMPProberStopBeforeStart(t *testing.T) {
 // The table helpers return their events instead of sending them, so the
 // prober never blocks on the channel while holding its mutex.
 func TestICMPProberTableEvents(t *testing.T) {
-	p := newICMPProber(ICMPV4, newFakeICMPConn(), nil, "icmpv4")
+	p := newTestProber(t, ICMPV4, newFakeICMPConn(), nil, "icmpv4")
 	p.targets["127.0.0.1"] = icmpTarget{key: "127.0.0.1", name: "127.0.0.1"}
 	p.targets["127.0.0.2"] = icmpTarget{key: "127.0.0.2", name: "localhost(127.0.0.2)"}
 	p.timeout = time.Hour
