@@ -202,7 +202,7 @@ func (r *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 func TestCustomTransportDoesNotMutateRequest(t *testing.T) {
 	rt := &recordingTransport{}
-	ct := &customTransport{transport: rt, headers: map[string]string{"Host": "vhost", "X-Test": "1"}}
+	ct := &customTransport{transport: rt, hostTransport: rt, host: "vhost", headers: map[string]string{"Host": "vhost", "X-Test": "1"}}
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
 
 	if _, err := ct.RoundTrip(req); err != nil {

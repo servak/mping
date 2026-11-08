@@ -49,8 +49,8 @@ func TestClassifyErr(t *testing.T) {
 		{"refused", &net.OpError{Op: "dial", Err: errors.New("connection refused")}, FAILED},
 		{"plain error", errors.New("boom"), FAILED},
 		{"context deadline", context.DeadlineExceeded, TIMEOUT},
-		// Wrapping hides the timeout: kept as FAILED for compatibility
-		{"wrapped timeout", fmt.Errorf("read: %w", netTimeout), FAILED},
+		{"wrapped timeout", fmt.Errorf("read: %w", netTimeout), TIMEOUT},
+		{"wrapped deadline", fmt.Errorf("read: %w", context.DeadlineExceeded), TIMEOUT},
 	}
 	for _, tt := range tests {
 		if got := classifyErr(tt.err); got != tt.want {

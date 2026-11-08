@@ -1,6 +1,8 @@
 package prober
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -60,11 +62,11 @@ func errorEvent(key, displayName string, sentTime time.Time, err error) *Event {
 	return failureEvent(key, displayName, classifyErr(err), sentTime, 0, err.Error())
 }
 
-// classifyErr maps a probe error to TIMEOUT when it is a net.Error timeout
-// and to FAILED otherwise. Only err itself is inspected, not the errors it
-// wraps, so a timeout wrapped with extra context is still reported as FAILED.
+// classifyErr maps a probe error to TIMEOUT when it is, or wraps, a net.Error
+// timeout or a context deadline, and to FAILED otherwise.
 func classifyErr(err error) reason {
-	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+	var netErr net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
 		return TIMEOUT
 	}
 	return FAILED

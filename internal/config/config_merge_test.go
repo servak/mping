@@ -184,3 +184,54 @@ func TestLoadedHTTPSConfigProbesTLSServer(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadKeepAliveOverride(t *testing.T) {
+	for _, name := range []string{"http", "https"} {
+		t.Run("builtin "+name, func(t *testing.T) {
+			cfg, err := Load("prober:\n  " + name + ":\n    http:\n      keep_alive: true\n")
+			if err != nil {
+				t.Fatal(err)
+			}
+			h := cfg.Prober[name].HTTP
+			if !h.KeepAlive {
+				t.Error("keep_alive override lost")
+			}
+			if h.ExpectCodes != "200-299" {
+				t.Errorf("expect_codes = %q, want default 200-299", h.ExpectCodes)
+			}
+			if name == "https" && (h.TLS == nil || !h.TLS.ShouldSkipVerify()) {
+				t.Errorf("default tls lost: %+v", h.TLS)
+			}
+		})
+	}
+
+	t.Run("custom prober", func(t *testing.T) {
+		cfg, err := Load("prober:\n  api:\n    probe: https\n    http:\n      expect_codes: \"200\"\n      keep_alive: true\n      tls:\n        skip_verify: false\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := cfg.Prober["api"].HTTP
+		if !h.KeepAlive || h.ExpectCodes != "200" || h.TLS == nil || h.TLS.ShouldSkipVerify() {
+			t.Errorf("custom prober config wrong: %+v", h)
+		}
+	})
+
+	t.Run("keep_alive is visible in printed and default configs", func(t *testing.T) {
+		if out := Marshal(DefaultConfig()); !strings.Contains(out, "keep_alive: false") {
+			t.Errorf("default config does not show keep_alive:\n%s", out)
+		}
+		cfg, err := Load("prober:\n  http:\n    http:\n      keep_alive: true\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out := Marshal(cfg); !strings.Contains(out, "keep_alive: true") {
+			t.Errorf("printed config does not show keep_alive: true:\n%s", out)
+		}
+	})
+}
+
+func TestLoadRejectsDuplicateHostHeader(t *testing.T) {
+	if _, err := Load("prober:\n  http:\n    http:\n      headers:\n        Host: a.example\n        host: b.example\n"); err == nil {
+		t.Error("expected an error for two Host headers")
+	}
+}
