@@ -300,6 +300,8 @@ dns://[server[:port]]/domain[/record_type]
 - **domain**: Domain name to query (required)
 - **record_type**: DNS record type (optional, defaults to A)
 
+IPv6 servers: write `[2001:db8::1]` or `[2001:db8::1]:5353`. An unbracketed IPv6 address is always read as a bare address (no port), so `dns://2001:db8::1:5353/...` means the address `2001:db8::1:5353` on the default port.
+
 ### Supported Record Types
 A, AAAA, CNAME, MX, NS, PTR, SOA, SRV, TXT
 

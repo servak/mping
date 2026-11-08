@@ -10,6 +10,10 @@ import (
 // splitServerPort splits a "server[:port]" string. Unlike net.SplitHostPort it
 // also accepts a missing port and IPv6 literals in every common spelling:
 // "[::1]:123", "[::1]" and the bare "::1". port is empty when none was given.
+//
+// A bare IPv6 literal is always an address with no port: "2001:db8::1:123" is
+// the address 2001:db8::1:123, not 2001:db8::1 on port 123. Following the
+// usual convention, a port needs brackets: "[2001:db8::1]:123".
 func splitServerPort(s string) (host, port string, err error) {
 	if strings.HasPrefix(s, "[") {
 		end := strings.Index(s, "]")

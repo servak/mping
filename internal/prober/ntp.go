@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,12 +18,21 @@ const (
 )
 
 type (
+	// ntpTarget is one monitored NTP server.
+	ntpTarget struct {
+		display string // original target string, for display
+		host    string // server host name or IP literal
+		port    int
+		literal bool // host is an IP literal and never needs resolving
+	}
+
 	NTPProber struct {
-		targets  map[string]string // server address -> display name
-		resolved map[string]string // server address -> resolved IP:port, looked up once at Accept
-		config   *NTPConfig
-		prefix   string
-		loop     *runLoop
+		targets map[string]*ntpTarget // "host:port" -> target
+		config  *NTPConfig
+		prefix  string
+		loop    *runLoop
+		// resolve looks up a host:port; replaceable in tests.
+		resolve func(network, address string) (*net.UDPAddr, error)
 	}
 
 	NTPConfig struct {
@@ -66,11 +76,11 @@ func (cfg *NTPConfig) Validate() error {
 
 func NewNTPProber(cfg *NTPConfig, prefix string) *NTPProber {
 	return &NTPProber{
-		targets:  make(map[string]string),
-		resolved: make(map[string]string),
-		config:   cfg,
-		prefix:   prefix,
-		loop:     newRunLoop(),
+		targets: make(map[string]*ntpTarget),
+		config:  cfg,
+		prefix:  prefix,
+		loop:    newRunLoop(),
+		resolve: net.ResolveUDPAddr,
 	}
 }
 
@@ -85,17 +95,16 @@ func (p *NTPProber) Accept(target string) error {
 		return fmt.Errorf("invalid NTP target: %w", err)
 	}
 
-	// Resolve the server once; probes reuse the address so that DNS lookups
-	// neither add latency to every probe nor skew the timestamps.
+	// Resolve once to reject unresolvable names early. Probes resolve again
+	// (before T1) so that pool members that come and go are followed.
 	serverAddr := net.JoinHostPort(server, strconv.Itoa(port))
-	udpAddr, err := net.ResolveUDPAddr("udp", serverAddr)
-	if err != nil {
+	if _, err := p.resolve("udp", serverAddr); err != nil {
 		return fmt.Errorf("failed to resolve NTP server '%s': %w", serverAddr, err)
 	}
 
 	// Store target with server:port as key for uniqueness
-	p.targets[serverAddr] = target
-	p.resolved[serverAddr] = udpAddr.String()
+	_, litErr := netip.ParseAddr(server)
+	p.targets[serverAddr] = &ntpTarget{display: target, host: server, port: port, literal: litErr == nil}
 
 	return nil
 }
@@ -133,7 +142,7 @@ func (p *NTPProber) parseTarget(target string) (string, int, error) {
 
 func (p *NTPProber) Start(result chan *Event, interval, timeout time.Duration) error {
 	return runPeriodic(p.loop, result, NTP, interval, slices.Sorted(maps.Keys(p.targets)),
-		func(serverAddr string) (string, string) { return serverAddr, p.targets[serverAddr] },
+		func(serverAddr string) (string, string) { return serverAddr, p.targets[serverAddr].display },
 		func(serverAddr string) { p.sendProbe(result, serverAddr, timeout) })
 }
 
@@ -144,13 +153,21 @@ func (p *NTPProber) Stop() {
 
 func (p *NTPProber) sendProbe(result chan *Event, serverAddr string, timeout time.Duration) {
 	now := time.Now()
-	displayName := p.targets[serverAddr]
+	tgt := p.targets[serverAddr]
+	displayName := tgt.display
 	result <- sentEvent(serverAddr, displayName, now)
 
-	// Use the address resolved at Accept time so no DNS lookup happens here.
-	dest, ok := p.resolved[serverAddr]
-	if !ok {
-		dest = serverAddr
+	// Resolve on every probe, before T1 is taken, so DNS time stays out of the
+	// measurement while a dead pool member does not stick for the whole
+	// session. IP literals are used as they are.
+	dest := serverAddr
+	if !tgt.literal {
+		udpAddr, err := p.resolve("udp", serverAddr)
+		if err != nil {
+			result <- errorEvent(serverAddr, displayName, now, fmt.Errorf("failed to resolve NTP server '%s': %w", serverAddr, err))
+			return
+		}
+		dest = udpAddr.String()
 	}
 
 	conn, err := net.DialTimeout("udp", dest, timeout)
@@ -208,8 +225,10 @@ func (p *NTPProber) sendProbe(result chan *Event, serverAddr string, timeout tim
 	}
 	offset := (t2.Sub(t1) + t3.Sub(t4)) / 2
 	rtt := t4.Sub(t1) - t3.Sub(t2)
-	if rtt < 0 {
-		rtt = 0
+	// Clamp to a small positive value: stats treats a zero RTT as "unset", so
+	// a clock-skew artifact (negative delay) must not be reported as 0.
+	if rtt < time.Microsecond {
+		rtt = time.Microsecond
 	}
 
 	// Check if offset exceeds maximum allowed
@@ -229,6 +248,11 @@ func validateNTPResponse(resp, req *ntpPacket) error {
 	if mode := resp.Settings & 0x07; mode != 4 {
 		return fmt.Errorf("invalid NTP response: mode %d (expected 4, server)", mode)
 	}
+	// The origin timestamp is checked first: a packet that does not answer our
+	// request (e.g. a spoofed or stale stratum-0 one) must not be reported as KoD.
+	if resp.OrigTimeSec != req.TxTimeSec || resp.OrigTimeFrac != req.TxTimeFrac {
+		return fmt.Errorf("invalid NTP response: origin timestamp does not match the request")
+	}
 	if resp.Stratum == 0 {
 		code := strings.TrimRight(string([]byte{
 			byte(resp.ReferenceID >> 24), byte(resp.ReferenceID >> 16),
@@ -236,11 +260,11 @@ func validateNTPResponse(resp, req *ntpPacket) error {
 		}), "\x00 ")
 		return fmt.Errorf("NTP server sent Kiss-o'-Death (stratum 0), code %q", code)
 	}
+	if resp.Stratum >= 16 {
+		return fmt.Errorf("NTP server is unsynchronized or invalid (stratum %d)", resp.Stratum)
+	}
 	if li := resp.Settings >> 6; li == 3 {
 		return fmt.Errorf("NTP server is unsynchronized (leap indicator 3)")
-	}
-	if resp.OrigTimeSec != req.TxTimeSec || resp.OrigTimeFrac != req.TxTimeFrac {
-		return fmt.Errorf("invalid NTP response: origin timestamp does not match the request")
 	}
 	if resp.TxTimeSec == 0 && resp.TxTimeFrac == 0 {
 		return fmt.Errorf("invalid NTP response: transmit timestamp is zero")
