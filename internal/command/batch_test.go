@@ -3,6 +3,7 @@ package command
 import (
 	"errors"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -78,5 +79,66 @@ func TestBatchCmdRejectsInvalidFlags(t *testing.T) {
 				t.Errorf("Execute() error = %v, want containing %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func runBatch(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	cmd := NewPingBatchCmd()
+	var out strings.Builder
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+func TestBatchRejectsBadInput(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"negative interval", []string{"-i", "-1", "tcp://127.0.0.1:1"}},
+		{"negative timeout", []string{"-t", "-1", "tcp://127.0.0.1:1"}},
+		{"missing target file", []string{"-f", "/nonexistent/hosts.txt"}},
+		{"directory as target file", []string{"-f", t.TempDir()}},
+		{"missing explicit config", []string{"-c", "/nonexistent/mping.yml", "tcp://127.0.0.1:1"}},
+		{"no targets", nil},
+		{"huge CIDR", []string{"0.0.0.0/0"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := runBatch(t, tt.args...); err == nil {
+				t.Fatal("expected an error")
+			}
+		})
+	}
+}
+
+func TestBatchStopsOnSignal(t *testing.T) {
+	done := make(chan error, 1)
+	var out string
+	go func() {
+		var err error
+		out, err = runBatch(t, "--count", "100", "-i", "1000", "-t", "200", "-o", "json", "tcp://127.0.0.1:1")
+		done <- err
+	}()
+	time.Sleep(700 * time.Millisecond)
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		var exitErr *ExitError
+		if err != nil && !errors.As(err, &exitErr) {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(out, "127.0.0.1") {
+			t.Errorf("partial report missing: %q", out)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("batch did not stop after SIGINT")
 	}
 }

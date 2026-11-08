@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -68,14 +70,15 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 				}
 			}
 
-			hosts := ExpandTargets(args, filename)
+			hosts, err := ExpandTargets(args, filename)
+			if err != nil {
+				return err
+			}
 			if len(hosts) == 0 {
-				cmd.Println("Please set hostname or ip.")
-				cmd.Help()
-				return nil
+				return errors.New("no targets: please set hostname or ip")
 			}
 
-			cfg, err := loadConfig(path)
+			cfg, err := loadConfig(path, flags.Changed("config"))
 			if err != nil {
 				return err
 			}
@@ -94,7 +97,7 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 				return err
 			}
 
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
 
 			// Progress goes to stderr (only when it is a terminal) so that
@@ -111,24 +114,45 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 			// not accumulate across rounds (the prober's ticker does not drift).
 			start := time.Now()
 			fmt.Fprint(progress, ".")
-			for i := 1; i < counter; i++ {
-				time.Sleep(time.Until(start.Add(time.Duration(i) * interval)))
+			// sleepUntil returns false when a signal interrupted the wait.
+			sleepUntil := func(d time.Duration) bool {
+				t := time.NewTimer(time.Until(start.Add(d)))
+				defer t.Stop()
+				select {
+				case <-t.C:
+					return true
+				case <-ctx.Done():
+					return false
+				}
+			}
+			interrupted := false
+			for i := 1; i < counter && !interrupted; i++ {
+				if !sleepUntil(time.Duration(i) * interval) {
+					interrupted = true
+					break
+				}
 				fmt.Fprint(progress, ".")
 			}
-			time.Sleep(time.Until(start.Add(time.Duration(counter-1)*interval + interval/2)))
+			if !interrupted {
+				sleepUntil(time.Duration(counter-1)*interval + interval/2)
+			}
 
 			// Stop probing
 			sess.stop()
 			fmt.Fprint(progress, "\r\033[K")
+			var runErr error
 			select {
 			case err := <-probeErr:
-				fmt.Fprintf(os.Stderr, "ProbeManager error: %v\n", err)
+				runErr = fmt.Errorf("probe manager: %w", err)
 			default:
 			}
 
 			metrics := sess.metrics.SortBy(stats.Success, true)
 			if err := shared.WriteReport(cmd.OutOrStdout(), output, metrics, stats.Success, true); err != nil {
 				return err
+			}
+			if runErr != nil {
+				return runErr
 			}
 			return checkMaxLoss(metrics, maxLoss)
 		},

@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/servak/mping/internal/beep"
+	"github.com/servak/mping/internal/config"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/ui/shared"
 	"github.com/servak/mping/internal/ui/tui"
@@ -30,10 +32,6 @@ mping dns://8.8.8.8/google.com`,
 			if err != nil {
 				return err
 			}
-			title, err := flags.GetString("title")
-			if err != nil {
-				return err
-			}
 			path, err := flags.GetString("config")
 			if err != nil {
 				return err
@@ -47,18 +45,23 @@ mping dns://8.8.8.8/google.com`,
 				return err
 			}
 
-			hosts := ExpandTargets(args, filename)
+			hosts, err := ExpandTargets(args, filename)
+			if err != nil {
+				return err
+			}
 			if len(hosts) == 0 {
 				cmd.Println("Please set hostname or ip.")
 				cmd.Help()
 				return nil
 			}
 
-			cfg, err := loadConfig(path)
+			cfg, err := loadConfig(path, flags.Changed("config"))
 			if err != nil {
 				return err
 			}
-			cfg.SetTitle(title)
+			if err := applyTitle(cfg, flags); err != nil {
+				return err
+			}
 
 			// The notifier rings the bell on failures unless the host was muted
 			// with the "m" key in the TUI.
@@ -108,6 +111,20 @@ mping dns://8.8.8.8/google.com`,
 	flags.IntP("timeout", "t", 1000, "timeout(ms)")
 
 	return cmd
+}
+
+// applyTitle overrides the configured UI title only when --title was given,
+// so the config file's (or the default) title is kept otherwise.
+func applyTitle(cfg *config.Config, flags *pflag.FlagSet) error {
+	if !flags.Changed("title") {
+		return nil
+	}
+	title, err := flags.GetString("title")
+	if err != nil {
+		return err
+	}
+	cfg.SetTitle(title)
+	return nil
 }
 
 func startTUI(manager stats.MetricsManager, notifier tui.Notifier, cfg *shared.Config, interval, timeout time.Duration) {

@@ -18,9 +18,12 @@ func TestValidateTiming(t *testing.T) {
 		wantTimeout  time.Duration
 	}{
 		{"valid", 1000, 500, "", time.Second, 500 * time.Millisecond},
-		{"both zero", 0, 0, "both interval and timeout can't be zero", 0, 0},
-		{"interval zero", 0, 1000, "interval can't be zero", 0, 0},
-		{"timeout zero", 1000, 0, "timeout can't be zero", 0, 0},
+		{"both zero", 0, 0, "both interval and timeout must be greater than zero", 0, 0},
+		{"interval zero", 0, 1000, "interval must be greater than zero", 0, 0},
+		{"timeout zero", 1000, 0, "timeout must be greater than zero", 0, 0},
+		{"interval negative", -1, 1000, "interval must be greater than zero", 0, 0},
+		{"timeout negative", 1000, -5, "timeout must be greater than zero", 0, 0},
+		{"both negative", -1, -1, "both interval and timeout must be greater than zero", 0, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -73,14 +76,24 @@ func TestParseTimingFlags(t *testing.T) {
 }
 
 func TestLoadConfigFallsBackToDefaults(t *testing.T) {
-	cfg, err := loadConfig("/nonexistent/mping.yml")
+	cfg, err := loadConfig("/nonexistent/mping.yml", false)
 	if err != nil || cfg == nil {
 		t.Fatalf("expected default config, got (%v, %v)", cfg, err)
 	}
 }
 
+func TestLoadConfigExplicitPathMustExist(t *testing.T) {
+	if _, err := loadConfig("/nonexistent/mping.yml", true); err == nil {
+		t.Fatal("expected error for missing explicit config")
+	}
+	// A directory is unreadable even for the implicit path.
+	if _, err := loadConfig(t.TempDir(), false); err == nil {
+		t.Fatal("expected error for unreadable config")
+	}
+}
+
 func TestNewSessionRejectsBadTarget(t *testing.T) {
-	cfg, err := loadConfig("/nonexistent/mping.yml")
+	cfg, err := loadConfig("/nonexistent/mping.yml", false)
 	if err != nil {
 		t.Fatal(err)
 	}
