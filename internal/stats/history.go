@@ -58,21 +58,29 @@ func (th *TargetHistory) AddEntry(entry HistoryEntry) {
 // insertOrdered inserts an entry that is older than the newest one at its
 // chronological position, dropping the oldest entry if the buffer is full.
 func (th *TargetHistory) insertOrdered(entry HistoryEntry) {
-	list := make([]HistoryEntry, 0, th.count+1)
-	for i := th.count - 1; i >= 0; i-- {
-		list = append(list, th.entries[(th.index-1-i+th.size)%th.size])
+	// at returns the i-th entry counting from the oldest
+	at := func(i int) int { return (th.index - th.count + i + th.size*2) % th.size }
+	// position (from the oldest) after any entries with an equal timestamp
+	pos := sort.Search(th.count, func(i int) bool { return th.entries[at(i)].Timestamp.After(entry.Timestamp) })
+	if th.count == th.size {
+		// Full: drop the oldest by shifting the older part one slot back,
+		// then place the entry at pos-1 (an entry older than all is dropped).
+		if pos == 0 {
+			return
+		}
+		for i := 0; i < pos-1; i++ {
+			th.entries[at(i)] = th.entries[at(i+1)]
+		}
+		th.entries[at(pos-1)] = entry
+		return
 	}
-	// after any entries with an equal timestamp
-	pos := sort.Search(len(list), func(i int) bool { return list[i].Timestamp.After(entry.Timestamp) })
-	list = append(list, HistoryEntry{})
-	copy(list[pos+1:], list[pos:])
-	list[pos] = entry
-	if len(list) > th.size {
-		list = list[len(list)-th.size:]
+	// Not full: shift the newer part one slot forward, then insert.
+	for i := th.count; i > pos; i-- {
+		th.entries[at(i)] = th.entries[at(i-1)]
 	}
-	copy(th.entries, list)
-	th.count = len(list)
-	th.index = th.count % th.size
+	th.entries[at(pos)] = entry
+	th.count++
+	th.index = (th.index + 1) % th.size
 }
 
 // GetRecentEntries retrieves the latest n entries (newest first)

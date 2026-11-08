@@ -71,6 +71,7 @@ mping dns://8.8.8.8/google.com`,
 			// The notifier rings the bell on failures unless the host was muted
 			// with the "m" key in the TUI.
 			notifier := beep.NewNotifier()
+			defer notifier.Close()
 
 			sess, err := newSession(sessionParams{
 				Cfg:             cfg,

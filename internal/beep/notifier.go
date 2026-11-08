@@ -34,6 +34,11 @@ func (n *Notifier) OnFailure(name string) {
 	n.beep()
 }
 
+// Close stops the background beep worker. It is idempotent.
+func (n *Notifier) Close() {
+	n.beeper.Close()
+}
+
 // Toggle switches the global beep on/off and returns the new state
 func (n *Notifier) Toggle() bool {
 	return n.beeper.Toggle()

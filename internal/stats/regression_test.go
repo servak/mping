@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"slices"
 	"testing"
 	"time"
 )
@@ -8,7 +9,7 @@ import (
 func TestResetDropsStaleResults(t *testing.T) {
 	mm := NewMetricsManager().(*metricsManager)
 	sent := time.Now().Add(-time.Second)
-	mm.Sent("a")
+	mm.Sent("a", time.Now())
 	time.Sleep(2 * time.Millisecond)
 	mm.ResetAllMetrics()
 	mm.SuccessWithDetails("a", time.Millisecond, sent, nil)
@@ -119,4 +120,110 @@ func TestNewMetricsZeroHistorySize(t *testing.T) {
 		t.Error("expected one entry")
 	}
 	_ = m
+}
+
+func TestSentProcessedAfterResetIsDropped(t *testing.T) {
+	mm := NewMetricsManager().(*metricsManager)
+	sent := time.Now()
+	time.Sleep(2 * time.Millisecond)
+	mm.getMetrics("h")
+	mm.ResetAllMetrics()
+	// SENT and its result were queued before the reset, processed after it
+	mm.Sent("h", sent)
+	mm.SuccessWithDetails("h", time.Millisecond, sent, nil)
+	m := mm.GetMetrics("h")
+	if m.GetTotal() != 0 || m.GetSuccessful() != 0 || m.GetFailed() != 0 {
+		t.Errorf("stale SENT counted: %d/%d/%d", m.GetTotal(), m.GetSuccessful(), m.GetFailed())
+	}
+	mm.Sent("h", time.Now())
+	if mm.GetMetrics("h").GetTotal() != 1 {
+		t.Error("fresh SENT after reset must be counted")
+	}
+}
+
+func TestLastRTTKeepsNewest(t *testing.T) {
+	m := newMetrics("x", 10, 0)
+	now := time.Now()
+	m.Success(5*time.Millisecond, now)
+	m.Success(500*time.Millisecond, now.Add(-time.Second))
+	if m.LastRTT != 5*time.Millisecond {
+		t.Errorf("LastRTT = %v, want 5ms", m.LastRTT)
+	}
+	// equal send time: newest-or-equal wins, for success and failure alike
+	m.Success(7*time.Millisecond, now)
+	if m.LastRTT != 7*time.Millisecond {
+		t.Errorf("LastRTT = %v, want 7ms on tie", m.LastRTT)
+	}
+	m.Fail(now, "a")
+	m.Fail(now, "b")
+	if m.LastFailDetail != "b" {
+		t.Errorf("LastFailDetail = %q, want b on tie", m.LastFailDetail)
+	}
+}
+
+func TestInsertOrderedNoAllocAndOrder(t *testing.T) {
+	for _, size := range []int{1, 2, 3, 5, 8} {
+		base := time.Now()
+		h := NewTargetHistory(size)
+		added := 0
+		// pseudo-random out-of-order timestamps, wrapping the ring several times
+		for i := 0; i < 40; i++ {
+			ts := base.Add(time.Duration((i*7)%13) * time.Second)
+			h.AddEntry(HistoryEntry{Timestamp: ts})
+			added++
+			e := h.GetRecentEntries(size)
+			for j := 1; j < len(e); j++ {
+				if e[j].Timestamp.After(e[j-1].Timestamp) {
+					t.Fatalf("size %d step %d: order broken", size, i)
+				}
+			}
+			if want := min(added, size); len(e) != want {
+				t.Fatalf("size %d step %d: len %d want %d", size, i, len(e), want)
+			}
+		}
+	}
+	h := NewTargetHistory(100)
+	base := time.Now()
+	for i := 0; i < 100; i++ {
+		h.AddEntry(HistoryEntry{Timestamp: base.Add(time.Duration(i) * time.Second)})
+	}
+	allocs := testing.AllocsPerRun(100, func() {
+		h.AddEntry(HistoryEntry{Timestamp: base.Add(50*time.Second + time.Millisecond)})
+	})
+	if allocs != 0 {
+		t.Errorf("late insert allocated %v times", allocs)
+	}
+}
+
+func TestInsertOrderedFullOlderThanAll(t *testing.T) {
+	th := NewTargetHistory(3)
+	base := time.Now()
+	for i := 1; i <= 3; i++ {
+		th.AddEntry(HistoryEntry{Timestamp: base.Add(time.Duration(i) * time.Second), RTT: time.Duration(i)})
+	}
+	th.AddEntry(HistoryEntry{Timestamp: base, RTT: 99}) // older than all: dropped
+	th.AddEntry(HistoryEntry{Timestamp: base.Add(1500 * time.Millisecond), RTT: 15})
+	var got []time.Duration
+	for _, e := range th.GetRecentEntries(3) {
+		got = append(got, e.RTT)
+	}
+	if !slices.Equal(got, []time.Duration{3, 2, 15}) {
+		t.Errorf("got %v, want [3 2 15]", got)
+	}
+}
+
+func TestSortByTieBreakNameThenKey(t *testing.T) {
+	mm := NewMetricsManager().(*metricsManager)
+	mm.autoRegister("k2", "b", "p2")
+	mm.autoRegister("k1", "b", "p1")
+	mm.autoRegister("k3", "a", "p3")
+	for _, asc := range []bool{true, false} {
+		var got []string
+		for _, r := range mm.SortBy(Sent, asc) {
+			got = append(got, r.GetProbeType())
+		}
+		if !slices.Equal(got, []string{"p3", "p1", "p2"}) {
+			t.Errorf("asc=%v got %v", asc, got)
+		}
+	}
 }

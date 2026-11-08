@@ -1,13 +1,16 @@
 package beep
 
 import (
+	"bytes"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 )
 
 func TestNewBeeper(t *testing.T) {
 	beeper := NewBeeper()
+	defer beeper.Close()
 
 	if !beeper.IsEnabled() {
 		t.Error("Expected beeper to be enabled by default")
@@ -20,6 +23,7 @@ func TestNewBeeper(t *testing.T) {
 
 func TestToggle(t *testing.T) {
 	beeper := NewBeeper()
+	defer beeper.Close()
 
 	initialState := beeper.IsEnabled()
 	beeper.Toggle()
@@ -37,6 +41,7 @@ func TestToggle(t *testing.T) {
 func TestDebounce(t *testing.T) {
 	debounceInterval := 100 * time.Millisecond
 	beeper := NewBeeper()
+	defer beeper.Close()
 	beeper.debounceTime = debounceInterval
 
 	// First beep should work
@@ -68,6 +73,7 @@ func TestDebounce(t *testing.T) {
 
 func TestBeepWhenDisabled(t *testing.T) {
 	beeper := NewBeeper()
+	defer beeper.Close()
 	beeper.Toggle() // disable
 
 	// Beep should not update lastBeepTime when disabled
@@ -81,6 +87,7 @@ func TestBeepWhenDisabled(t *testing.T) {
 
 func TestConcurrentAccess(t *testing.T) {
 	beeper := NewBeeper()
+	defer beeper.Close()
 	done := make(chan bool)
 
 	// Test concurrent beep calls
@@ -117,8 +124,10 @@ func (w *blockingWriter) Write(p []byte) (int, error) {
 
 func TestBeepDoesNotBlockWhenOutputBlocked(t *testing.T) {
 	w := &blockingWriter{release: make(chan struct{})}
-	defer close(w.release)
 	b := NewBeeper()
+	// Close waits for the worker, so release the writer first (LIFO defers)
+	defer b.Close()
+	defer close(w.release)
 	b.out = w
 	b.debounceTime = 0
 	before := runtime.NumGoroutine()
@@ -135,5 +144,65 @@ func TestBeepDoesNotBlockWhenOutputBlocked(t *testing.T) {
 	}
 	if n := runtime.NumGoroutine() - before; n > 5 {
 		t.Errorf("goroutines piled up: +%d", n)
+	}
+}
+
+func TestCloseIdempotentAndStopsWorker(t *testing.T) {
+	before := runtime.NumGoroutine()
+	b := NewBeeper()
+	b.Beep()
+	b.Close()
+	b.Close() // second call must not panic or block
+	b.Beep()  // no-op after Close
+	time.Sleep(20 * time.Millisecond)
+	if n := runtime.NumGoroutine(); n > before {
+		t.Errorf("worker goroutine leaked: %d > %d", n, before)
+	}
+}
+
+func TestCloseWithoutBeep(t *testing.T) {
+	b := NewBeeper()
+	b.Close()
+	b.Close()
+}
+
+type syncBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+func TestZeroValueBeeperWorks(t *testing.T) {
+	var b Beeper
+	defer b.Close()
+	if !b.IsEnabled() {
+		t.Error("zero value should be enabled")
+	}
+	b.Beep() // must not panic with nil out; writes to os.Stdout
+	time.Sleep(20 * time.Millisecond)
+	if b.GetLastBeepTime().IsZero() {
+		t.Error("zero-value Beeper dropped the beep")
+	}
+}
+
+func TestZeroValueBeeperWritesToOut(t *testing.T) {
+	buf := &syncBuf{}
+	b := &Beeper{out: buf}
+	defer b.Close()
+	b.Beep()
+	time.Sleep(20 * time.Millisecond)
+	if buf.String() != "\a" {
+		t.Errorf("out = %q, want bell", buf.String())
 	}
 }

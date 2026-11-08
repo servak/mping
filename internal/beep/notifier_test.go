@@ -7,8 +7,9 @@ import (
 )
 
 // countingNotifier returns a Notifier whose bell only increments a counter
-func countingNotifier(silenced ...string) (*Notifier, *atomic.Int32) {
+func countingNotifier(t testing.TB, silenced ...string) (*Notifier, *atomic.Int32) {
 	n := NewNotifier()
+	t.Cleanup(n.Close)
 	for _, name := range silenced {
 		n.ToggleSilence(name)
 	}
@@ -18,7 +19,7 @@ func countingNotifier(silenced ...string) (*Notifier, *atomic.Int32) {
 }
 
 func TestNotifierSilence(t *testing.T) {
-	n, _ := countingNotifier("quiet")
+	n, _ := countingNotifier(t, "quiet")
 	if !n.IsSilenced("quiet") || n.IsSilenced("loud") {
 		t.Error("initial silenced state wrong")
 	}
@@ -31,7 +32,7 @@ func TestNotifierSilence(t *testing.T) {
 }
 
 func TestNotifierOnFailureSkipsSilenced(t *testing.T) {
-	n, rang := countingNotifier("quiet")
+	n, rang := countingNotifier(t, "quiet")
 	n.OnFailure("quiet")
 	if got := rang.Load(); got != 0 {
 		t.Errorf("silenced target rang %d times, want 0", got)
@@ -43,7 +44,7 @@ func TestNotifierOnFailureSkipsSilenced(t *testing.T) {
 }
 
 func TestNotifierToggle(t *testing.T) {
-	n, _ := countingNotifier()
+	n, _ := countingNotifier(t)
 	if !n.Enabled() {
 		t.Fatal("beep should be enabled by default")
 	}
@@ -56,7 +57,7 @@ func TestNotifierToggle(t *testing.T) {
 }
 
 func TestNotifierConcurrent(t *testing.T) {
-	n, _ := countingNotifier()
+	n, _ := countingNotifier(t)
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
 		wg.Add(1)

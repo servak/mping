@@ -61,10 +61,12 @@ type metrics struct {
 
 func (m *metrics) Success(rtt time.Duration, sentTime time.Time) {
 	m.Successful++
-	if sentTime.After(m.LastSuccTime) {
+	// Newest-or-equal send time wins (same tie rule as Fail), so a late
+	// result of an older probe overwrites neither the time nor the RTT.
+	if !sentTime.Before(m.LastSuccTime) {
 		m.LastSuccTime = sentTime
+		m.LastRTT = rtt
 	}
-	m.LastRTT = rtt
 	m.TotalRTT += rtt
 	m.sumSquaredRTT += float64(rtt) * float64(rtt)
 	m.AverageRTT = m.TotalRTT / time.Duration(m.Successful)
@@ -79,7 +81,8 @@ func (m *metrics) Success(rtt time.Duration, sentTime time.Time) {
 
 func (m *metrics) Fail(sentTime time.Time, msg string) {
 	m.Failed++
-	// a late result of an older probe must not overwrite newer failure info
+	// Newest-or-equal send time wins (same tie rule as Success); a late
+	// result of an older probe must not overwrite newer failure info.
 	if !sentTime.Before(m.LastFailTime) {
 		m.LastFailTime = sentTime
 		m.LastFailDetail = msg

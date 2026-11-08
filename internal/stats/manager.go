@@ -1,7 +1,8 @@
 package stats
 
 import (
-	"sort"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -142,11 +143,16 @@ func (mm *metricsManager) Failed(host string, sentTime time.Time, msg string) {
 	}
 }
 
-func (mm *metricsManager) Sent(host string) {
+// Sent counts a sent probe. Probes sent before the last reset are dropped,
+// like their results, so a SENT event queued before a reset cannot inflate
+// Total afterwards.
+func (mm *metricsManager) Sent(host string, sentTime time.Time) {
 	m := mm.getMetrics(host)
 
 	mm.mu.Lock()
-	m.Sent()
+	if !sentTime.Before(m.resetAt) {
+		m.Sent()
+	}
 	mm.mu.Unlock()
 }
 
@@ -162,7 +168,7 @@ func (mm *metricsManager) Subscribe(res <-chan *prober.Event) <-chan struct{} {
 			case prober.REGISTER:
 				mm.autoRegister(r.Key, r.DisplayName, string(r.ProbeType))
 			case prober.SENT:
-				mm.Sent(r.Key)
+				mm.Sent(r.Key, r.SentTime)
 			case prober.SUCCESS:
 				mm.SuccessWithDetails(r.Key, r.Rtt, r.SentTime, r.Details)
 			case prober.TIMEOUT:
@@ -204,18 +210,13 @@ func (mm *metricsManager) SortBy(k Key, ascending bool) []Metrics {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 	now := time.Now()
-	keys := make([]string, 0, len(mm.metrics))
-	for key := range mm.metrics {
-		keys = append(keys, key)
+	type item struct {
+		key string
+		m   Metrics
 	}
-	sort.Strings(keys)
-	// Tie-break deterministically: by display name, then by key
-	sort.SliceStable(keys, func(i, j int) bool {
-		return mm.metrics[keys[i]].Name < mm.metrics[keys[j]].Name
-	})
-	res := make([]Metrics, 0, len(keys))
-	for _, key := range keys {
-		res = append(res, mm.metrics[key].settledSnapshot(now))
+	items := make([]item, 0, len(mm.metrics))
+	for key, m := range mm.metrics {
+		items = append(items, item{key, m.settledSnapshot(now)})
 	}
 
 	// less must be a strict ordering: descending order swaps the operands
@@ -242,16 +243,34 @@ func (mm *metricsManager) SortBy(k Key, ascending bool) []Metrics {
 		}
 		return false
 	}
-	sort.SliceStable(res, func(i, j int) bool {
+	// One sort: primary key, then display name, then key as tie-breakers
+	slices.SortFunc(items, func(a, b item) int {
 		// Unmeasured RTTs (zero) always go last, whatever the direction
-		if zi, zj := rttFor(k, res[i]) == 0, rttFor(k, res[j]) == 0; zi != zj {
-			return zj
+		if za, zb := rttFor(k, a.m) == 0, rttFor(k, b.m) == 0; za != zb {
+			if zb {
+				return -1
+			}
+			return 1
 		}
-		if ascending {
-			return less(res[i], res[j])
+		x, y := a.m, b.m
+		if !ascending {
+			x, y = y, x
 		}
-		return less(res[j], res[i])
+		if less(x, y) {
+			return -1
+		}
+		if less(y, x) {
+			return 1
+		}
+		if c := strings.Compare(a.m.GetName(), b.m.GetName()); c != 0 {
+			return c
+		}
+		return strings.Compare(a.key, b.key)
 	})
+	res := make([]Metrics, len(items))
+	for i, it := range items {
+		res[i] = it.m
+	}
 	return res
 }
 
