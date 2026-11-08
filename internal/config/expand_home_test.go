@@ -18,6 +18,9 @@ func TestExpandHome(t *testing.T) {
 		{"/etc/mping.yml", "/etc/mping.yml"},
 		{"relative/~/x", "relative/~/x"},
 		{"", ""},
+		{"~/", usr.HomeDir + "/"},
+		{"~user/x", "~user/x"},
+		{"~foo.yml", "~foo.yml"},
 	}
 	for _, tt := range tests {
 		got, err := ExpandHome(tt.in)

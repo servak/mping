@@ -53,14 +53,23 @@ type Config struct {
 }
 
 func (c *Config) SetTitle(t string) {
+	if c.UI == nil {
+		c.UI = shared.DefaultConfig()
+	}
 	c.UI.Title = t
 }
 
 func (c *Config) SetSourceInterface(sourceInterface string) {
 	if sourceInterface != "" {
 		for _, prober := range c.Prober {
+			if prober == nil {
+				continue
+			}
 			if prober.ICMP != nil {
 				prober.ICMP.SourceInterface = sourceInterface
+			}
+			if prober.TCP != nil {
+				prober.TCP.SourceInterface = sourceInterface
 			}
 		}
 	}
@@ -183,6 +192,9 @@ func Load(s string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Prober = probers
+	if cfg.UI == nil { // `ui: null` / `ui: ~` would otherwise drop the defaults
+		cfg.UI = shared.DefaultConfig()
+	}
 
 	// Validate configuration after loading
 	if err := cfg.Validate(); err != nil {
@@ -239,11 +251,11 @@ func sameProbeFamily(a, b prober.ProbeType) bool {
 	return family(a) == family(b)
 }
 
-// ExpandHome replaces a leading "~" with the current user's home directory.
-// Paths without a leading "~" are returned unchanged. If the home directory
+// ExpandHome replaces a leading "~" or "~/" with the current user's home
+// directory. Other paths (including "~user/x" and "~foo.yml") are returned unchanged. If the home directory
 // cannot be determined, the original path is returned together with the error.
 func ExpandHome(path string) (string, error) {
-	if !strings.HasPrefix(path, "~") {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
 		return path, nil
 	}
 	usr, err := user.Current()

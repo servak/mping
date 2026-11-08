@@ -228,3 +228,38 @@ prober:
 		}
 	})
 }
+
+func TestLoadNullUIKeepsDefaults(t *testing.T) {
+	for _, y := range []string{"ui: null\n", "ui: ~\n", "ui:\n"} {
+		cfg, err := Load(y)
+		if err != nil {
+			t.Fatalf("%q: %v", y, err)
+		}
+		if cfg.UI == nil {
+			t.Fatalf("%q: UI is nil", y)
+		}
+		cfg.SetTitle("x") // must not panic
+		if cfg.UI.Title != "x" {
+			t.Errorf("title = %q", cfg.UI.Title)
+		}
+	}
+}
+
+func TestSetTitleNilUI(t *testing.T) {
+	c := &Config{}
+	c.SetTitle("t")
+	if c.UI == nil || c.UI.Title != "t" {
+		t.Errorf("UI = %+v", c.UI)
+	}
+}
+
+func TestSetSourceInterfaceAppliesToTCP(t *testing.T) {
+	c := DefaultConfig()
+	c.SetSourceInterface("eth0")
+	if got := c.Prober[string(prober.TCP)].TCP.SourceInterface; got != "eth0" {
+		t.Errorf("tcp source interface = %q", got)
+	}
+	if got := c.Prober[string(prober.ICMPV4)].ICMP.SourceInterface; got != "eth0" {
+		t.Errorf("icmp source interface = %q", got)
+	}
+}
