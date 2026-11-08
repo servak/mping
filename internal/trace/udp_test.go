@@ -212,6 +212,7 @@ type fakeNetwork struct {
 	ready    chan struct{}
 	closed   chan struct{}
 	sent     []uint16
+	sendErr  func(ttl int) error // optional: fail sends
 }
 
 func newFakeNetwork(branches int) *fakeNetwork {
@@ -239,6 +240,11 @@ func (f *fakeNetwork) receive(deliver func(reply, string, time.Time)) {
 
 func (f *fakeNetwork) send(ttl int, port uint16) error {
 	<-f.ready
+	if f.sendErr != nil {
+		if err := f.sendErr(ttl); err != nil {
+			return err
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sent = append(f.sent, port)

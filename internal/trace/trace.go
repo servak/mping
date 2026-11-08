@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -360,22 +361,52 @@ func (t *Tracer) sendRound(ctx context.Context) error {
 		t.mu.Unlock()
 
 		if err := t.tp.send(ttl, key); err != nil {
-			t.mu.Lock()
-			delete(t.pending, key) // not sent: neither lost nor answered
-			t.mu.Unlock()
 			if errors.Is(err, net.ErrClosed) {
+				t.mu.Lock()
+				delete(t.pending, key) // not sent: neither lost nor answered
+				t.mu.Unlock()
 				return nil
 			}
+			if isTransientSendErr(err) {
+				// e.g. no route right now, a local firewall, full
+				// buffers: the probe is lost, the trace goes on
+				t.mu.Lock()
+				if p, ok := t.pending[key]; ok {
+					t.loseLocked(key, p)
+				}
+				t.mu.Unlock()
+				continue
+			}
+			t.mu.Lock()
+			delete(t.pending, key)
+			t.mu.Unlock()
 			return fmt.Errorf("send ttl=%d: %w", ttl, err)
 		}
 	}
 	return nil
 }
 
+// isTransientSendErr reports whether a failed send only loses that probe:
+// the errnos a send reports for a local routing problem, a firewall rule,
+// full buffers or an ICMP error of an earlier probe. Anything else (a broken
+// socket) ends the trace.
+func isTransientSendErr(err error) bool {
+	for _, e := range []syscall.Errno{
+		syscall.ENETUNREACH, syscall.EHOSTUNREACH, syscall.ENETDOWN, syscall.EHOSTDOWN,
+		syscall.ENOBUFS, syscall.ENOMEM, syscall.EAGAIN, syscall.EPERM, syscall.EACCES,
+		syscall.ECONNREFUSED, syscall.EPROTO, syscall.EMSGSIZE, syscall.EADDRNOTAVAIL,
+	} {
+		if errors.Is(err, e) {
+			return true
+		}
+	}
+	return false
+}
+
 // probeKeyLocked returns the key of the next probe: the next echo sequence
 // for ICMP, the rotating destination port for UDP. A probe still pending
-// under the key (only possible after the key space wrapped, long after its
-// timeout) is counted as lost first.
+// under the key (only possible after the key space wrapped, after its
+// timeout; see udpPortRange) is counted as lost first.
 func (t *Tracer) probeKeyLocked(round, ttl int) uint16 {
 	var key uint16
 	if t.cfg.Proto == ProtoUDP {
