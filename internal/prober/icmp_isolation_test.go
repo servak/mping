@@ -3,6 +3,9 @@ package prober
 import (
 	"testing"
 	"time"
+
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
 )
 
 // startFake starts p on its own event channel and returns the log and a
@@ -94,6 +97,88 @@ func TestICMPProberKeys(t *testing.T) {
 			e := log.snapshot()[0]
 			if e.Result != REGISTER || e.Key != tc.key || e.DisplayName != tc.name || e.ProbeType != ICMPV4 {
 				t.Errorf("REGISTER = {Key:%q Name:%q Type:%q}, want {%q %q icmpv4}", e.Key, e.DisplayName, e.ProbeType, tc.key, tc.name)
+			}
+		})
+	}
+}
+
+// A reply arriving after the timeout is a TIMEOUT, reported once, never a
+// SUCCESS with an RTT above the timeout.
+func TestICMPProberLateReply(t *testing.T) {
+	p := newICMPProber(ICMPV4, newFakeICMPConn(), nil, "icmpv4")
+	if err := p.Accept("icmpv4://127.0.0.1"); err != nil {
+		t.Fatal(err)
+	}
+	p.timeout = 50 * time.Millisecond
+	p.addTable(1, time.Now().Add(-100*time.Millisecond))
+	msg := icmp.Message{Type: ipv4.ICMPTypeEchoReply, Body: &icmp.Echo{}}
+	e := p.success(1, "127.0.0.1", msg, nil, 0)
+	if e == nil || e.Result != TIMEOUT {
+		t.Fatalf("late reply: success() = %+v, want TIMEOUT", e)
+	}
+	if events, pending := p.checkTimeout(); len(events) != 0 || pending != 0 {
+		t.Errorf("checkTimeout() after the late reply = %d events, %d pending; want 0, 0", len(events), pending)
+	}
+}
+
+// The same through Start: with -i 1000 -t 50 and an RTT of 150ms every
+// probe is a TIMEOUT.
+func TestICMPProberLateReplyLifecycle(t *testing.T) {
+	conn := newFakeICMPConn()
+	conn.replyDelay = 150 * time.Millisecond
+	p := newFakeICMPProber(t, conn)
+	log, stop := startFake(t, p, time.Second, 50*time.Millisecond)
+	waitFor(t, "TIMEOUT", func() bool { return log.count(TIMEOUT) > 0 })
+	time.Sleep(200 * time.Millisecond) // let the late reply arrive
+	stop()
+	if n := log.count(SUCCESS); n != 0 {
+		t.Errorf("late replies counted as %d SUCCESS: %s", n, describeEvents(log.snapshot()))
+	}
+	if sent, timeouts := log.count(SENT), log.count(TIMEOUT); sent != timeouts {
+		t.Errorf("%d SENT, %d TIMEOUT; want one TIMEOUT per request", sent, timeouts)
+	}
+}
+
+// The timeout is enforced on its own deadline, not at the next tick.
+func TestICMPProberTimeoutBeforeNextTick(t *testing.T) {
+	conn := newFakeICMPConn()
+	conn.noReply = true
+	p := newFakeICMPProber(t, conn)
+	log, stop := startFake(t, p, time.Hour, 50*time.Millisecond)
+	defer stop()
+	waitFor(t, "TIMEOUT", func() bool { return log.count(TIMEOUT) > 0 })
+}
+
+// Stop does not wait for the next interval: it returns as soon as the last
+// round is answered, or at the latest when its timeout expires.
+func TestICMPProberStopDoesNotWaitInterval(t *testing.T) {
+	for _, noReply := range []bool{false, true} {
+		name := "answered"
+		if noReply {
+			name = "unanswered"
+		}
+		t.Run(name, func(t *testing.T) {
+			conn := newFakeICMPConn()
+			conn.noReply = noReply
+			p := newFakeICMPProber(t, conn)
+			const timeout = 300 * time.Millisecond
+			log, stop := startFake(t, p, time.Hour, timeout)
+			waitFor(t, "SENT", func() bool { return log.count(SENT) > 0 })
+			if !noReply {
+				waitFor(t, "SUCCESS", func() bool { return log.count(SUCCESS) > 0 })
+			}
+			begin := time.Now()
+			stop()
+			took := time.Since(begin)
+			limit := timeout + 200*time.Millisecond
+			if !noReply {
+				limit = 200 * time.Millisecond // nothing left to wait for
+			}
+			if took > limit {
+				t.Errorf("Stop took %v, want at most %v", took, limit)
+			}
+			if noReply && log.count(TIMEOUT) != log.count(SENT) {
+				t.Errorf("%d SENT, %d TIMEOUT", log.count(SENT), log.count(TIMEOUT))
 			}
 		})
 	}

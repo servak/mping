@@ -36,6 +36,9 @@ type (
 		tables  map[runTime]map[string]bool // guarded by mu
 		mu      sync.Mutex
 		loop    *runLoop
+		// wake is signalled when a round is fully answered, so that the
+		// drain after Stop does not wait for its timeout
+		wake chan struct{}
 
 		closeOnce sync.Once
 	}
@@ -139,6 +142,7 @@ func newICMPProber(t ProbeType, c packetConn, body []byte, prefix string) *ICMPP
 		runCnt:  0,
 		body:    body,
 		loop:    newRunLoop(),
+		wake:    make(chan struct{}, 1),
 	}
 }
 
@@ -211,6 +215,21 @@ func (p *ICMPProber) getTargetInfo(addr string) (string, string) {
 	return addr, addr // fallback
 }
 
+// answered drops round rt once every target has answered, waking a drain
+// that waits for it. p.mu must be held.
+func (p *ICMPProber) answered(rt runTime, table map[string]bool) {
+	for _, done := range table {
+		if !done {
+			return
+		}
+	}
+	delete(p.tables, rt)
+	select {
+	case p.wake <- struct{}{}:
+	default:
+	}
+}
+
 // success marks the reply from addr to round runCnt and returns its event,
 // or nil for a duplicate or unexpected reply. Events are returned rather than
 // sent so that p.mu is never held while blocking on the event channel.
@@ -228,8 +247,14 @@ func (p *ICMPProber) success(runCnt int, addr string, payload icmp.Message, pack
 			continue
 		}
 		table[addr] = true
+		p.answered(k, table)
 		elapse := time.Since(k.sentTime)
 		key, displayName := p.getTargetInfo(addr)
+		if elapse > p.timeout {
+			// Too late: this is the round's TIMEOUT, which checkTimeout
+			// will not report again
+			return failureEvent(key, displayName, TIMEOUT, k.sentTime, p.timeout, "timeout")
+		}
 		details := &ProbeDetails{
 			ProbeType: string(p.version),
 			ICMP:      p.extractICMPDetails(runCnt, addr, payload, packetData, packetSize),
@@ -324,6 +349,7 @@ func (p *ICMPProber) failed(runCnt int, addr string, err error) *Event {
 		}
 		if _, ok := table[addr]; ok {
 			table[addr] = true
+			p.answered(k, table)
 		}
 		key, displayName := p.getTargetInfo(addr)
 		return failureEvent(key, displayName, FAILED, k.sentTime, 0, err.Error())
@@ -351,6 +377,31 @@ func (p *ICMPProber) checkTimeout() (events []*Event, pending int) {
 		delete(p.tables, rt)
 	}
 	return events, len(p.tables)
+}
+
+// nextDeadline returns when the oldest outstanding round times out, and
+// false when no round is outstanding.
+func (p *ICMPProber) nextDeadline() (time.Time, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var next time.Time
+	for rt := range p.tables {
+		if d := rt.sentTime.Add(p.timeout); next.IsZero() || d.Before(next) {
+			next = d
+		}
+	}
+	return next, !next.IsZero()
+}
+
+// expire reports the rounds that timed out and returns the number of rounds
+// still outstanding. It arms deadline for the next timeout, if any.
+func (p *ICMPProber) expire(r chan *Event, deadline *time.Timer) int {
+	events, pending := p.checkTimeout()
+	emit(r, events...)
+	if next, ok := p.nextDeadline(); ok {
+		deadline.Reset(time.Until(next))
+	}
+	return pending
 }
 
 // emit sends the events that were collected under p.mu.
@@ -458,8 +509,9 @@ func (p *ICMPProber) closeConn() {
 	p.closeOnce.Do(func() { _ = p.c.Close() })
 }
 
-// Start sends one echo request per target and round until Stop. After Stop
-// it keeps receiving until every outstanding round is answered or has timed
+// Start sends one echo request per target and round until Stop. Requests
+// are reported as TIMEOUT as soon as their timeout expires. After Stop it
+// keeps receiving until every outstanding round is answered or has timed
 // out, then closes the socket and returns once the receiver has exited.
 func (p *ICMPProber) Start(r chan *Event, interval, timeout time.Duration) error {
 	ok, err := p.loop.begin()
@@ -486,7 +538,10 @@ func (p *ICMPProber) Start(r chan *Event, interval, timeout time.Duration) error
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
 	p.probe(r)
+	p.expire(r, deadline)
 loop:
 	for {
 		select {
@@ -494,18 +549,20 @@ loop:
 			break loop
 		case <-ticker.C:
 			p.probe(r)
-			events, _ := p.checkTimeout()
-			emit(r, events...)
+			p.expire(r, deadline)
+		case <-deadline.C:
+			p.expire(r, deadline)
 		}
 	}
-	for {
-		events, pending := p.checkTimeout()
-		emit(r, events...)
-		if pending == 0 {
-			return nil
+	// Wait for the outstanding rounds: until each is answered (wake) or
+	// times out (deadline), never longer than the timeout
+	for p.expire(r, deadline) > 0 {
+		select {
+		case <-deadline.C:
+		case <-p.wake:
 		}
-		time.Sleep(interval)
 	}
+	return nil
 }
 
 // Stop stops probing and waits for Start to return, which includes waiting
