@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/icmp"
@@ -28,10 +29,10 @@ type (
 		prefix  string // Custom prefix like "my-ping", "icmpv4", etc.
 		c       packetConn
 		body    []byte
-		targets map[string]string // IPAddr string -> DisplayName
+		targets map[string]icmpTarget // IPAddr string -> event key and name
 		timeout time.Duration
 		runCnt  int
-		runID   int
+		runID   int                         // echo ID, unique per prober in the process
 		tables  map[runTime]map[string]bool // guarded by mu
 		mu      sync.Mutex
 		loop    *runLoop
@@ -44,6 +45,12 @@ type (
 		TOS             int    `yaml:"tos,omitempty"`
 		TTL             int    `yaml:"ttl,omitempty"`
 		SourceInterface string `yaml:"source_interface,omitempty"`
+	}
+
+	// icmpTarget is the event key and display name of a target address
+	icmpTarget struct {
+		key  string
+		name string
 	}
 
 	runTime struct {
@@ -104,18 +111,41 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, er
 	return newICMPProber(t, c, []byte(cfg.Body), prefix), nil
 }
 
+// echoIDs counts the ICMP probers created in this process.
+var echoIDs atomic.Uint32
+
+// nextEchoID returns the echo ID for a new prober. A raw ICMP socket
+// receives the echo replies of every socket on the host, and the probers
+// in one process ping with the same sequence numbers, so the echo ID is
+// what tells their replies apart: each prober gets its own, derived from
+// the process ID so that concurrent mping processes differ too.
+//
+// The probers only use raw sockets. Datagram ICMP sockets (Linux
+// "ping" sockets) would need different matching: the kernel rewrites the
+// echo ID to the socket's port and delivers each socket only its own
+// replies, so the ID check in recvPkts would have to be skipped there.
+func nextEchoID() int {
+	return (os.Getpid() + int(echoIDs.Add(1)-1)) & 0xffff
+}
+
 func newICMPProber(t ProbeType, c packetConn, body []byte, prefix string) *ICMPProber {
 	return &ICMPProber{
 		version: t,
 		prefix:  prefix,
 		c:       c,
 		tables:  make(map[runTime]map[string]bool),
-		targets: make(map[string]string),
-		runID:   os.Getpid() & 0xffff,
+		targets: make(map[string]icmpTarget),
+		runID:   nextEchoID(),
 		runCnt:  0,
 		body:    body,
 		loop:    newRunLoop(),
 	}
+}
+
+// isDefault reports whether p is one of the built-in icmpv4/icmpv6 probers,
+// whose targets are keyed and shown by their bare address.
+func (p *ICMPProber) isDefault() bool {
+	return p.prefix == string(p.version)
 }
 
 func (p *ICMPProber) Accept(target string) error {
@@ -149,8 +179,15 @@ func (p *ICMPProber) Accept(target string) error {
 		displayName = fmt.Sprintf("%s(%s)", hostname, ipStr)
 	}
 
-	// Store IP address string with display name
-	p.targets[ipStr] = displayName
+	// The built-in probers key their targets by address. Any other ICMP
+	// prober (e.g. one with TTL=1) may probe the same address, so its key
+	// and name carry its own prefix to keep the two apart in the stats.
+	key := ipStr
+	if !p.isDefault() {
+		key = p.prefix + "://" + ipStr
+		displayName = p.prefix + "://" + displayName
+	}
+	p.targets[ipStr] = icmpTarget{key: key, name: displayName}
 
 	return nil
 }
@@ -168,8 +205,8 @@ func (p *ICMPProber) addTable(runCnt int, sentTime time.Time) {
 
 // getTargetInfo returns Key and DisplayName for the given IP address
 func (p *ICMPProber) getTargetInfo(addr string) (string, string) {
-	if displayName, exists := p.targets[addr]; exists {
-		return addr, displayName
+	if t, exists := p.targets[addr]; exists {
+		return t.key, t.name
 	}
 	return addr, addr // fallback
 }
@@ -432,7 +469,8 @@ func (p *ICMPProber) Start(r chan *Event, interval, timeout time.Duration) error
 	defer p.loop.finish()
 
 	for _, ipStr := range slices.Sorted(maps.Keys(p.targets)) {
-		register(r, ipStr, p.targets[ipStr], p.version)
+		t := p.targets[ipStr]
+		register(r, t.key, t.name, p.version)
 	}
 	p.timeout = timeout
 
