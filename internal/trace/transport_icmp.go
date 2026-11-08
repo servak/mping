@@ -40,17 +40,24 @@ type icmpTransport struct {
 	conn    *icmp.PacketConn
 	dstAddr net.Addr
 	id      uint16
+	lease   *icmpid.Lease
 	checkID bool
 
 	writeMu   sync.Mutex // TTL is a socket option, so set+write must be atomic
-	closeOnce sync.Once
 }
+
+// acquireID takes the echo ID; tests replace it to use a local allocator.
+var acquireID = icmpid.Acquire
 
 // newICMPTransport prefers a raw socket and falls back to an unprivileged
 // datagram ICMP socket; on macOS the fallback still receives Time Exceeded
 // messages, on Linux only the destination may be visible without privileges.
 func newICMPTransport(dst *net.IPAddr, v6 bool) (*icmpTransport, error) {
-	t := &icmpTransport{v6: v6, id: icmpid.Acquire()}
+	lease, err := acquireID()
+	if err != nil {
+		return nil, fmt.Errorf("cannot allocate ICMP echo ID: %w", err)
+	}
+	t := &icmpTransport{v6: v6, id: lease.ID(), lease: lease}
 	rawNet, dgramNet, laddr := "ip4:icmp", "udp4", "0.0.0.0"
 	if v6 {
 		rawNet, dgramNet, laddr = "ip6:ipv6-icmp", "udp6", "::"
@@ -66,7 +73,7 @@ func newICMPTransport(dst *net.IPAddr, v6 bool) (*icmpTransport, error) {
 		// replies per socket, so only check the ID elsewhere (e.g. macOS).
 		t.checkID = runtime.GOOS != "linux"
 	} else {
-		icmpid.Release(t.id)
+		lease.Release()
 		return nil, fmt.Errorf("cannot open ICMP socket (%v; %v): run as root or grant cap_net_raw", err, err2)
 	}
 	return t, nil
@@ -76,7 +83,7 @@ func (t *icmpTransport) privileged() bool { return t.raw }
 
 func (t *icmpTransport) close() error {
 	err := t.conn.Close()
-	t.closeOnce.Do(func() { icmpid.Release(t.id) })
+	t.lease.Release()
 	return err
 }
 

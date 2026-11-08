@@ -128,29 +128,42 @@ func TestParseReplyRejects(t *testing.T) {
 	}
 }
 
-// A tracer's echo ID comes from the process-wide allocator shared with the
-// ICMP probers: it is held while the transport is open, other allocations
-// (probers, other tracers) never get it, and closing releases it once.
-func TestICMPTransportEchoIDShared(t *testing.T) {
+// A tracer's echo ID is leased from the shared allocator for as long as the
+// transport is open; closing releases it, and closing twice must not release
+// the lease of a later owner of the same ID.
+func TestICMPTransportEchoIDLease(t *testing.T) {
+	alloc := icmpid.New(1, 0, nil)
+	old := acquireID
+	acquireID = alloc.Acquire
+	defer func() { acquireID = old }()
+
 	tp, err := newICMPTransport(&net.IPAddr{IP: net.IPv4(127, 0, 0, 1)}, false)
 	if err != nil {
 		t.Skipf("no ICMP socket: %v", err)
 	}
-	if tp.id == 0 || !icmpid.InUse(tp.id) {
-		t.Fatalf("echo ID %#x not held in the shared allocator", tp.id)
-	}
-	for range 1000 {
-		id := icmpid.Acquire()
-		if id == tp.id {
-			t.Fatalf("shared allocator handed out the tracer ID %#x", id)
-		}
-		defer icmpid.Release(id)
+	if tp.id == 0 || tp.lease == nil || tp.lease.ID() != tp.id {
+		t.Fatalf("echo ID %#x not backed by a lease", tp.id)
 	}
 	_ = tp.close()
-	if icmpid.InUse(tp.id) {
-		t.Fatalf("echo ID %#x still held after close", tp.id)
+	// No quarantine: walking the whole space hands the closed ID to a new
+	// owner (the last ID acquired before exhaustion).
+	var owner *icmpid.Lease
+	for {
+		l, err := alloc.Acquire()
+		if err != nil {
+			break
+		}
+		if l.ID() == tp.id {
+			owner = l
+		}
 	}
-	_ = tp.close() // closing twice must not release an ID reacquired since
+	if owner == nil {
+		t.Fatalf("echo ID %#x not reacquirable after close", tp.id)
+	}
+	_ = tp.close() // second close must not release the new owner's lease
+	if _, err := alloc.Acquire(); err == nil {
+		t.Fatalf("second close released the new owner's ID %#x", tp.id)
+	}
 }
 
 // The echo ID decides whether a reply is ours. Replies from, or quoting, an

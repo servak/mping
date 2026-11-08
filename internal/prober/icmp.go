@@ -33,6 +33,7 @@ type (
 		timeout time.Duration
 		runCnt  int
 		runID   int                         // echo ID, unique per prober in the process
+		lease   *icmpid.Lease               // owns runID until the socket is closed
 		tables  map[runTime]map[string]bool // guarded by mu
 		mu      sync.Mutex
 		loop    *runLoop
@@ -111,7 +112,12 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, er
 			return nil, err
 		}
 	}
-	return newICMPProber(t, c, []byte(cfg.Body), prefix), nil
+	lease, err := icmpid.Acquire()
+	if err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("cannot allocate ICMP echo ID: %w", err)
+	}
+	return newICMPProber(t, c, []byte(cfg.Body), prefix, lease), nil
 }
 
 // newICMPProber returns a prober on c with its own echo ID. The echo ID
@@ -126,14 +132,15 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, er
 // "ping" sockets) would need different matching: the kernel rewrites the
 // echo ID to the socket's port and delivers each socket only its own
 // replies, so the ID check in recvPkts would have to be skipped there.
-func newICMPProber(t ProbeType, c packetConn, body []byte, prefix string) *ICMPProber {
+func newICMPProber(t ProbeType, c packetConn, body []byte, prefix string, lease *icmpid.Lease) *ICMPProber {
 	return &ICMPProber{
 		version: t,
 		prefix:  prefix,
 		c:       c,
 		tables:  make(map[runTime]map[string]bool),
 		targets: make(map[string]icmpTarget),
-		runID:   int(icmpid.Acquire()),
+		runID:   int(lease.ID()),
+		lease:   lease,
 		runCnt:  0,
 		body:    body,
 		loop:    newRunLoop(),
@@ -523,7 +530,7 @@ func (p *ICMPProber) recvPkts(r chan *Event) {
 func (p *ICMPProber) closeConn() {
 	p.closeOnce.Do(func() {
 		_ = p.c.Close()
-		icmpid.Release(uint16(p.runID))
+		p.lease.Release()
 	})
 }
 
