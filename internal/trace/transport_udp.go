@@ -6,7 +6,6 @@ import (
 	"net"
 	"runtime"
 	"sync"
-	"syscall"
 	"time"
 
 	"golang.org/x/net/icmp"
@@ -18,14 +17,15 @@ const (
 	// UDPBasePort is the first destination port of UDP probes (the
 	// traditional traceroute port).
 	UDPBasePort = 33434
-	// UDPPortRange is how many destination ports (flows) UDP probes rotate
-	// through: UDPBasePort .. UDPBasePort+UDPPortRange-1.
-	UDPPortRange = 64
-	// udpRoundStride shifts the ports of consecutive rounds so that a round
-	// (at most maxHops < udpRoundStride ports) never reuses a port of the
-	// previous round, while every hop still cycles through all ports
-	// (udpRoundStride and UDPPortRange are coprime).
-	udpRoundStride = 33
+	// udpRoundStride shifts the ports of consecutive rounds by more than a
+	// round (maxHops ports), so that rounds do not overlap; see udpPort.
+	// It is odd (prime) so that the ports of one TTL in successive rounds
+	// also differ in their low bits, which simple ECMP hashes look at.
+	udpRoundStride = maxHops + 1
+	// maxUDPPortRange is the most destination ports (flows) UDP probes
+	// rotate through: every port from UDPBasePort up to 65535. It is not a
+	// multiple of udpRoundStride, see udpPortRange.
+	maxUDPPortRange = 65536 - UDPBasePort
 
 	// sendRetries is how often a send is retried when the socket reports an
 	// earlier ICMP error instead of sending (Linux with IP_RECVERR)
@@ -34,16 +34,67 @@ const (
 
 var udpPayload = []byte("mping-trace")
 
-// udpPort returns the destination port of the probe for ttl in round:
+// udpProbePayload returns the payload of the probe for ttl: udpPayload
+// followed by ttl bytes of value ttl. The TTL is thus in the UDP length of
+// the datagram quoted by ICMP errors and in the payload the Linux error
+// queue returns, so a reply can be checked against the probe pending under
+// its destination port (see udpReplyTTL).
+func udpProbePayload(ttl int) []byte {
+	b := make([]byte, len(udpPayload)+ttl)
+	copy(b, udpPayload)
+	for i := len(udpPayload); i < len(b); i++ {
+		b[i] = byte(ttl)
+	}
+	return b
+}
+
+// udpPortRange returns how many destination ports UDP probes rotate through
+// for the given round interval and probe timeout. A probe may still be
+// pending for up to w = ceil(timeout/interval)+1 rounds (with one round of
+// slack). Ports of probes d rounds apart differ by udpRoundStride*d ± (less
+// than maxHops), so (w+1)*udpRoundStride ports guarantee that no probe of
+// the last w rounds shares a port with one of this round, and a late reply
+// is never credited to another TTL. The range is coprime with the stride so
+// that every TTL cycles through all ports. Past maxUDPPortRange (a timeout
+// of more than about 1000 intervals) the tracer counts probes older than
+// udpPortWindow rounds as lost instead, which keeps the guarantee.
+func udpPortRange(interval, timeout time.Duration) int {
+	w := 2
+	if interval > 0 && timeout > 0 {
+		w = int(min((timeout+interval-1)/interval, maxUDPPortRange)) + 1
+	}
+	n := min((w+1)*udpRoundStride, maxUDPPortRange)
+	for gcd(n, udpRoundStride) != 1 {
+		n++
+	}
+	return n
+}
+
+// udpPortWindow returns how many rounds back from the current one no probe
+// shares a port with it, for the given number of ports: the largest w with
+// udpRoundStride*w + maxHops-1 < ports (see udpPortRange).
+func udpPortWindow(ports int) int {
+	return (ports - maxHops) / udpRoundStride
+}
+
+func gcd(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
+}
+
+// udpPort returns the destination port of the probe for ttl in round, with
+// ports UDP probes rotate through (udpPortRange):
 //
-//	UDPBasePort + (udpRoundStride*round + ttl) mod UDPPortRange
+//	UDPBasePort + (udpRoundStride*round + ttl - 1) mod ports
 //
 // Routers hash ECMP on the L4 ports, so rotating the port makes successive
 // probes to one TTL take every branch the probed service's own traffic
-// (a new source port per connection) may take. Ports repeat every
-// UDPPortRange rounds, so per-branch statistics accumulate.
-func udpPort(round, ttl int) uint16 {
-	return uint16(UDPBasePort + (udpRoundStride*round+ttl)%UDPPortRange)
+// (a new source port per connection) may take. Ports repeat every `ports`
+// rounds, so per-branch statistics accumulate.
+func udpPort(ports, round, ttl int) uint16 {
+	return uint16(UDPBasePort + (udpRoundStride*round+ttl-1)%ports) // round >= 0, ttl >= 1
 }
 
 // errUDPUnsupported is returned when ICMP errors for UDP probes cannot be
@@ -62,6 +113,7 @@ var errUDPUnsupported = errors.New("UDP trace needs root (or cap_net_raw) on thi
 type udpTransport struct {
 	v6      bool
 	dst     net.IP
+	zone    string // IPv6 zone of dst (link-local destinations)
 	conn    *net.UDPConn
 	srcPort uint16
 	icmp    *icmp.PacketConn // nil: receive from the error queue
@@ -70,7 +122,7 @@ type udpTransport struct {
 	writeMu sync.Mutex // TTL is a socket option, so set+write must be atomic
 }
 
-func newUDPTransport(dst net.IP, v6 bool) (*udpTransport, error) {
+func newUDPTransport(dst *net.IPAddr, v6 bool) (*udpTransport, error) {
 	udpNet, rawNet, dgramNet, laddr := "udp4", "ip4:icmp", "udp4", "0.0.0.0"
 	if v6 {
 		udpNet, rawNet, dgramNet, laddr = "udp6", "ip6:ipv6-icmp", "udp6", "::"
@@ -81,7 +133,8 @@ func newUDPTransport(dst net.IP, v6 bool) (*udpTransport, error) {
 	}
 	t := &udpTransport{
 		v6:      v6,
-		dst:     dst,
+		dst:     dst.IP,
+		zone:    dst.Zone,
 		conn:    conn,
 		srcPort: uint16(conn.LocalAddr().(*net.UDPAddr).Port),
 	}
@@ -131,9 +184,10 @@ func (t *udpTransport) send(ttl int, port uint16) error {
 	if err != nil {
 		return err
 	}
-	dst := &net.UDPAddr{IP: t.dst, Port: int(port)}
+	dst := &net.UDPAddr{IP: t.dst, Port: int(port), Zone: t.zone}
+	payload := udpProbePayload(ttl)
 	for i := 0; ; i++ {
-		_, err = t.conn.WriteToUDP(udpPayload, dst)
+		_, err = t.conn.WriteToUDP(payload, dst)
 		// With IP_RECVERR Linux also reports a received ICMP error once
 		// as the result of the next socket call. The error itself is
 		// still queued for receive, so just send again.
@@ -141,17 +195,6 @@ func (t *udpTransport) send(ttl int, port uint16) error {
 			return err
 		}
 	}
-}
-
-// isICMPErrno reports whether err is the errno Linux derives from an ICMP
-// error (Time Exceeded, Port / Host / Net Unreachable)
-func isICMPErrno(err error) bool {
-	for _, e := range []syscall.Errno{syscall.ECONNREFUSED, syscall.EHOSTUNREACH, syscall.ENETUNREACH, syscall.EPROTO} {
-		if errors.Is(err, e) {
-			return true
-		}
-	}
-	return false
 }
 
 func (t *udpTransport) receive(deliver func(reply, string, time.Time)) {
@@ -167,9 +210,18 @@ func (t *udpTransport) receive(deliver func(reply, string, time.Time)) {
 		}
 		now := time.Now()
 		r, err := parseUDPReply(t.v6, buf[:n])
-		if err != nil || r.id != t.srcPort {
+		if err != nil || !t.accept(r) {
 			continue // not a reply to our probes
 		}
 		deliver(r, peerIP(peer), now)
 	}
+}
+
+// accept reports whether the ICMP error r quotes one of our probes: our
+// source port, and a TTL that the tracer checks against the probe pending
+// under the destination port. Load balancers and DNAT often leave the
+// quoted destination unrewritten, so it is only checked when the TTL is
+// unknown and the ports alone could match another socket's datagram.
+func (t *udpTransport) accept(r reply) bool {
+	return r.id == t.srcPort && (r.ttl != 0 || sameAddr(t.dst, r.dst))
 }

@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"bytes"
 	"encoding/binary"
 	"net"
 )
@@ -75,4 +76,18 @@ func parseSockaddr(b []byte) net.IP {
 		}
 	}
 	return nil
+}
+
+// errQueuePayloadTTL returns the probe TTL from the payload of the original
+// datagram that the error queue returns with an ICMP error (see
+// udpProbePayload), or 0 if the payload is truncated or not ours.
+func errQueuePayloadTTL(payload []byte) int {
+	if len(payload) <= len(udpPayload) || !bytes.HasPrefix(payload, udpPayload) {
+		return 0
+	}
+	ttl := int(payload[len(udpPayload)])
+	if ttl < 1 || ttl > maxHops {
+		return 0
+	}
+	return ttl
 }

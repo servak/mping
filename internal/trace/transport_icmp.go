@@ -2,6 +2,7 @@ package trace
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"os"
 	"runtime"
@@ -27,9 +28,28 @@ type transport interface {
 	privileged() bool
 }
 
-// idCounter makes echo IDs unique per tracer within the process, and distinct
-// from the ICMP prober which uses pid&0xffff.
-var idCounter atomic.Uint32
+// Echo IDs are a random per-process base plus a counter: unique per tracer
+// within the process, and unrelated to the pid, so that they do not follow
+// the pid&0xffff IDs of the ICMP probers of this or another mping process
+// (pids are often consecutive).
+var (
+	idBase    = uint16(rand.Uint32())
+	idCounter atomic.Uint32
+)
+
+// nextEchoID returns the echo ID for a new tracer, never pid&0xffff (the ID
+// of this process' ICMP prober)
+func nextEchoID() uint16 {
+	return echoID(idBase, idCounter.Add(1), os.Getpid())
+}
+
+func echoID(base uint16, n uint32, pid int) uint16 {
+	id := base + uint16(n)
+	if id == uint16(pid&0xffff) {
+		id++
+	}
+	return id
+}
 
 // icmpTransport traces with ICMP echo requests, like mtr's default mode. The
 // echo ID is fixed per tracer, so every probe is one flow for ECMP hashing.
@@ -47,19 +67,19 @@ type icmpTransport struct {
 // newICMPTransport prefers a raw socket and falls back to an unprivileged
 // datagram ICMP socket; on macOS the fallback still receives Time Exceeded
 // messages, on Linux only the destination may be visible without privileges.
-func newICMPTransport(dst net.IP, v6 bool) (*icmpTransport, error) {
-	t := &icmpTransport{v6: v6, id: uint16(os.Getpid() + 1 + int(idCounter.Add(1)))}
+func newICMPTransport(dst *net.IPAddr, v6 bool) (*icmpTransport, error) {
+	t := &icmpTransport{v6: v6, id: nextEchoID()}
 	rawNet, dgramNet, laddr := "ip4:icmp", "udp4", "0.0.0.0"
 	if v6 {
 		rawNet, dgramNet, laddr = "ip6:ipv6-icmp", "udp6", "::"
 	}
 	if c, err := icmp.ListenPacket(rawNet, laddr); err == nil {
 		t.conn, t.raw = c, true
-		t.dstAddr = &net.IPAddr{IP: dst}
+		t.dstAddr = &net.IPAddr{IP: dst.IP, Zone: dst.Zone}
 		t.checkID = true
 	} else if c, err2 := icmp.ListenPacket(dgramNet, laddr); err2 == nil {
 		t.conn = c
-		t.dstAddr = &net.UDPAddr{IP: dst}
+		t.dstAddr = &net.UDPAddr{IP: dst.IP, Zone: dst.Zone}
 		// Linux rewrites the echo ID of datagram ICMP sockets and demuxes
 		// replies per socket, so only check the ID elsewhere (e.g. macOS).
 		t.checkID = runtime.GOOS != "linux"
@@ -108,16 +128,24 @@ func (t *icmpTransport) receive(deliver func(reply, string, time.Time)) {
 		}
 		now := time.Now()
 		r, err := parseReply(t.v6, buf[:n])
-		if err != nil {
+		if err != nil || !t.accept(r) {
 			continue
-		}
-		if t.checkID && r.id != t.id {
-			continue // another process or tracer
 		}
 		deliver(r, peerIP(peer), now)
 	}
 }
 
+// accept reports whether r answers one of our probes: the echo ID matches,
+// where the kernel keeps it; elsewhere (Linux datagram sockets) the kernel
+// has already matched the reply to our socket by its own ID. The tracer then
+// matches the sequence to a pending probe. Addresses are not checked: DNAT
+// and load balancers answer echo requests from another address, and often
+// leave the destination of the quoted datagram unrewritten.
+func (t *icmpTransport) accept(r reply) bool {
+	return !t.checkID || r.id == t.id
+}
+
+// peerIP returns the address of a reply's sender
 func peerIP(a net.Addr) string {
 	switch v := a.(type) {
 	case *net.IPAddr:

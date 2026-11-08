@@ -3,6 +3,8 @@ package trace
 import (
 	"encoding/binary"
 	"errors"
+	"net"
+	"net/netip"
 
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
@@ -36,6 +38,28 @@ type reply struct {
 	kind replyKind
 	id   uint16
 	seq  uint16
+	ttl  int        // TTL the probe was sent with, if the reply tells (0 = unknown)
+	dst  netip.Addr // destination of the quoted datagram (invalid for echo replies)
+}
+
+// sameAddr reports whether the quoted destination a is ip; an unknown
+// (invalid) a matches.
+func sameAddr(ip net.IP, a netip.Addr) bool {
+	if !a.IsValid() {
+		return true
+	}
+	b, ok := netip.AddrFromSlice(ip)
+	return ok && b.Unmap() == a.Unmap()
+}
+
+// udpReplyTTL returns the probe TTL encoded in a UDP probe's length by
+// udpProbePayload (0 if it does not look like one of our probes)
+func udpReplyTTL(udpLen int) int {
+	ttl := udpLen - udpHeaderLen - len(udpPayload)
+	if ttl < 1 || ttl > maxHops {
+		return 0
+	}
+	return ttl
 }
 
 var errNotOurs = errors.New("not a reply to one of our probes")
@@ -64,7 +88,7 @@ func parseReply(v6 bool, b []byte) (reply, error) {
 	if v6 {
 		proto, echoType = protocolICMPv6, byte(ipv6.ICMPTypeEchoRequest)
 	}
-	inner, err := quotedTransport(v6, data, proto, icmpEchoHdrLen)
+	inner, dst, err := quotedTransport(v6, data, proto, icmpEchoHdrLen)
 	if err != nil {
 		return reply{}, err
 	}
@@ -75,6 +99,7 @@ func parseReply(v6 bool, b []byte) (reply, error) {
 		kind: kind,
 		id:   binary.BigEndian.Uint16(inner[4:6]),
 		seq:  binary.BigEndian.Uint16(inner[6:8]),
+		dst:  dst,
 	}, nil
 }
 
@@ -90,7 +115,7 @@ func parseUDPReply(v6 bool, b []byte) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	inner, err := quotedTransport(v6, data, protocolUDP, udpHeaderLen)
+	inner, dst, err := quotedTransport(v6, data, protocolUDP, udpHeaderLen)
 	if err != nil {
 		return reply{}, err
 	}
@@ -98,6 +123,8 @@ func parseUDPReply(v6 bool, b []byte) (reply, error) {
 		kind: kind,
 		id:   binary.BigEndian.Uint16(inner[0:2]),
 		seq:  binary.BigEndian.Uint16(inner[2:4]),
+		ttl:  udpReplyTTL(int(binary.BigEndian.Uint16(inner[4:6]))),
+		dst:  dst,
 	}, nil
 }
 
@@ -136,17 +163,19 @@ const (
 
 // quotedTransport skips the IP header of the original datagram quoted in an
 // ICMP error and returns its transport header, which must be of protocol
-// proto and at least minLen bytes long.
-func quotedTransport(v6 bool, data []byte, proto, minLen int) ([]byte, error) {
+// proto and at least minLen bytes long, and its destination address.
+func quotedTransport(v6 bool, data []byte, proto, minLen int) ([]byte, netip.Addr, error) {
 	var next, off int
+	var dst netip.Addr
 	if v6 {
 		if len(data) < ipv6HeaderLen {
-			return nil, errNotOurs
+			return nil, dst, errNotOurs
 		}
+		dst = netip.AddrFrom16([16]byte(data[24:40]))
 		next, off = int(data[6]), ipv6HeaderLen
 		for next != proto {
 			if len(data) < off+8 {
-				return nil, errNotOurs
+				return nil, dst, errNotOurs
 			}
 			switch next {
 			case ipv6HopByHop, ipv6Routing, ipv6DestOptions:
@@ -154,20 +183,21 @@ func quotedTransport(v6 bool, data []byte, proto, minLen int) ([]byte, error) {
 			case ipv6Fragment:
 				next, off = int(data[off]), off+8
 			default:
-				return nil, errNotOurs
+				return nil, dst, errNotOurs
 			}
 		}
 	} else {
 		if len(data) < ipv4MinHeaderLen {
-			return nil, errNotOurs
+			return nil, dst, errNotOurs
 		}
+		dst = netip.AddrFrom4([4]byte(data[16:20]))
 		next, off = int(data[9]), int(data[0]&0x0f)*4
 		if off < ipv4MinHeaderLen {
-			return nil, errNotOurs
+			return nil, dst, errNotOurs
 		}
 	}
 	if next != proto || len(data) < off+minLen {
-		return nil, errNotOurs
+		return nil, dst, errNotOurs
 	}
-	return data[off:], nil
+	return data[off:], dst, nil
 }

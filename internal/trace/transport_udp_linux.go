@@ -4,6 +4,7 @@ package trace
 
 import (
 	"net"
+	"net/netip"
 	"os"
 	"time"
 
@@ -46,11 +47,11 @@ func (t *udpTransport) receiveErrQueue(deliver func(reply, string, time.Time)) {
 	buf := make([]byte, maxPacketSize)
 	oob := make([]byte, 512)
 	for {
-		var oobn int
+		var n, oobn int
 		var from unix.Sockaddr
 		var rerr error
 		err := rc.Read(func(fd uintptr) bool {
-			_, oobn, _, from, rerr = unix.Recvmsg(int(fd), buf, oob, unix.MSG_ERRQUEUE|unix.MSG_DONTWAIT)
+			n, oobn, _, from, rerr = unix.Recvmsg(int(fd), buf, oob, unix.MSG_ERRQUEUE|unix.MSG_DONTWAIT)
 			if rerr == unix.EAGAIN || rerr == unix.EWOULDBLOCK {
 				// Nothing queued: discard any normal data (a destination
 				// actually listening on the port), which would otherwise
@@ -72,12 +73,23 @@ func (t *udpTransport) receiveErrQueue(deliver func(reply, string, time.Time)) {
 		}
 		now := time.Now()
 		var dstPort uint16
+		var dstAddr netip.Addr
 		switch sa := from.(type) {
 		case *unix.SockaddrInet4:
-			dstPort = uint16(sa.Port)
+			dstPort, dstAddr = uint16(sa.Port), netip.AddrFrom4(sa.Addr)
 		case *unix.SockaddrInet6:
-			dstPort = uint16(sa.Port)
+			dstPort, dstAddr = uint16(sa.Port), netip.AddrFrom16(sa.Addr)
 		default:
+			continue
+		}
+		// The kernel returns the payload quoted by the ICMP error, so the
+		// TTL check only works when the router quoted more than the 8 bytes
+		// of the UDP header (RFC 792 minimum; RFC 1812 asks for more). With
+		// a short quote the TTL is unknown and the port scheme (no port is
+		// reused while a probe on it is pending) is what keeps replies on
+		// their hop; the quoted destination is then checked as well.
+		ttl := errQueuePayloadTTL(buf[:n])
+		if ttl == 0 && !sameAddr(t.dst, dstAddr) {
 			continue
 		}
 		msgs, err := unix.ParseSocketControlMessage(oob[:oobn])
@@ -94,7 +106,7 @@ func (t *udpTransport) receiveErrQueue(deliver func(reply, string, time.Time)) {
 			if err != nil {
 				continue
 			}
-			r.id = t.srcPort
+			r.id, r.ttl = t.srcPort, ttl
 			deliver(r, addr, now)
 		}
 	}
