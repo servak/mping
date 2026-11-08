@@ -131,7 +131,7 @@ func TestStaleAndHiddenThresholds(t *testing.T) {
 func TestResponderCap(t *testing.T) {
 	tr := newTestTracer()
 	for i := 0; i < maxRespondersPerHop+4; i++ {
-		tr.inject(1, i+1, fmt.Sprintf("10.0.0.%d", i), ms(1))
+		tr.inject(1, 1+i/4, fmt.Sprintf("10.0.0.%d", i), ms(1)) // none stale yet
 	}
 	hop := tr.Snapshot().Hops[0]
 	if len(hop.Responders) != maxRespondersPerHop {
@@ -141,7 +141,7 @@ func TestResponderCap(t *testing.T) {
 		t.Errorf("hop totals must include dropped responders: sent %d recv %d", hop.Sent, hop.Recv)
 	}
 	// known responders keep counting once the cap is reached
-	tr.inject(1, 30, "10.0.0.0", ms(1))
+	tr.inject(1, 6, "10.0.0.0", ms(1))
 	if got := tr.Snapshot().Hops[0].Responders[0].Recv; got != 2 {
 		t.Errorf("first responder recv = %d, want 2", got)
 	}
@@ -204,5 +204,37 @@ func TestMostRecentSilentResponderKept(t *testing.T) {
 	}
 	if b := findResponder(hop, "B"); b == nil || !b.Stale || hop.Addr != "B" {
 		t.Errorf("hop = %+v", hop)
+	}
+}
+
+// Responders that went silent long ago must not block new ones once the
+// per-hop table is full
+func TestResponderCapEvictsSilent(t *testing.T) {
+	tr := newTestTracer()
+	for i := 0; i < maxRespondersPerHop; i++ {
+		tr.inject(1, 1+i/4, fmt.Sprintf("10.0.0.%d", i), ms(1))
+	}
+	for round := 50; round <= 52; round++ {
+		tr.inject(1, round, "10.9.9.9", ms(2))
+	}
+	hop := tr.Snapshot().Hops[0]
+	if hop.Addr != "10.9.9.9" {
+		t.Errorf("hop addr = %q, want the new responder; responders %+v", hop.Addr, hop.Responders)
+	}
+	if r := findResponder(hop, "10.9.9.9"); r == nil || r.Recv != 3 {
+		t.Errorf("new responder = %+v", r)
+	}
+	if n := len(tr.hops[0].order); n > maxRespondersPerHop {
+		t.Errorf("%d responders tracked, cap %d", n, maxRespondersPerHop)
+	}
+	// stale (not yet hidden) responders make room too, oldest first
+	tr = newTestTracer()
+	for i := 0; i < maxRespondersPerHop; i++ {
+		tr.inject(1, 1+i, fmt.Sprintf("10.0.0.%d", i), ms(1))
+	}
+	tr.inject(1, 1+maxRespondersPerHop+staleAfterRounds, "10.9.9.9", ms(1))
+	hop = tr.Snapshot().Hops[0]
+	if findResponder(hop, "10.9.9.9") == nil || findResponder(hop, "10.0.0.0") != nil || findResponder(hop, "10.0.0.15") == nil {
+		t.Errorf("responders = %+v", hop.Responders)
 	}
 }

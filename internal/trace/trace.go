@@ -164,8 +164,9 @@ type hopStats struct {
 	order      []string // responder addresses in first-seen order
 }
 
-// record counts a reply from addr received for a probe of the given round
-func (h *hopStats) record(addr string, rtt time.Duration, round int) {
+// record counts a reply from addr received for a probe of the given round;
+// now is the tracer's current round.
+func (h *hopStats) record(addr string, rtt time.Duration, round, now int) {
 	h.recv++
 	h.last = rtt
 	if h.best == 0 || rtt < h.best {
@@ -178,7 +179,7 @@ func (h *hopStats) record(addr string, rtt time.Duration, round int) {
 
 	r := h.resp[addr]
 	if r == nil {
-		if len(h.order) >= maxRespondersPerHop {
+		if len(h.order) >= maxRespondersPerHop && !h.evictStale(now) {
 			return // counted in the hop totals only
 		}
 		if h.resp == nil {
@@ -200,6 +201,24 @@ func (h *hopStats) record(addr string, rtt time.Duration, round int) {
 	if round > r.lastRound {
 		r.lastRound = round
 	}
+}
+
+// evictStale drops the responder silent for the longest time if it is at
+// least stale (hidden responders are the oldest, so they go first), making
+// room for a new one. It reports whether a responder was dropped.
+func (h *hopStats) evictStale(now int) bool {
+	victim := -1
+	for i, addr := range h.order {
+		if victim < 0 || h.resp[addr].lastRound < h.resp[h.order[victim]].lastRound {
+			victim = i
+		}
+	}
+	if victim < 0 || now-h.resp[h.order[victim]].lastRound <= staleAfterRounds {
+		return false
+	}
+	delete(h.resp, h.order[victim])
+	h.order = append(h.order[:victim], h.order[victim+1:]...)
+	return true
 }
 
 type inflight struct {
@@ -435,7 +454,7 @@ func (t *Tracer) handle(r reply, addr string, now time.Time) {
 
 	h := &t.hops[p.ttl-1]
 	h.sent++
-	h.record(addr, now.Sub(p.sent), p.round)
+	h.record(addr, now.Sub(p.sent), p.round, max(t.rounds, p.round))
 	if t.onEvent != nil {
 		t.onEvent(probeEvent{round: p.round, ttl: p.ttl, addr: addr, rtt: now.Sub(p.sent), outcome: outcomeReply})
 	}
