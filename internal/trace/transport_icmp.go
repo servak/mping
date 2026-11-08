@@ -43,7 +43,7 @@ type icmpTransport struct {
 	lease   *icmpid.Lease
 	checkID bool
 
-	writeMu   sync.Mutex // TTL is a socket option, so set+write must be atomic
+	writeMu sync.Mutex // TTL is a socket option, so set+write must be atomic
 }
 
 // acquireID takes the echo ID; tests replace it to use a local allocator.
