@@ -70,10 +70,10 @@ func classifyErr(err error) reason {
 	return FAILED
 }
 
-// interfaceIP returns the first address of the named interface in the wanted
+// interfaceIP returns an address of the named interface in the wanted
 // family (IPv6 when v6 is set, IPv4 otherwise), skipping loopback addresses
-// when skipLoopback is set.
-func interfaceIP(name string, v6, skipLoopback bool) (net.IP, error) {
+// when skipLoopback is set. See pickInterfaceIP for the preference.
+func interfaceIP(name string, v6, skipLoopback bool) (*net.IPAddr, error) {
 	iface, err := net.InterfaceByName(name)
 	if err != nil {
 		return nil, fmt.Errorf("interface not found: %s", name)
@@ -82,22 +82,51 @@ func interfaceIP(name string, v6, skipLoopback bool) (net.IP, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get addresses for interface %s: %v", name, err)
 	}
-	family := "IPv4"
-	if v6 {
-		family = "IPv6"
-	}
+	return pickInterfaceIP(iface.Name, addrs, v6, skipLoopback)
+}
+
+// pickInterfaceIP picks the source address among the addresses of the
+// interface name: a global unicast address if there is one, else a
+// link-local one, else any other (a loopback address unless skipLoopback).
+// IPv6 link-local addresses carry the interface as zone, without which
+// they cannot be bound.
+func pickInterfaceIP(name string, addrs []net.Addr, v6, skipLoopback bool) (*net.IPAddr, error) {
+	var linkLocal, other *net.IPAddr
 	for _, addr := range addrs {
 		ipNet, ok := addr.(*net.IPNet)
 		if !ok {
 			continue
 		}
-		if (ipNet.IP.To4() == nil) != v6 {
+		ip := ipNet.IP
+		if (ip.To4() == nil) != v6 {
 			continue
 		}
-		if skipLoopback && ipNet.IP.IsLoopback() {
-			continue
+		switch {
+		case skipLoopback && ip.IsLoopback():
+		case ip.IsGlobalUnicast():
+			return &net.IPAddr{IP: ip}, nil
+		case ip.IsLinkLocalUnicast():
+			if linkLocal == nil {
+				linkLocal = &net.IPAddr{IP: ip}
+				if v6 {
+					linkLocal.Zone = name
+				}
+			}
+		default:
+			if other == nil {
+				other = &net.IPAddr{IP: ip}
+			}
 		}
-		return ipNet.IP, nil
+	}
+	if linkLocal != nil {
+		return linkLocal, nil
+	}
+	if other != nil {
+		return other, nil
+	}
+	family := "IPv4"
+	if v6 {
+		family = "IPv6"
 	}
 	return nil, fmt.Errorf("no suitable %s address found on interface %s", family, name)
 }

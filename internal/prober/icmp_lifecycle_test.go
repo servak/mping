@@ -20,6 +20,37 @@ type fakeICMPConn struct {
 	closed    chan struct{}
 	closeOnce sync.Once
 	noReply   bool
+	// replyDelay delays every reply, to simulate a slow path
+	replyDelay time.Duration
+	// net, when set, delivers every reply to all of its connections, as
+	// the kernel does for raw ICMP sockets
+	net *fakeICMPNet
+}
+
+// fakeICMPNet is a host on which every raw ICMP socket sees every reply.
+type fakeICMPNet struct {
+	mu    sync.Mutex
+	conns []*fakeICMPConn
+}
+
+func (n *fakeICMPNet) newConn() *fakeICMPConn {
+	c := newFakeICMPConn()
+	c.net = n
+	n.mu.Lock()
+	n.conns = append(n.conns, c)
+	n.mu.Unlock()
+	return c
+}
+
+func (n *fakeICMPNet) deliver(pk fakePacket) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, c := range n.conns {
+		select {
+		case c.pkts <- pk:
+		default: // a stalled reader drops the packet
+		}
+	}
 }
 
 type fakePacket struct {
@@ -65,7 +96,22 @@ func (c *fakeICMPConn) WriteTo(b []byte, dst net.Addr) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	c.pkts <- fakePacket{data: data, addr: dst}
+	pk := fakePacket{data: data, addr: dst}
+	send := func() {
+		if c.net != nil {
+			c.net.deliver(pk)
+			return
+		}
+		select {
+		case c.pkts <- pk:
+		default:
+		}
+	}
+	if c.replyDelay > 0 {
+		time.AfterFunc(c.replyDelay, send)
+	} else {
+		send()
+	}
 	return len(b), nil
 }
 
@@ -164,8 +210,8 @@ func TestICMPProberStopBeforeStart(t *testing.T) {
 // prober never blocks on the channel while holding its mutex.
 func TestICMPProberTableEvents(t *testing.T) {
 	p := newICMPProber(ICMPV4, newFakeICMPConn(), nil, "icmpv4")
-	p.targets["127.0.0.1"] = "127.0.0.1"
-	p.targets["127.0.0.2"] = "localhost(127.0.0.2)"
+	p.targets["127.0.0.1"] = icmpTarget{key: "127.0.0.1", name: "127.0.0.1"}
+	p.targets["127.0.0.2"] = icmpTarget{key: "127.0.0.2", name: "localhost(127.0.0.2)"}
 	p.timeout = time.Hour
 	p.addTable(1, time.Now().Add(-time.Millisecond))
 
@@ -182,13 +228,13 @@ func TestICMPProberTableEvents(t *testing.T) {
 	if e := p.success(1, "192.0.2.1", msg, nil, 0); e != nil {
 		t.Errorf("unknown address: success() = %+v, want nil", e)
 	}
-	if events, pending := p.checkTimeout(); len(events) != 0 || pending != 1 {
-		t.Errorf("checkTimeout() before timeout = %d events, %d pending", len(events), pending)
+	if events, pending, next := p.checkTimeout(); len(events) != 0 || pending != 1 || next.IsZero() {
+		t.Errorf("checkTimeout() before timeout = %d events, %d pending, next %v", len(events), pending, next)
 	}
 
 	p.timeout = 0
-	events, pending := p.checkTimeout()
-	if pending != 0 || len(events) != 1 {
+	events, pending, next := p.checkTimeout()
+	if pending != 0 || len(events) != 1 || !next.IsZero() {
 		t.Fatalf("checkTimeout() = %d events, %d pending; want 1, 0", len(events), pending)
 	}
 	if e := events[0]; e.Result != TIMEOUT || e.Key != "127.0.0.2" || e.DisplayName != "localhost(127.0.0.2)" {
