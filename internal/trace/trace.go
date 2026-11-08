@@ -162,6 +162,10 @@ type hopStats struct {
 	sum        float64
 	resp       map[string]*respStats
 	order      []string // responder addresses in first-seen order
+
+	// rounds of the latest probe to this TTL answered by the end of the
+	// path (echo reply / unreachable) and by a Time Exceeded (0 = never)
+	lastEnd, lastTE int
 }
 
 // record counts a reply from addr received for a probe of the given round;
@@ -360,9 +364,10 @@ func (t *Tracer) drain(recvDone <-chan struct{}, err error) error {
 func (t *Tracer) sendRound(ctx context.Context) error {
 	t.mu.Lock()
 	t.expire(time.Now())
-	maxTTL := t.probeLimitLocked()
 	t.rounds++
 	round := t.rounds
+	t.updateReachLocked()
+	maxTTL := t.probeLimitLocked()
 	t.mu.Unlock()
 
 	gap := t.cfg.Interval / time.Duration(maxTTL)
@@ -460,13 +465,39 @@ func (t *Tracer) handle(r reply, addr string, now time.Time) {
 	}
 
 	if r.kind == kindEchoReply || r.kind == kindUnreachable {
-		t.reached = true
-		if p.ttl < t.maxTTL {
-			t.maxTTL = p.ttl
-		}
+		h.lastEnd = max(h.lastEnd, p.round)
+	} else {
+		h.lastTE = max(h.lastTE, p.round)
 	}
+	t.updateReachLocked()
 	if !t.cfg.NoDNS {
 		t.lookupLocked(addr)
+	}
+}
+
+// updateReachLocked re-evaluates where the path ends. The destination is the
+// nearest TTL answered by the end of the path (echo reply / unreachable)
+// unless a Time Exceeded came from that TTL or beyond after that answer or
+// within the last staleAfterRounds rounds: then the path goes on past it (a
+// transient unreachable, a longer route, or a longer ECMP branch). With no
+// such TTL the destination is unknown again and probing goes beyond.
+func (t *Tracer) updateReachLocked() {
+	dst, newestTE := 0, 0
+	for i := len(t.hops) - 1; i >= 0; i-- {
+		h := &t.hops[i]
+		newestTE = max(newestTE, h.lastTE) // newest Time Exceeded at TTL >= i+1
+		if h.lastEnd == 0 {
+			continue
+		}
+		if newestTE > 0 && (newestTE > h.lastEnd || t.rounds-newestTE < staleAfterRounds) {
+			continue
+		}
+		dst = i + 1
+	}
+	t.reached = dst > 0
+	t.maxTTL = maxHops
+	if t.reached {
+		t.maxTTL = dst
 	}
 }
 
