@@ -254,14 +254,15 @@ type Tracer struct {
 	dst net.IP
 	tp  transport
 
-	mu      sync.Mutex
-	seq     uint16
-	pending map[uint16]inflight // by probe key: ICMP echo seq / UDP dst port
-	hops    []hopStats          // index = ttl-1
-	maxTTL  int                 // shrinks to the destination's distance once known
-	reached bool
-	rounds  int
-	names   map[string]string // reverse DNS cache ("" = lookup in progress/failed)
+	mu       sync.Mutex
+	seq      uint16
+	udpPorts int                 // destination ports UDP probes rotate through
+	pending  map[uint16]inflight // by probe key: ICMP echo seq / UDP dst port
+	hops     []hopStats          // index = ttl-1
+	maxTTL   int                 // the destination's distance once known, else maxHops
+	reached  bool
+	rounds   int
+	names    map[string]string // reverse DNS cache ("" = lookup in progress/failed)
 
 	onEvent func(probeEvent) // test hook, called with mu held
 
@@ -295,14 +296,16 @@ func New(target string, cfg Config) (*Tracer, error) {
 }
 
 func newTracer(cfg Config, dst net.IP, tp transport) *Tracer {
+	cfg = cfg.withDefaults()
 	return &Tracer{
-		cfg:     cfg.withDefaults(),
-		dst:     dst,
-		tp:      tp,
-		pending: map[uint16]inflight{},
-		hops:    make([]hopStats, maxHops),
-		maxTTL:  maxHops,
-		names:   map[string]string{},
+		cfg:      cfg,
+		dst:      dst,
+		tp:       tp,
+		udpPorts: udpPortRange(cfg.Interval, cfg.Timeout),
+		pending:  map[uint16]inflight{},
+		hops:     make([]hopStats, maxHops),
+		maxTTL:   maxHops,
+		names:    map[string]string{},
 	}
 }
 
@@ -434,7 +437,7 @@ func isTransientSendErr(err error) bool {
 func (t *Tracer) probeKeyLocked(round, ttl int) uint16 {
 	var key uint16
 	if t.cfg.Proto == ProtoUDP {
-		key = udpPort(round, ttl)
+		key = udpPort(t.udpPorts, round, ttl)
 	} else {
 		t.seq++
 		key = t.seq
@@ -449,6 +452,11 @@ func (t *Tracer) handle(r reply, addr string, now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	p, ok := t.pending[r.seq]
+	if ok && r.ttl != 0 && r.ttl != p.ttl {
+		// The reply is for an earlier probe that used the same key with
+		// another TTL (a late reply after the key came round again)
+		ok = false
+	}
 	if !ok {
 		if t.onEvent != nil {
 			t.onEvent(probeEvent{addr: addr, outcome: outcomeLate})

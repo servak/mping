@@ -2,7 +2,9 @@ package trace
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"net"
+	"net/netip"
 	"os"
 	"runtime"
 	"sync"
@@ -27,9 +29,28 @@ type transport interface {
 	privileged() bool
 }
 
-// idCounter makes echo IDs unique per tracer within the process, and distinct
-// from the ICMP prober which uses pid&0xffff.
-var idCounter atomic.Uint32
+// Echo IDs are a random per-process base plus a counter: unique per tracer
+// within the process, and unrelated to the pid, so that they do not follow
+// the pid&0xffff IDs of the ICMP probers of this or another mping process
+// (pids are often consecutive).
+var (
+	idBase    = uint16(rand.Uint32())
+	idCounter atomic.Uint32
+)
+
+// nextEchoID returns the echo ID for a new tracer, never pid&0xffff (the ID
+// of this process' ICMP prober)
+func nextEchoID() uint16 {
+	return echoID(idBase, idCounter.Add(1), os.Getpid())
+}
+
+func echoID(base uint16, n uint32, pid int) uint16 {
+	id := base + uint16(n)
+	if id == uint16(pid&0xffff) {
+		id++
+	}
+	return id
+}
 
 // icmpTransport traces with ICMP echo requests, like mtr's default mode. The
 // echo ID is fixed per tracer, so every probe is one flow for ECMP hashing.
@@ -37,6 +58,7 @@ type icmpTransport struct {
 	v6      bool
 	raw     bool
 	conn    *icmp.PacketConn
+	dst     net.IP
 	dstAddr net.Addr
 	id      uint16
 	checkID bool
@@ -48,7 +70,7 @@ type icmpTransport struct {
 // datagram ICMP socket; on macOS the fallback still receives Time Exceeded
 // messages, on Linux only the destination may be visible without privileges.
 func newICMPTransport(dst net.IP, v6 bool) (*icmpTransport, error) {
-	t := &icmpTransport{v6: v6, id: uint16(os.Getpid() + 1 + int(idCounter.Add(1)))}
+	t := &icmpTransport{v6: v6, dst: dst, id: nextEchoID()}
 	rawNet, dgramNet, laddr := "ip4:icmp", "udp4", "0.0.0.0"
 	if v6 {
 		rawNet, dgramNet, laddr = "ip6:ipv6-icmp", "udp6", "::"
@@ -108,14 +130,39 @@ func (t *icmpTransport) receive(deliver func(reply, string, time.Time)) {
 		}
 		now := time.Now()
 		r, err := parseReply(t.v6, buf[:n])
-		if err != nil {
+		if err != nil || !t.accept(r, peer) {
 			continue
-		}
-		if t.checkID && r.id != t.id {
-			continue // another process or tracer
 		}
 		deliver(r, peerIP(peer), now)
 	}
+}
+
+// accept reports whether r (received from peer) answers one of our probes:
+// the echo ID matches (where the kernel keeps it) and the echo reply comes
+// from, or the ICMP error quotes a datagram to, the traced destination. A
+// process pinging or tracing another host with the same echo ID is ignored.
+func (t *icmpTransport) accept(r reply, peer net.Addr) bool {
+	if t.checkID && r.id != t.id {
+		return false // another process or tracer
+	}
+	if r.kind == kindEchoReply {
+		ip, ok := addrIP(peer)
+		return ok && sameAddr(t.dst, ip)
+	}
+	return r.dst.IsValid() && sameAddr(t.dst, r.dst)
+}
+
+func addrIP(a net.Addr) (netip.Addr, bool) {
+	var ip net.IP
+	switch v := a.(type) {
+	case *net.IPAddr:
+		ip = v.IP
+	case *net.UDPAddr:
+		ip = v.IP
+	default:
+		return netip.Addr{}, false
+	}
+	return netip.AddrFromSlice(ip)
 }
 
 func peerIP(a net.Addr) string {

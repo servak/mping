@@ -1,6 +1,8 @@
 package trace
 
 import (
+	"net"
+	"net/netip"
 	"testing"
 
 	"golang.org/x/net/icmp"
@@ -92,6 +94,7 @@ func TestParseReply(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseReply() error = %v", err)
 			}
+			got.dst = netip.Addr{} // checked in TestICMPAccept
 			if got != tt.want {
 				t.Errorf("parseReply() = %+v, want %+v", got, tt.want)
 			}
@@ -120,5 +123,69 @@ func TestParseReplyRejects(t *testing.T) {
 				t.Errorf("expected error, got %+v", got)
 			}
 		})
+	}
+}
+
+func TestEchoIDAvoidsProberID(t *testing.T) {
+	pid := 0x12345
+	if id := echoID(0x2344, 1, pid); id == uint16(pid&0xffff) {
+		t.Errorf("echo ID %#x equals the ICMP prober ID", id)
+	}
+	// IDs follow the random base, not the pid: a tracer of one process
+	// must not take the prober ID of the next one (pid+1)
+	if a, b := echoID(0x1000, 1, pid), echoID(0x1000, 1, pid+1); a != b {
+		t.Errorf("echo ID depends on the pid: %#x / %#x", a, b)
+	}
+}
+
+// Replies with our echo ID but about another destination (another mping
+// process using the same ID) are ignored
+func TestICMPAccept(t *testing.T) {
+	for _, v6 := range []bool{false, true} {
+		dst, other := net.ParseIP("192.0.2.1"), net.ParseIP("198.51.100.1")
+		dstOff, dstLen := 16, 4
+		if v6 {
+			dst, other = net.ParseIP("2001:db8::1"), net.ParseIP("2001:db8::2")
+			dstOff, dstLen = 24, 16
+		}
+		raw := func(ip net.IP) []byte {
+			if v6 {
+				return ip.To16()
+			}
+			return ip.To4()
+		}
+		tp := &icmpTransport{v6: v6, dst: dst, id: 42, checkID: true}
+		teType := icmp.Type(ipv4.ICMPTypeTimeExceeded)
+		if v6 {
+			teType = ipv6.ICMPTypeTimeExceeded
+		}
+		te := func(to net.IP, id int) reply {
+			q := quoted(t, v6, 20, id, 3)
+			copy(q[dstOff:dstOff+dstLen], raw(to))
+			r, err := parseReply(v6, marshal(t, icmp.Message{Type: teType, Body: &icmp.TimeExceeded{Data: q}}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return r
+		}
+		echo := reply{kind: kindEchoReply, id: 42, seq: 3}
+		tests := []struct {
+			name string
+			r    reply
+			peer net.Addr
+			want bool
+		}{
+			{"echo reply from the destination", echo, &net.IPAddr{IP: dst}, true},
+			{"echo reply from another host", echo, &net.IPAddr{IP: other}, false},
+			{"echo reply with another ID", reply{kind: kindEchoReply, id: 43, seq: 3}, &net.IPAddr{IP: dst}, false},
+			{"time exceeded for our probe", te(dst, 42), &net.IPAddr{IP: other}, true},
+			{"time exceeded for another destination", te(other, 42), &net.IPAddr{IP: other}, false},
+			{"time exceeded with another ID", te(dst, 43), &net.IPAddr{IP: other}, false},
+		}
+		for _, tt := range tests {
+			if got := tp.accept(tt.r, tt.peer); got != tt.want {
+				t.Errorf("v6=%v %s: accept = %v, want %v", v6, tt.name, got, tt.want)
+			}
+		}
 	}
 }
