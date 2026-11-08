@@ -5,17 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math/rand/v2"
 	"net"
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
+
+	"github.com/servak/mping/internal/icmpid"
 )
 
 const (
@@ -114,36 +114,18 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, er
 	return newICMPProber(t, c, []byte(cfg.Body), prefix), nil
 }
 
-// echoIDs counts the ICMP probers created in this process, and echoIDBase
-// is a random per-process start for their echo IDs.
-var (
-	echoIDs    atomic.Uint32
-	echoIDBase = uint16(rand.Uint32())
-)
-
-// nextEchoID returns the echo ID for a new prober. A raw ICMP socket
-// receives the echo replies of every socket on the host, and the probers
-// in one process ping with the same sequence numbers, so the echo ID is
-// what tells their replies apart: each prober gets its own, counting up
-// from a random per-process base. The random base keeps concurrent mping
-// processes apart (PID-derived IDs overlap for neighbouring PIDs), and the
-// path tracer (internal/trace) draws its echo IDs from its own random base
-// too, so the two rarely meet. ID 0 is skipped; the counter wraps after
-// 65535 probers, far more than one process creates.
+// newICMPProber returns a prober on c with its own echo ID. The echo ID
+// tells the replies of this prober apart from those of the other
+// probers and path tracers of the process, which ping with overlapping
+// sequence numbers: a raw ICMP socket receives the echo replies of every
+// socket on the host. IDs come from the process-wide allocator in
+// internal/icmpid, shared with internal/trace, and are released when the
+// socket is closed.
 //
 // The probers only use raw sockets. Datagram ICMP sockets (Linux
 // "ping" sockets) would need different matching: the kernel rewrites the
 // echo ID to the socket's port and delivers each socket only its own
 // replies, so the ID check in recvPkts would have to be skipped there.
-func nextEchoID() int {
-	for {
-		id := echoIDBase + uint16(echoIDs.Add(1)-1)
-		if id != 0 {
-			return int(id)
-		}
-	}
-}
-
 func newICMPProber(t ProbeType, c packetConn, body []byte, prefix string) *ICMPProber {
 	return &ICMPProber{
 		version: t,
@@ -151,7 +133,7 @@ func newICMPProber(t ProbeType, c packetConn, body []byte, prefix string) *ICMPP
 		c:       c,
 		tables:  make(map[runTime]map[string]bool),
 		targets: make(map[string]icmpTarget),
-		runID:   nextEchoID(),
+		runID:   int(icmpid.Acquire()),
 		runCnt:  0,
 		body:    body,
 		loop:    newRunLoop(),
@@ -539,7 +521,10 @@ func (p *ICMPProber) recvPkts(r chan *Event) {
 }
 
 func (p *ICMPProber) closeConn() {
-	p.closeOnce.Do(func() { _ = p.c.Close() })
+	p.closeOnce.Do(func() {
+		_ = p.c.Close()
+		icmpid.Release(uint16(p.runID))
+	})
 }
 
 // Start sends one echo request per target and round until Stop. Requests

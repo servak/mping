@@ -2,17 +2,16 @@ package trace
 
 import (
 	"fmt"
-	"math/rand/v2"
 	"net"
-	"os"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
+
+	"github.com/servak/mping/internal/icmpid"
 )
 
 // transport sends probes and delivers the matching ICMP replies. The probe
@@ -28,31 +27,13 @@ type transport interface {
 	privileged() bool
 }
 
-// Echo IDs are a random per-process base plus a counter: unique per tracer
-// within the process, and unrelated to the pid, so that they do not follow
-// the pid&0xffff IDs of the ICMP probers of this or another mping process
-// (pids are often consecutive).
-var (
-	idBase    = uint16(rand.Uint32())
-	idCounter atomic.Uint32
-)
-
-// nextEchoID returns the echo ID for a new tracer, never pid&0xffff (the ID
-// of this process' ICMP prober)
-func nextEchoID() uint16 {
-	return echoID(idBase, idCounter.Add(1), os.Getpid())
-}
-
-func echoID(base uint16, n uint32, pid int) uint16 {
-	id := base + uint16(n)
-	if id == uint16(pid&0xffff) {
-		id++
-	}
-	return id
-}
-
 // icmpTransport traces with ICMP echo requests, like mtr's default mode. The
 // echo ID is fixed per tracer, so every probe is one flow for ECMP hashing.
+// It comes from the process-wide allocator in internal/icmpid, shared with
+// the ICMP probers, so that no two live tracers or probers of the process
+// use the same ID (raw sockets see every echo reply on the host); it is
+// released when the transport is closed, as tracers restart on every target
+// change.
 type icmpTransport struct {
 	v6      bool
 	raw     bool
@@ -61,14 +42,15 @@ type icmpTransport struct {
 	id      uint16
 	checkID bool
 
-	writeMu sync.Mutex // TTL is a socket option, so set+write must be atomic
+	writeMu   sync.Mutex // TTL is a socket option, so set+write must be atomic
+	closeOnce sync.Once
 }
 
 // newICMPTransport prefers a raw socket and falls back to an unprivileged
 // datagram ICMP socket; on macOS the fallback still receives Time Exceeded
 // messages, on Linux only the destination may be visible without privileges.
 func newICMPTransport(dst *net.IPAddr, v6 bool) (*icmpTransport, error) {
-	t := &icmpTransport{v6: v6, id: nextEchoID()}
+	t := &icmpTransport{v6: v6, id: icmpid.Acquire()}
 	rawNet, dgramNet, laddr := "ip4:icmp", "udp4", "0.0.0.0"
 	if v6 {
 		rawNet, dgramNet, laddr = "ip6:ipv6-icmp", "udp6", "::"
@@ -84,6 +66,7 @@ func newICMPTransport(dst *net.IPAddr, v6 bool) (*icmpTransport, error) {
 		// replies per socket, so only check the ID elsewhere (e.g. macOS).
 		t.checkID = runtime.GOOS != "linux"
 	} else {
+		icmpid.Release(t.id)
 		return nil, fmt.Errorf("cannot open ICMP socket (%v; %v): run as root or grant cap_net_raw", err, err2)
 	}
 	return t, nil
@@ -91,7 +74,11 @@ func newICMPTransport(dst *net.IPAddr, v6 bool) (*icmpTransport, error) {
 
 func (t *icmpTransport) privileged() bool { return t.raw }
 
-func (t *icmpTransport) close() error { return t.conn.Close() }
+func (t *icmpTransport) close() error {
+	err := t.conn.Close()
+	t.closeOnce.Do(func() { icmpid.Release(t.id) })
+	return err
+}
 
 func (t *icmpTransport) send(ttl int, seq uint16) error {
 	msg := icmp.Message{Body: &icmp.Echo{ID: int(t.id), Seq: int(seq), Data: []byte("mping-trace")}}

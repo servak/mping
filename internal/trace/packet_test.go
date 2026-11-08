@@ -8,6 +8,8 @@ import (
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
+
+	"github.com/servak/mping/internal/icmpid"
 )
 
 func echoRequest(t *testing.T, v6 bool, id, seq int) []byte {
@@ -126,16 +128,29 @@ func TestParseReplyRejects(t *testing.T) {
 	}
 }
 
-func TestEchoIDAvoidsProberID(t *testing.T) {
-	pid := 0x12345
-	if id := echoID(0x2344, 1, pid); id == uint16(pid&0xffff) {
-		t.Errorf("echo ID %#x equals the ICMP prober ID", id)
+// A tracer's echo ID comes from the process-wide allocator shared with the
+// ICMP probers: it is held while the transport is open, other allocations
+// (probers, other tracers) never get it, and closing releases it once.
+func TestICMPTransportEchoIDShared(t *testing.T) {
+	tp, err := newICMPTransport(&net.IPAddr{IP: net.IPv4(127, 0, 0, 1)}, false)
+	if err != nil {
+		t.Skipf("no ICMP socket: %v", err)
 	}
-	// IDs follow the random base, not the pid: a tracer of one process
-	// must not take the prober ID of the next one (pid+1)
-	if a, b := echoID(0x1000, 1, pid), echoID(0x1000, 1, pid+1); a != b {
-		t.Errorf("echo ID depends on the pid: %#x / %#x", a, b)
+	if tp.id == 0 || !icmpid.InUse(tp.id) {
+		t.Fatalf("echo ID %#x not held in the shared allocator", tp.id)
 	}
+	for range 1000 {
+		id := icmpid.Acquire()
+		if id == tp.id {
+			t.Fatalf("shared allocator handed out the tracer ID %#x", id)
+		}
+		defer icmpid.Release(id)
+	}
+	_ = tp.close()
+	if icmpid.InUse(tp.id) {
+		t.Fatalf("echo ID %#x still held after close", tp.id)
+	}
+	_ = tp.close() // closing twice must not release an ID reacquired since
 }
 
 // The echo ID decides whether a reply is ours. Replies from, or quoting, an

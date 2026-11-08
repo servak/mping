@@ -4,21 +4,43 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/servak/mping/internal/icmpid"
 	"github.com/servak/mping/internal/trace"
 )
 
-// Echo IDs of the probers in one process are distinct and never 0.
-func TestNextEchoIDDistinct(t *testing.T) {
-	seen := make(map[int]bool)
-	for range 1000 {
-		id := nextEchoID()
-		if id <= 0 || id > 0xffff {
-			t.Fatalf("nextEchoID() = %d, out of range", id)
+// Probers and path tracers draw their echo IDs from one process-wide
+// allocator: the IDs held at once are distinct and never 0, also while
+// tracers churn (they restart on every target change), and a stopped
+// prober releases its ID.
+func TestEchoIDsDisjointFromTracer(t *testing.T) {
+	var probers []*ICMPProber
+	held := make(map[uint16]bool)
+	for i := range 200 {
+		p := newICMPProber(ICMPV4, newFakeICMPConn(), nil, "icmpv4")
+		probers = append(probers, p)
+		id := uint16(p.runID)
+		if id == 0 || p.runID > 0xffff || held[id] {
+			t.Fatalf("prober echo ID %d: zero, out of range or duplicate", p.runID)
 		}
-		if seen[id] {
-			t.Fatalf("nextEchoID() returned %d twice", id)
+		held[id] = true
+		// a tracer starting and stopping between probers (trace uses
+		// icmpid.Acquire / Release for its transports)
+		tr := icmpid.Acquire()
+		if tr == 0 || held[tr] {
+			t.Fatalf("tracer echo ID %#x: zero or held by a prober", tr)
 		}
-		seen[id] = true
+		if i%2 == 0 {
+			icmpid.Release(tr)
+		} else {
+			held[tr] = true
+			defer icmpid.Release(tr)
+		}
+	}
+	for _, p := range probers {
+		p.Stop()
+		if icmpid.InUse(uint16(p.runID)) {
+			t.Fatalf("echo ID %d still held after Stop", p.runID)
+		}
 	}
 }
 
