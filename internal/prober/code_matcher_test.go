@@ -228,3 +228,14 @@ func TestIsValidCodePattern(t *testing.T) {
 		})
 	}
 }
+
+func TestIsValidCodePatternRejectsReversedRange(t *testing.T) {
+	for _, p := range []string{"299-200", "200,400-300"} {
+		if IsValidCodePattern(p) {
+			t.Errorf("IsValidCodePattern(%q) = true, want false", p)
+		}
+	}
+	if !IsValidCodePattern("200-200") {
+		t.Error("single-value range should stay valid")
+	}
+}
