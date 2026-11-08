@@ -88,6 +88,12 @@ jobs:
       run: gosec -no-fail ./...
       continue-on-error: true
 
+    - name: Install govulncheck
+      run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+    - name: Run govulncheck
+      run: govulncheck ./...
+
   mod-tidy:
     name: Go Mod Tidy
     runs-on: ubuntu-latest
