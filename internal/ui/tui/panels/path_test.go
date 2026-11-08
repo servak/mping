@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
+	"github.com/rivo/tview"
 	"github.com/servak/mping/internal/trace"
 	"github.com/servak/mping/internal/ui/shared"
 )
@@ -104,6 +106,41 @@ func TestFormatPathProtocolAndPrivilegeNote(t *testing.T) {
 		}
 		if note := strings.Contains(got, "unprivileged ICMP"); note != tt.wantNote {
 			t.Errorf("proto %q: unprivileged note = %v, want %v", tt.proto, note, tt.wantNote)
+		}
+	}
+}
+
+// Regression: widths and truncation used byte lengths, which misaligned the
+// columns and could cut a multibyte name in the middle of a character.
+func TestFormatPathMultibyteNames(t *testing.T) {
+	// uniseg (used by tview) ignores the locale; go-runewidth did not and
+	// counted "…" as 2 columns here, misaligning truncated rows.
+	t.Setenv("LANG", "ja_JP.UTF-8")
+	t.Setenv("LC_ALL", "ja_JP.UTF-8")
+	theme := shared.PredefinedThemes["dark"]
+	res := &trace.Result{
+		Dst: net.ParseIP("192.0.2.10"), Rounds: 3, Reached: true, Privileged: true,
+		Hops: []trace.Hop{
+			{TTL: 1, Addr: "192.0.2.1", Name: strings.Repeat("ルーター", 12) + ".example.jp", Sent: 3, Recv: 3, Avg: time.Millisecond},
+			{TTL: 2, Addr: "192.0.2.2", Name: "ゲートウェイ.example.jp", Sent: 3, Recv: 3, Avg: time.Millisecond},
+			{TTL: 3, Addr: "192.0.2.10", Sent: 3, Recv: 3, Avg: time.Millisecond},
+		},
+	}
+	got := FormatPath("example.jp", res, nil, &theme)
+	if !utf8.ValidString(got) {
+		t.Fatalf("invalid UTF-8:\n%q", got)
+	}
+	lines := strings.Split(got, "\n")
+	want := -1
+	if !strings.Contains(got, "…") {
+		t.Fatalf("expected a truncated row:\n%s", got)
+	}
+	for _, l := range lines[1:] { // skip the title; table header and hop rows must align
+		w := tview.TaggedStringWidth(l)
+		if want < 0 {
+			want = w
+		} else if w != want {
+			t.Errorf("line width %d, want %d: %q", w, want, l)
 		}
 	}
 }

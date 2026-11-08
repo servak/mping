@@ -110,8 +110,19 @@ func (a *TUIApp) setupKeyBindings() {
 			return event
 		}
 
-		// When filter input is visible, let it handle its own keys
+		// While the filter bar is open every key belongs to it, so a global
+		// command (sort, reset, quit) can never run mid-edit. If focus moved
+		// away (e.g. a mouse click on the list), Esc cancels editing like it
+		// does in the input and any other key returns focus to the input.
 		if a.layout.IsFilterShown() {
+			input := a.layout.GetFilterInput()
+			if !input.HasFocus() {
+				if event.Key() == tcell.KeyEscape {
+					a.handleFilterDone(tcell.KeyEscape)
+					return nil
+				}
+				a.app.SetFocus(input)
+			}
 			return event
 		}
 
@@ -173,6 +184,7 @@ func (a *TUIApp) setupKeyBindings() {
 func (a *TUIApp) setupHelpModal() {
 	helpModal := a.createHelpModal()
 	a.layout.AddModal("help", helpModal)
+	a.layout.RegisterThemedModal(helpModal)
 }
 
 // createHelpModal creates help modal content
@@ -210,7 +222,7 @@ Press 'h' or Esc to close           `
 		SetText(helpText).
 		AddButtons([]string{"Close"}).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-			// Button press handling is done by parent
+			a.hideHelp()
 		})
 }
 
@@ -307,6 +319,7 @@ func (a *TUIApp) handleRowSelection(row, col int) {
 // Theme-related methods
 func (a *TUIApp) cycleTheme() {
 	a.config.CycleTheme()
+	a.layout.ApplyTheme()
 }
 
 // Beep-related methods
@@ -321,7 +334,9 @@ func (a *TUIApp) toggleSilence() {
 	if a.notifier == nil {
 		return
 	}
-	if host := a.state.GetSelectedHost(); host != "" {
-		a.notifier.ToggleSilence(host)
+	// Use the highlighted row: the selected host may be hidden by the filter
+	// while the list highlights another row.
+	if m, ok := a.layout.GetHostListPanel().CurrentSelectedMetric(); ok {
+		a.notifier.ToggleSilence(m.GetName())
 	}
 }

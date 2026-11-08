@@ -227,3 +227,42 @@ func TestFormatLastFailCell(t *testing.T) {
 		}
 	}
 }
+
+// Regression: remote-provided strings were parsed as tview color tags.
+func TestRemoteTextIsEscaped(t *testing.T) {
+	theme := shared.PredefinedThemes["dark"]
+	now := time.Now()
+	mm := statstest.FromEvents(t,
+		&prober.Event{Key: "[red]host", DisplayName: "[red]host", Result: prober.REGISTER},
+		&prober.Event{Key: "[red]host", Result: prober.FAILED, SentTime: now, Message: "bad [abc::] reason"},
+	)
+	m := mm.SortBy(stats.Success, true)[0]
+
+	detail := FormatHostDetail(m, &theme)
+	if strings.Contains(detail, "[abc::]") || !strings.Contains(detail, "[abc::[]") {
+		t.Errorf("error text not escaped:\n%s", detail)
+	}
+	if got := FormatHistory(m, &theme); strings.Contains(got, "[abc::]") {
+		t.Errorf("history error not escaped:\n%s", got)
+	}
+
+	// Host list cells
+	panel := NewHostListPanel(newMockState(), mm, nil, shared.DefaultConfig())
+	panel.Update()
+	for col := 0; col < panel.table.GetColumnCount(); col++ {
+		txt := panel.table.GetCell(1, col).Text
+		if strings.Contains(txt, "[red]") || strings.Contains(txt, "[abc::]") {
+			t.Errorf("column %d not escaped: %q", col, txt)
+		}
+	}
+
+	// Header
+	cfg := shared.DefaultConfig()
+	cfg.Title = "[red]title"
+	st := newMockState()
+	st.filter = "[abc::]"
+	hdr := NewHeaderPanel(st, cfg, time.Second, time.Second).generateHeaderContent()
+	if strings.Contains(hdr, "[red]title") || strings.Contains(hdr, "[abc::]") {
+		t.Errorf("header not escaped: %q", hdr)
+	}
+}

@@ -65,14 +65,14 @@ func (h *HeaderPanel) generateHeaderContent() string {
 	theme := h.config.GetTheme()
 	if h.config.Title != "" {
 		// Use title from config if available
-		parts = append(parts, fmt.Sprintf("[%s]%s[-]", theme.Primary, h.config.Title))
+		parts = append(parts, fmt.Sprintf("[%s]%s[-]", theme.Primary, tview.Escape(h.config.Title)))
 	}
 	parts = append(parts, fmt.Sprintf("[%s]Sort: %s[-]", theme.Accent, sortDisplay))
 	parts = append(parts, fmt.Sprintf("[%s]Interval: %dms[-]", theme.Accent, h.interval.Milliseconds()))
 	parts = append(parts, fmt.Sprintf("[%s]Timeout: %dms[-]", theme.Accent, h.timeout.Milliseconds()))
 
 	if filterText != "" {
-		parts = append(parts, fmt.Sprintf("[%s]Filter: %s[-]", theme.Warning, filterText))
+		parts = append(parts, fmt.Sprintf("[%s]Filter: %s[-]", theme.Warning, tview.Escape(filterText)))
 	}
 
 	// Add beep state
@@ -84,7 +84,7 @@ func (h *HeaderPanel) generateHeaderContent() string {
 		parts = append(parts, fmt.Sprintf("[%s]Beep: %s[-]", theme.Accent, beepState))
 	}
 
-	parts = append(parts, fmt.Sprintf("[%s]Theme: %s[-]", theme.Secondary, h.config.Theme))
+	parts = append(parts, fmt.Sprintf("[%s]Theme: %s[-]", theme.Secondary, tview.Escape(h.config.Theme)))
 	sep := fmt.Sprintf("[%s] | [-]", theme.Separator)
 	return strings.Join(parts, sep)
 }
