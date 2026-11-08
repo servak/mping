@@ -1,6 +1,10 @@
 package trace
 
-import "testing"
+import (
+	"net"
+	"runtime"
+	"testing"
+)
 
 func TestHostFromTarget(t *testing.T) {
 	tests := []struct {
@@ -51,4 +55,48 @@ func TestProtoForProbeType(t *testing.T) {
 			t.Errorf("ProtoForProbeType(%q) = %s, want %s", pt, got, want)
 		}
 	}
+}
+
+func TestResolveKeepsZone(t *testing.T) {
+	ifname := loopbackName(t)
+	addr, err := ResolveAddr("fe80::1%"+ifname, false)
+	if err != nil {
+		t.Fatalf("ResolveAddr: %v", err)
+	}
+	if !addr.IP.Equal(net.ParseIP("fe80::1")) || addr.Zone != ifname {
+		t.Errorf("ResolveAddr = %+v, want fe80::1 zone %s", addr, ifname)
+	}
+	for _, target := range []string{"fe80::1%" + ifname, "tcp://[fe80::1%25" + ifname + "]:443"} {
+		tr, err := New(target, Config{Proto: ProtoUDP, NoDNS: true})
+		if err != nil {
+			t.Logf("%s: cannot open sockets: %v", target, err)
+			continue
+		}
+		tp := tr.tp.(*udpTransport)
+		if tp.zone != ifname {
+			t.Errorf("%s: transport zone = %q, want %q", target, tp.zone, ifname)
+		}
+		// macOS has fe80::1 on lo0: a send without the zone fails there
+		if runtime.GOOS == "darwin" {
+			if err := tp.send(1, UDPBasePort); err != nil {
+				t.Errorf("%s: send: %v", target, err)
+			}
+		}
+		tr.Close()
+	}
+}
+
+func loopbackName(t *testing.T) string {
+	t.Helper()
+	ifs, err := net.Interfaces()
+	if err != nil {
+		t.Skip(err)
+	}
+	for _, ifi := range ifs {
+		if ifi.Flags&net.FlagLoopback != 0 {
+			return ifi.Name
+		}
+	}
+	t.Skip("no loopback interface")
+	return ""
 }

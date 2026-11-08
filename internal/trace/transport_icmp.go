@@ -69,19 +69,19 @@ type icmpTransport struct {
 // newICMPTransport prefers a raw socket and falls back to an unprivileged
 // datagram ICMP socket; on macOS the fallback still receives Time Exceeded
 // messages, on Linux only the destination may be visible without privileges.
-func newICMPTransport(dst net.IP, v6 bool) (*icmpTransport, error) {
-	t := &icmpTransport{v6: v6, dst: dst, id: nextEchoID()}
+func newICMPTransport(dst *net.IPAddr, v6 bool) (*icmpTransport, error) {
+	t := &icmpTransport{v6: v6, dst: dst.IP, id: nextEchoID()}
 	rawNet, dgramNet, laddr := "ip4:icmp", "udp4", "0.0.0.0"
 	if v6 {
 		rawNet, dgramNet, laddr = "ip6:ipv6-icmp", "udp6", "::"
 	}
 	if c, err := icmp.ListenPacket(rawNet, laddr); err == nil {
 		t.conn, t.raw = c, true
-		t.dstAddr = &net.IPAddr{IP: dst}
+		t.dstAddr = &net.IPAddr{IP: dst.IP, Zone: dst.Zone}
 		t.checkID = true
 	} else if c, err2 := icmp.ListenPacket(dgramNet, laddr); err2 == nil {
 		t.conn = c
-		t.dstAddr = &net.UDPAddr{IP: dst}
+		t.dstAddr = &net.UDPAddr{IP: dst.IP, Zone: dst.Zone}
 		// Linux rewrites the echo ID of datagram ICMP sockets and demuxes
 		// replies per socket, so only check the ID elsewhere (e.g. macOS).
 		t.checkID = runtime.GOOS != "linux"

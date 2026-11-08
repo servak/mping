@@ -110,6 +110,7 @@ var errUDPUnsupported = errors.New("UDP trace needs root (or cap_net_raw) on thi
 type udpTransport struct {
 	v6      bool
 	dst     net.IP
+	zone    string // IPv6 zone of dst (link-local destinations)
 	conn    *net.UDPConn
 	srcPort uint16
 	icmp    *icmp.PacketConn // nil: receive from the error queue
@@ -118,7 +119,7 @@ type udpTransport struct {
 	writeMu sync.Mutex // TTL is a socket option, so set+write must be atomic
 }
 
-func newUDPTransport(dst net.IP, v6 bool) (*udpTransport, error) {
+func newUDPTransport(dst *net.IPAddr, v6 bool) (*udpTransport, error) {
 	udpNet, rawNet, dgramNet, laddr := "udp4", "ip4:icmp", "udp4", "0.0.0.0"
 	if v6 {
 		udpNet, rawNet, dgramNet, laddr = "udp6", "ip6:ipv6-icmp", "udp6", "::"
@@ -129,7 +130,8 @@ func newUDPTransport(dst net.IP, v6 bool) (*udpTransport, error) {
 	}
 	t := &udpTransport{
 		v6:      v6,
-		dst:     dst,
+		dst:     dst.IP,
+		zone:    dst.Zone,
 		conn:    conn,
 		srcPort: uint16(conn.LocalAddr().(*net.UDPAddr).Port),
 	}
@@ -179,7 +181,7 @@ func (t *udpTransport) send(ttl int, port uint16) error {
 	if err != nil {
 		return err
 	}
-	dst := &net.UDPAddr{IP: t.dst, Port: int(port)}
+	dst := &net.UDPAddr{IP: t.dst, Port: int(port), Zone: t.zone}
 	payload := udpProbePayload(ttl)
 	for i := 0; ; i++ {
 		_, err = t.conn.WriteToUDP(payload, dst)

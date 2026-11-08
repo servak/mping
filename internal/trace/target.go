@@ -67,9 +67,20 @@ func ProtoForProbeType(probeType string) Proto {
 }
 
 // Resolve resolves host to an IP address, preferring IPv4 unless preferV6.
+// The IPv6 zone of a scoped address is dropped; see ResolveAddr.
 func Resolve(host string, preferV6 bool) (net.IP, error) {
+	addr, err := ResolveAddr(host, preferV6)
+	if err != nil {
+		return nil, err
+	}
+	return addr.IP, nil
+}
+
+// ResolveAddr resolves host like Resolve but keeps the zone of a scoped IPv6
+// address (fe80::1%en0), which link-local destinations need to be reached.
+func ResolveAddr(host string, preferV6 bool) (*net.IPAddr, error) {
 	if ip := net.ParseIP(host); ip != nil {
-		return ip, nil
+		return &net.IPAddr{IP: ip}, nil
 	}
 	order := []string{"ip4", "ip6"}
 	if preferV6 {
@@ -79,7 +90,7 @@ func Resolve(host string, preferV6 bool) (net.IP, error) {
 	for _, network := range order {
 		addr, err := net.ResolveIPAddr(network, host)
 		if err == nil {
-			return addr.IP, nil
+			return addr, nil
 		}
 		lastErr = err
 	}

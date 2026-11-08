@@ -274,11 +274,11 @@ type Tracer struct {
 func New(target string, cfg Config) (*Tracer, error) {
 	cfg = cfg.withDefaults()
 	host, preferV6 := HostFromTarget(target)
-	dst, err := Resolve(host, preferV6)
+	dst, err := ResolveAddr(host, preferV6)
 	if err != nil {
 		return nil, err
 	}
-	v6 := dst.To4() == nil
+	v6 := dst.IP.To4() == nil
 
 	var tp transport
 	switch cfg.Proto {
@@ -292,7 +292,7 @@ func New(target string, cfg Config) (*Tracer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newTracer(cfg, dst, tp), nil
+	return newTracer(cfg, dst.IP, tp), nil
 }
 
 func newTracer(cfg Config, dst net.IP, tp transport) *Tracer {
