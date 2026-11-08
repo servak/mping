@@ -135,12 +135,15 @@ func TestThemeChangeRestylesFilterAndModal(t *testing.T) {
 	l.RegisterThemedModal(modal)
 
 	cfg.CycleTheme()
-	l.UpdateAll()
+	l.ApplyTheme()
 
 	theme := cfg.GetTheme()
 	fg, _, _ := l.filterInput.GetLabelStyle().Decompose()
 	if fg != tcell.GetColor(theme.Primary) {
 		t.Errorf("filter label color = %v, want %v", fg, tcell.GetColor(theme.Primary))
+	}
+	if _, got, _ := l.filterInput.GetFieldStyle().Decompose(); got != tcell.GetColor(theme.SelectionBg) {
+		t.Errorf("filter field background = %v, want %v", got, tcell.GetColor(theme.SelectionBg))
 	}
 	screen := tcell.NewSimulationScreen("")
 	if err := screen.Init(); err != nil {

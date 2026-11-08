@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/mattn/go-runewidth"
 	"github.com/rivo/tview"
+	"github.com/rivo/uniseg"
 
 	"github.com/servak/mping/internal/trace"
 	"github.com/servak/mping/internal/ui/shared"
@@ -82,7 +82,7 @@ func FormatPath(target string, res *trace.Result, err error, theme *shared.Theme
 	for i, h := range res.Hops {
 		rows[i] = pathHopRows(h)
 		for _, r := range rows[i] {
-			width = max(width, min(runewidth.StringWidth(r.host()), maxPathHostWidth))
+			width = max(width, min(uniseg.StringWidth(r.host()), maxPathHostWidth))
 		}
 	}
 
@@ -167,18 +167,18 @@ func (r pathRow) fit(limit int) string {
 	if r.stale {
 		suffix = staleSuffix
 	}
-	if runewidth.StringWidth(r.label)+len(suffix) <= limit {
+	if uniseg.StringWidth(r.label)+len(suffix) <= limit {
 		return r.label + suffix
 	}
 	// Truncate by display width; the tail "…" counts toward the width
-	return runewidth.Truncate(r.label, max(limit-len(suffix), 1), "…") + suffix
+	return truncateWidth(r.label, max(limit-len(suffix), 1)) + suffix
 }
 
 // padRight escapes s for tview and pads it with spaces to width display
 // columns. Padding is measured on the unescaped text: Escape adds characters
 // and multibyte names are not one column per byte or rune.
 func padRight(s string, width int) string {
-	return tview.Escape(s) + strings.Repeat(" ", max(width-runewidth.StringWidth(s), 0))
+	return tview.Escape(s) + strings.Repeat(" ", max(width-uniseg.StringWidth(s), 0))
 }
 
 // pathHopRows lays out a hop: the dominant responder first (it carries the
@@ -227,4 +227,27 @@ func responderLabel(addr, name string) string {
 		return name
 	}
 	return addr
+}
+
+// truncateWidth shortens s to at most width columns including a trailing "…".
+// It measures with uniseg, the same measure tview/tcell use for drawing, and
+// cuts only on grapheme cluster boundaries.
+func truncateWidth(s string, width int) string {
+	if uniseg.StringWidth(s) <= width {
+		return s
+	}
+	const ellipsis = "…"
+	budget := width - uniseg.StringWidth(ellipsis)
+	var sb strings.Builder
+	used := 0
+	g := uniseg.NewGraphemes(s)
+	for g.Next() {
+		w := g.Width()
+		if used+w > budget {
+			break
+		}
+		sb.WriteString(g.Str())
+		used += w
+	}
+	return sb.String() + ellipsis
 }

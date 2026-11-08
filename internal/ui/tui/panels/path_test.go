@@ -3,14 +3,12 @@ package panels
 import (
 	"errors"
 	"net"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
-	"github.com/mattn/go-runewidth"
-
+	"github.com/rivo/tview"
 	"github.com/servak/mping/internal/trace"
 	"github.com/servak/mping/internal/ui/shared"
 )
@@ -115,6 +113,10 @@ func TestFormatPathProtocolAndPrivilegeNote(t *testing.T) {
 // Regression: widths and truncation used byte lengths, which misaligned the
 // columns and could cut a multibyte name in the middle of a character.
 func TestFormatPathMultibyteNames(t *testing.T) {
+	// uniseg (used by tview) ignores the locale; go-runewidth did not and
+	// counted "…" as 2 columns here, misaligning truncated rows.
+	t.Setenv("LANG", "ja_JP.UTF-8")
+	t.Setenv("LC_ALL", "ja_JP.UTF-8")
 	theme := shared.PredefinedThemes["dark"]
 	res := &trace.Result{
 		Dst: net.ParseIP("192.0.2.10"), Rounds: 3, Reached: true, Privileged: true,
@@ -128,11 +130,13 @@ func TestFormatPathMultibyteNames(t *testing.T) {
 	if !utf8.ValidString(got) {
 		t.Fatalf("invalid UTF-8:\n%q", got)
 	}
-	tags := regexp.MustCompile(`\[[^\]]*\]`)
 	lines := strings.Split(got, "\n")
 	want := -1
+	if !strings.Contains(got, "…") {
+		t.Fatalf("expected a truncated row:\n%s", got)
+	}
 	for _, l := range lines[1:] { // skip the title; table header and hop rows must align
-		w := runewidth.StringWidth(tags.ReplaceAllString(l, ""))
+		w := tview.TaggedStringWidth(l)
 		if want < 0 {
 			want = w
 		} else if w != want {

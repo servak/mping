@@ -110,15 +110,20 @@ func (a *TUIApp) setupKeyBindings() {
 			return event
 		}
 
-		// While the filter input has focus it handles its own keys. If the
-		// bar is still open but focus moved away (e.g. a mouse click on the
-		// list), close it so the main bindings, Esc included, keep working.
+		// While the filter bar is open every key belongs to it, so a global
+		// command (sort, reset, quit) can never run mid-edit. If focus moved
+		// away (e.g. a mouse click on the list), Esc cancels editing like it
+		// does in the input and any other key returns focus to the input.
 		if a.layout.IsFilterShown() {
-			if a.layout.GetFilterInput().HasFocus() {
-				return event
+			input := a.layout.GetFilterInput()
+			if !input.HasFocus() {
+				if event.Key() == tcell.KeyEscape {
+					a.handleFilterDone(tcell.KeyEscape)
+					return nil
+				}
+				a.app.SetFocus(input)
 			}
-			a.layout.HideFilterInput()
-			a.layout.RestoreFocus()
+			return event
 		}
 
 		// Main screen key bindings
@@ -314,6 +319,7 @@ func (a *TUIApp) handleRowSelection(row, col int) {
 // Theme-related methods
 func (a *TUIApp) cycleTheme() {
 	a.config.CycleTheme()
+	a.layout.ApplyTheme()
 }
 
 // Beep-related methods

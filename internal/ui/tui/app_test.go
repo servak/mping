@@ -218,35 +218,64 @@ func TestToggleSilenceMutesHighlightedRow(t *testing.T) {
 }
 
 // Regression: clicking the list while the filter bar was open moved focus
-// away but left the bar "shown", so every key was passed through and Esc/q/v
-// stopped working.
-func TestKeysWorkAfterFilterLosesFocus(t *testing.T) {
-	mm := statstest.NewQuietManager()
-	statstest.Register(t, mm, "a")
-	app := NewTUIApp(mm, nil, shared.DefaultConfig(), time.Second, time.Second)
-	capture := app.app.GetInputCapture()
-
-	app.state.SetFilter("a")
-	app.showFilter()
-	// While the input has focus, keys go to it
-	if ev := capture(tcell.NewEventKey(tcell.KeyRune, 'v', tcell.ModNone)); ev == nil {
-		t.Fatal("keys must reach the focused filter input")
+// away but left the bar "shown". Keys must never run global commands in that
+// state: Esc cancels editing (keeping the applied filter), anything else goes
+// back to the input.
+func TestKeysAfterFilterLosesFocus(t *testing.T) {
+	setup := func() (*TUIApp, func(*tcell.EventKey) *tcell.EventKey) {
+		mm := statstest.NewQuietManager()
+		statstest.Register(t, mm, "a")
+		app := NewTUIApp(mm, nil, shared.DefaultConfig(), time.Second, time.Second)
+		app.state.SetFilter("a")
+		app.showFilter()
+		app.layout.SetFilterText("typed")
+		// A mouse click on the list focuses the table
+		app.app.SetFocus(app.layout.GetHostListPanel().GetView())
+		return app, app.app.GetInputCapture()
 	}
 
-	// A mouse click on the list focuses the table
-	app.app.SetFocus(app.layout.GetHostListPanel().GetView())
+	t.Run("Esc cancels editing and keeps the applied filter", func(t *testing.T) {
+		app, capture := setup()
+		if ev := capture(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)); ev != nil {
+			t.Errorf("Esc was not handled: %v", ev)
+		}
+		if app.layout.IsFilterShown() {
+			t.Error("filter bar should close")
+		}
+		if app.state.GetFilter() != "a" {
+			t.Errorf("applied filter = %q, want %q", app.state.GetFilter(), "a")
+		}
+	})
 
-	if ev := capture(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone)); ev != nil {
-		t.Errorf("Esc was not handled: %v", ev)
-	}
-	if app.layout.IsFilterShown() {
-		t.Error("filter bar should close once it lost focus")
-	}
-	if app.state.GetFilter() != "" {
-		t.Errorf("Esc should clear the active filter, got %q", app.state.GetFilter())
-	}
-	if ev := capture(tcell.NewEventKey(tcell.KeyRune, 'v', tcell.ModNone)); ev != nil {
-		t.Error("main key bindings must work again")
+	t.Run("other keys return to the input and run no command", func(t *testing.T) {
+		for _, r := range []rune{'q', 's', 'R', 'v'} {
+			app, capture := setup()
+			sortBefore := app.state.GetSortKey()
+			ev := capture(tcell.NewEventKey(tcell.KeyRune, r, tcell.ModNone))
+			if ev == nil || ev.Rune() != r {
+				t.Errorf("%q must be passed on to the filter input, got %v", r, ev)
+			}
+			if !app.layout.IsFilterShown() || !app.layout.GetFilterInput().HasFocus() {
+				t.Errorf("%q: focus should return to the filter input", r)
+			}
+			if app.layout.GetFilterText() != "typed" {
+				t.Errorf("%q: typed text lost: %q", r, app.layout.GetFilterText())
+			}
+			if app.state.GetSortKey() != sortBefore {
+				t.Errorf("%q changed the sort key", r)
+			}
+		}
+	})
+}
+
+// Regression: the theme was re-applied every tick; now `t` applies it at once.
+func TestCycleThemeRestylesImmediately(t *testing.T) {
+	app := NewTUIApp(statstest.NewQuietManager(), nil, shared.DefaultConfig(), time.Second, time.Second)
+	app.cycleTheme()
+	theme := app.config.GetTheme()
+	fg, _, _ := app.layout.GetFilterInput().GetLabelStyle().Decompose()
+	if fg != tcell.GetColor(theme.Primary) {
+		t.Errorf("filter label color = %v, want %v", fg, tcell.GetColor(theme.Primary))
 	}
 }
 

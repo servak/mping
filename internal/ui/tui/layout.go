@@ -95,13 +95,16 @@ func (l *LayoutManager) setupPanels(uiState *state.UIState, mm stats.MetricsProv
 
 	// Setup filter input with theme-aware colors
 	l.filterInput = tview.NewInputField().SetLabel("Filter: ")
-	l.applyTheme()
+	l.ApplyTheme()
 }
 
-// applyTheme restyles the widgets that are not redrawn by a panel Update
-func (l *LayoutManager) applyTheme() {
+// ApplyTheme restyles the widgets that are not redrawn by a panel Update.
+// Call it when the theme changes; it is not run on every tick.
+func (l *LayoutManager) ApplyTheme() {
 	theme := l.config.GetTheme()
-	l.filterInput.SetLabelColor(tcell.GetColor(theme.Primary))
+	l.filterInput.SetLabelColor(tcell.GetColor(theme.Primary)).
+		SetFieldBackgroundColor(tcell.GetColor(theme.SelectionBg)).
+		SetFieldTextColor(tcell.GetColor(theme.SelectionFg))
 	for _, m := range l.modals {
 		styleModal(m, theme)
 	}
@@ -217,7 +220,6 @@ func (l *LayoutManager) setMode(mode DisplayMode) {
 
 // UpdateAll refreshes all panels
 func (l *LayoutManager) UpdateAll() {
-	l.applyTheme()
 	l.header.Update()
 	l.footer.Update()
 	l.hostList.Update()

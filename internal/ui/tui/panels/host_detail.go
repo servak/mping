@@ -2,6 +2,7 @@ package panels
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -37,23 +38,26 @@ func NewHostDetailPanel(config *shared.Config) *HostDetailPanel {
 	}
 }
 
-// Update refreshes host detail display for current host
+// Update refreshes host detail display for current host. It is the single
+// place that styles the panel and decides its title.
 func (h *HostDetailPanel) Update() {
+	theme := h.config.GetTheme()
+	title := " Host Details "
+	if h.currentMetrics != nil {
+		title = " Host Details: " + tview.Escape(h.currentHost) + " "
+	}
+	h.container.
+		SetBorder(true).
+		SetTitle(fmt.Sprintf(" [%s]%s", theme.Primary, strings.TrimPrefix(title, " "))).
+		SetBackgroundColor(tcell.GetColor(theme.Background)).
+		SetBorderColor(tcell.GetColor(theme.Primary))
+	h.view.SetBackgroundColor(tcell.GetColor(theme.Background))
+
 	if h.currentMetrics == nil {
 		h.view.SetText("Select a host to view details")
 		return
 	}
-	theme := h.config.GetTheme()
-	h.container.
-		SetBorder(true).
-		SetTitle(fmt.Sprintf(" [%s]Host Details ", theme.Primary)).
-		SetBackgroundColor(tcell.GetColor(theme.Background)).
-		SetBorderColor(tcell.GetColor(theme.Primary))
-
-	// Format and display the host details with history
-	content := FormatHostDetail(h.currentMetrics, theme)
-	h.view.SetBackgroundColor(tcell.GetColor(theme.Background))
-	h.view.SetText(content)
+	h.view.SetText(FormatHostDetail(h.currentMetrics, theme))
 }
 
 // SetMetrics sets the current metrics object directly
@@ -61,11 +65,9 @@ func (h *HostDetailPanel) SetMetrics(metrics stats.Metrics) {
 	h.currentMetrics = metrics
 	if metrics == nil {
 		h.currentHost = ""
-		h.container.SetTitle(" Host Details ")
 		return
 	}
 	h.currentHost = metrics.GetName()
-	h.container.SetTitle(" Host Details: " + tview.Escape(h.currentHost) + " ")
 }
 
 // GetView returns the underlying tview component
