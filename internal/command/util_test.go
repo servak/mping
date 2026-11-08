@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -632,5 +633,35 @@ func TestExpandTargetsSizeCap(t *testing.T) {
 	got, err = ExpandTargets([]string{"255.255.255.252/30"}, "")
 	if err != nil || len(got) != 4 || got[3] != "255.255.255.255" {
 		t.Errorf("top of range: got %v, err %v", got, err)
+	}
+}
+
+func TestExpandTargetsEnforcesOverallCap(t *testing.T) {
+	// Plain hosts first, then a bracket range: the total exceeds the cap even
+	// though no single expansion does.
+	plain := make([]string, maxTargets)
+	for i := range plain {
+		plain[i] = "h" + strconv.Itoa(i)
+	}
+	if _, err := ExpandTargets(append(plain, "x[1-5]"), ""); err == nil {
+		t.Error("plain hosts + bracket range over the cap should fail")
+	}
+	// Only plain hosts over the cap.
+	if _, err := ExpandTargets(append(plain, "extra"), ""); err == nil {
+		t.Error("plain hosts over the cap should fail")
+	}
+	if got, err := ExpandTargets(plain, ""); err != nil || len(got) != maxTargets {
+		t.Errorf("exactly the cap should pass, got %d, %v", len(got), err)
+	}
+}
+
+func TestCIDRCapErrorReportsRealSize(t *testing.T) {
+	_, err := ExpandTargets([]string{"10.0.0.0/8"}, "")
+	if err == nil || !strings.Contains(err.Error(), "2^24") {
+		t.Errorf("error = %v, want mention of 2^24", err)
+	}
+	_, err = ExpandTargets([]string{"::/0"}, "")
+	if err == nil || !strings.Contains(err.Error(), "2^128") {
+		t.Errorf("error = %v, want mention of 2^128", err)
 	}
 }

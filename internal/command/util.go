@@ -24,7 +24,13 @@ func ExpandTargets(args []string, filePath string) ([]string, error) {
 	if targets, err = parseBrackets(targets); err != nil {
 		return nil, err
 	}
-	return parseCIDR(targets)
+	if targets, err = parseCIDR(targets); err != nil {
+		return nil, err
+	}
+	if len(targets) > maxTargets {
+		return nil, errTooManyTargets(len(targets))
+	}
+	return targets, nil
 }
 
 func parseBrackets(_hosts []string) ([]string, error) {
@@ -32,6 +38,9 @@ func parseBrackets(_hosts []string) ([]string, error) {
 	bracketRegex := regexp.MustCompile(`\[([^\]]+)\]`)
 
 	for _, h := range _hosts {
+		if len(hosts) > maxTargets {
+			return nil, errTooManyTargets(len(hosts))
+		}
 		matches := bracketRegex.FindAllStringSubmatch(h, -1)
 		if len(matches) == 0 {
 			hosts = append(hosts, h)
@@ -135,7 +144,7 @@ func expandRange(content string) ([]string, error) {
 	if start > end {
 		return []string{content}, nil // Invalid range
 	}
-	if start < 0 || end-start >= maxTargets {
+	if end-start >= maxTargets {
 		return nil, errTooManyTargets(end - start + 1)
 	}
 
@@ -189,10 +198,11 @@ func parseCIDR(_hosts []string) ([]string, error) {
 		}
 
 		ones, bits := ipnet.Mask.Size()
-		if hostBits := bits - ones; hostBits > 16 { // 2^16 == maxTargets
-			return nil, fmt.Errorf("%s: %w", h, errTooManyTargets(maxTargets+1))
+		hostBits := bits - ones
+		if hostBits > 16 { // 2^16 == maxTargets
+			return nil, fmt.Errorf("%s: too many targets (2^%d addresses): expansion is limited to %d", h, hostBits, maxTargets)
 		}
-		count := 1 << (bits - ones)
+		count := 1 << hostBits
 		if len(hosts)+count > maxTargets {
 			return nil, fmt.Errorf("%s: %w", h, errTooManyTargets(len(hosts)+count))
 		}

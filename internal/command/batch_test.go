@@ -1,8 +1,12 @@
 package command
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -82,17 +86,31 @@ func TestBatchCmdRejectsInvalidFlags(t *testing.T) {
 	}
 }
 
-func runBatch(t *testing.T, args ...string) (string, error) {
+func emptyConfig(t *testing.T) string {
 	t.Helper()
-	cmd := NewPingBatchCmd()
+	p := filepath.Join(t.TempDir(), "mping.yml")
+	if err := os.WriteFile(p, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func runBatchWith(t *testing.T, notify signalSource, args ...string) (string, error) {
+	t.Helper()
+	cmd := newPingBatchCmd(notify)
 	var out strings.Builder
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
-	cmd.SetArgs(args)
+	cmd.SetArgs(append([]string{"-c", emptyConfig(t)}, args...))
 	err := cmd.Execute()
 	return out.String(), err
+}
+
+func runBatch(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	return runBatchWith(t, osSignals, args...)
 }
 
 func TestBatchRejectsBadInput(t *testing.T) {
@@ -117,28 +135,42 @@ func TestBatchRejectsBadInput(t *testing.T) {
 	}
 }
 
-func TestBatchStopsOnSignal(t *testing.T) {
+func TestBatchInterruptedExitsNonZero(t *testing.T) {
+	sigs := make(chan os.Signal, 1)
+	sigs <- syscall.SIGTERM
+	var stopped atomic.Bool
+	notify := func() (<-chan os.Signal, func()) {
+		return sigs, func() { stopped.Store(true) }
+	}
 	done := make(chan error, 1)
 	var out string
 	go func() {
 		var err error
-		out, err = runBatch(t, "--count", "100", "-i", "1000", "-t", "200", "-o", "json", "tcp://127.0.0.1:1")
+		out, err = runBatchWith(t, notify, "--count", "100", "-i", "1000", "-t", "200", "-o", "json", "tcp://127.0.0.1:1")
 		done <- err
 	}()
-	time.Sleep(700 * time.Millisecond)
-	if err := syscall.Kill(syscall.Getpid(), syscall.SIGINT); err != nil {
-		t.Fatal(err)
-	}
 	select {
 	case err := <-done:
 		var exitErr *ExitError
-		if err != nil && !errors.As(err, &exitErr) {
-			t.Fatalf("unexpected error: %v", err)
+		if !errors.As(err, &exitErr) {
+			t.Fatalf("expected *ExitError, got %v", err)
 		}
-		if !strings.Contains(out, "127.0.0.1") {
-			t.Errorf("partial report missing: %q", out)
+		if want := 128 + int(syscall.SIGTERM); exitErr.Code != want {
+			t.Errorf("exit code = %d, want %d", exitErr.Code, want)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("batch did not stop after SIGINT")
+		if !strings.Contains(err.Error(), "partial") {
+			t.Errorf("error %q should say the report is partial", err)
+		}
+		// The signal may arrive before the first probe result, so the report
+		// may legitimately be empty; it must still be well-formed.
+		var report []map[string]any
+		if err := json.Unmarshal([]byte(out), &report); err != nil {
+			t.Errorf("partial report is not valid JSON: %v: %q", err, out)
+		}
+		if !stopped.Load() {
+			t.Error("signal handler was not released on first signal")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("batch did not stop after signal")
 	}
 }

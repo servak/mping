@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -50,6 +51,10 @@ mping dns://8.8.8.8/google.com`,
 				return err
 			}
 			if len(hosts) == 0 {
+				if filename != "" {
+					// Explicit input that yields nothing is an error, as in batch.
+					return errors.New("no targets: please set hostname or ip")
+				}
 				cmd.Println("Please set hostname or ip.")
 				cmd.Help()
 				return nil

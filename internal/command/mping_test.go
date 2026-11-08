@@ -3,6 +3,8 @@ package command
 import (
 	"github.com/servak/mping/internal/config"
 	"github.com/spf13/pflag"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -16,6 +18,7 @@ func TestPingCmdRejectsBadInput(t *testing.T) {
 		{"negative timeout", []string{"-t", "-1", "127.0.0.1"}},
 		{"missing target file", []string{"-f", "/nonexistent/hosts.txt"}},
 		{"missing explicit config", []string{"-c", "/nonexistent/mping.yml", "127.0.0.1"}},
+		{"empty target file", []string{"-f", emptyFile(t)}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -23,11 +26,31 @@ func TestPingCmdRejectsBadInput(t *testing.T) {
 			var out strings.Builder
 			cmd.SetOut(&out)
 			cmd.SetErr(&out)
-			cmd.SetArgs(tt.args)
+			cmd.SetArgs(append([]string{"-c", emptyConfig(t)}, tt.args...))
 			if err := cmd.Execute(); err == nil {
 				t.Fatal("expected an error")
 			}
 		})
+	}
+}
+
+func emptyFile(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "hosts.txt")
+	if err := os.WriteFile(p, []byte("# nothing\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestPingCmdNoArgsShowsHelp(t *testing.T) {
+	cmd := NewPingCmd()
+	var out strings.Builder
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", emptyConfig(t)})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("no args should show help without error, got %v", err)
 	}
 }
 
