@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/mattn/go-runewidth"
 	"github.com/rivo/tview"
 
 	"github.com/servak/mping/internal/trace"
@@ -81,7 +82,7 @@ func FormatPath(target string, res *trace.Result, err error, theme *shared.Theme
 	for i, h := range res.Hops {
 		rows[i] = pathHopRows(h)
 		for _, r := range rows[i] {
-			width = max(width, min(len(r.host()), maxPathHostWidth))
+			width = max(width, min(runewidth.StringWidth(r.host()), maxPathHostWidth))
 		}
 	}
 
@@ -106,7 +107,7 @@ func FormatPath(target string, res *trace.Result, err error, theme *shared.Theme
 		}
 		for j, r := range rows[i] {
 			if r.more > 0 {
-				fmt.Fprintf(&sb, "[%s]%3s  %-*s[%s]\n", theme.Secondary, "", width, fmt.Sprintf("+%d more", r.more), theme.Primary)
+				fmt.Fprintf(&sb, "[%s]%3s  %s[%s]\n", theme.Secondary, "", padRight(fmt.Sprintf("+%d more", r.more), width), theme.Primary)
 				continue
 			}
 			share := ""
@@ -119,15 +120,15 @@ func FormatPath(target string, res *trace.Result, err error, theme *shared.Theme
 				last = "-" // the last RTT is old news
 				rowColor = theme.Secondary
 			}
-			host := tview.Escape(r.fit(width))
+			host := padRight(r.fit(width), width)
 			if j == 0 {
-				fmt.Fprintf(&sb, "[%s]%3d  %-*s  %5s[%s]  [%s]%5.1f%%[%s] %4d [%s]%6s %6s %6s %6s[%s]\n",
-					rowColor, h.TTL, width, host, share, theme.Primary, lossColor, loss, theme.Primary, h.Sent,
+				fmt.Fprintf(&sb, "[%s]%3d  %s  %5s[%s]  [%s]%5.1f%%[%s] %4d [%s]%6s %6s %6s %6s[%s]\n",
+					rowColor, h.TTL, host, share, theme.Primary, lossColor, loss, theme.Primary, h.Sent,
 					rowColor, last, df(r.avg), df(r.best), df(r.worst), theme.Primary)
 				continue
 			}
-			fmt.Fprintf(&sb, "[%s]%3s  %-*s  %5s  %6s %4s %6s %6s %6s %6s[%s]\n",
-				rowColor, "", width, host, share, "", "", last, df(r.avg), df(r.best), df(r.worst), theme.Primary)
+			fmt.Fprintf(&sb, "[%s]%3s  %s  %5s  %6s %4s %6s %6s %6s %6s[%s]\n",
+				rowColor, "", host, share, "", "", last, df(r.avg), df(r.best), df(r.worst), theme.Primary)
 		}
 	}
 	if !res.Reached && res.Rounds > 0 {
@@ -166,10 +167,18 @@ func (r pathRow) fit(limit int) string {
 	if r.stale {
 		suffix = staleSuffix
 	}
-	if len(r.label)+len(suffix) <= limit {
+	if runewidth.StringWidth(r.label)+len(suffix) <= limit {
 		return r.label + suffix
 	}
-	return r.label[:max(limit-len(suffix)-1, 0)] + "…" + suffix
+	// Truncate by display width; the tail "…" counts toward the width
+	return runewidth.Truncate(r.label, max(limit-len(suffix), 1), "…") + suffix
+}
+
+// padRight escapes s for tview and pads it with spaces to width display
+// columns. Padding is measured on the unescaped text: Escape adds characters
+// and multibyte names are not one column per byte or rune.
+func padRight(s string, width int) string {
+	return tview.Escape(s) + strings.Repeat(" ", max(width-runewidth.StringWidth(s), 0))
 }
 
 // pathHopRows lays out a hop: the dominant responder first (it carries the
