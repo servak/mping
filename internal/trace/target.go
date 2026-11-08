@@ -54,6 +54,18 @@ func stripPort(hostport string) string {
 	return strings.Trim(hostport, "[]")
 }
 
+// ProtoForProbeType returns the trace protocol matching the flow behaviour of
+// a prober kind ("icmpv4", "http", ...; "" if unknown). ICMP probes use a
+// fixed echo ID and stay on one ECMP branch, so they are traced with ICMP.
+// Every other prober opens a new socket (source port) per probe and spreads
+// over the ECMP branches, so it is traced with UDP to rotating ports.
+func ProtoForProbeType(probeType string) Proto {
+	if probeType == "" || strings.HasPrefix(probeType, "icmp") {
+		return ProtoICMP
+	}
+	return ProtoUDP
+}
+
 // Resolve resolves host to an IP address, preferring IPv4 unless preferV6.
 func Resolve(host string, preferV6 bool) (net.IP, error) {
 	if ip := net.ParseIP(host); ip != nil {

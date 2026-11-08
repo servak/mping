@@ -9,6 +9,9 @@ import (
 // Metrics provides basic statistics for display and sorting
 type Metrics interface {
 	GetName() string
+	// GetProbeType returns the kind of prober of the target (icmpv4, icmpv6,
+	// http, https, tcp, dns, ntp), or "" if it was not registered by a prober
+	GetProbeType() string
 	GetTotal() int
 	GetSuccessful() int
 	GetFailed() int

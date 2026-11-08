@@ -40,6 +40,7 @@ func NewMetricsForTest(name string, historySize, total, success, failed int, los
 
 type metrics struct {
 	Name           string
+	ProbeType      string // prober kind (icmpv4, http, ...); "" if unknown
 	Total          int
 	Successful     int
 	Failed         int
@@ -135,6 +136,10 @@ func (m *metrics) snapshot() *metrics {
 
 func (m *metrics) GetName() string {
 	return m.Name
+}
+
+func (m *metrics) GetProbeType() string {
+	return m.ProbeType
 }
 
 func (m *metrics) GetTotal() int {

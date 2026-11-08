@@ -66,7 +66,7 @@ func (p *TCPProber) Accept(target string) error {
 }
 
 func (p *TCPProber) Start(result chan *Event, interval, timeout time.Duration) error {
-	return runPeriodic(p.loop, result, interval, slices.Sorted(maps.Keys(p.targets)),
+	return runPeriodic(p.loop, result, TCP, interval, slices.Sorted(maps.Keys(p.targets)),
 		func(target string) (string, string) { return target, p.targets[target] },
 		func(target string) { p.sendProbe(result, target, timeout) })
 }

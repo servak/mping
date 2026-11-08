@@ -39,7 +39,7 @@ func hopOf(ttl, sent, recv int, rs ...trace.Responder) trace.Hop {
 func pathFixtures() map[string]*trace.Result {
 	dst := net.ParseIP("192.0.2.10")
 	mk := func(hops ...trace.Hop) *trace.Result {
-		return &trace.Result{Dst: dst, Rounds: 42, Reached: true, Privileged: true, Hops: hops}
+		return &trace.Result{Dst: dst, Proto: trace.ProtoICMP, Rounds: 42, Reached: true, Privileged: true, Hops: hops}
 	}
 	dest := hopOf(9, 42, 42, resp("192.0.2.10", "", 42, 8, 8, 7, 9, false))
 	many := []trace.Responder{resp("10.0.1.1", "", 20, 2, 2, 1, 3, false)}
@@ -73,6 +73,19 @@ func pathFixtures() map[string]*trace.Result {
 		"truncated": mk(
 			hopOf(1, 42, 42, many...),
 			dest),
+		// UDP trace without privileges (Linux error queue): several ECMP
+		// branches per hop and no unprivileged-ICMP note
+		"udp_ecmp": {Dst: dst, Proto: trace.ProtoUDP, Rounds: 42, Reached: true, Hops: []trace.Hop{
+			hopOf(1, 42, 42, resp("192.0.2.1", "", 42, 1, 1, 1, 2, false)),
+			hopOf(2, 42, 42,
+				resp("10.0.0.1", "", 11, 2, 2, 1, 3, false),
+				resp("10.0.0.5", "", 11, 2, 2, 1, 3, false),
+				resp("10.0.0.9", "", 10, 3, 3, 2, 4, false),
+				resp("10.0.0.13", "", 10, 2, 2, 1, 3, false)),
+			hopOf(3, 42, 42,
+				resp("198.51.100.1", "", 21, 4, 4, 3, 5, false),
+				resp("198.51.100.5", "", 21, 5, 5, 4, 6, false)),
+			dest}},
 	}
 }
 

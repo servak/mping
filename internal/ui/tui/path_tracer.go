@@ -19,6 +19,7 @@ type pathTracer struct {
 
 	mu     sync.Mutex
 	target string
+	proto  trace.Proto
 	tracer *trace.Tracer
 	err    error
 	cancel context.CancelFunc
@@ -31,24 +32,26 @@ func newPathTracer(interval, timeout time.Duration) *pathTracer {
 	}}
 }
 
-// Follow traces target, restarting the trace if the target changed.
+// Follow traces target with proto, restarting the trace if either changed.
 // Socket setup and name resolution happen off the UI goroutine.
-func (p *pathTracer) Follow(target string) {
+func (p *pathTracer) Follow(target string, proto trace.Proto) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if target == p.target {
+	if target == p.target && proto == p.proto {
 		return
 	}
 	p.stopLocked()
-	p.target = target
+	p.target, p.proto = target, proto
 	if target == "" {
 		return
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
+	cfg := p.cfg
+	cfg.Proto = proto
 	go func() {
-		tr, err := trace.New(target, p.cfg)
+		tr, err := trace.New(target, cfg)
 		p.mu.Lock()
 		if ctx.Err() != nil {
 			p.mu.Unlock()
@@ -77,7 +80,7 @@ func (p *pathTracer) Stop() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.stopLocked()
-	p.target = ""
+	p.target, p.proto = "", ""
 }
 
 func (p *pathTracer) stopLocked() {

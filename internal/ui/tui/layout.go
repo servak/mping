@@ -7,6 +7,7 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/servak/mping/internal/stats"
+	"github.com/servak/mping/internal/trace"
 	"github.com/servak/mping/internal/ui/shared"
 	"github.com/servak/mping/internal/ui/tui/panels"
 	"github.com/servak/mping/internal/ui/tui/state"
@@ -206,11 +207,13 @@ func (l *LayoutManager) UpdateAll() {
 		}
 		l.hostDetail.Update()
 	case ListWithPath:
-		target := ""
+		target, proto := "", trace.ProtoICMP
 		if ok {
-			target = m.GetName()
+			// Trace like the probe flows: ICMP for ICMP targets, UDP to
+			// rotating ports (all ECMP branches) for everything else
+			target, proto = m.GetName(), trace.ProtoForProbeType(m.GetProbeType())
 		}
-		l.pathTracer.Follow(target)
+		l.pathTracer.Follow(target, proto)
 		l.path.Update(l.pathTracer.State())
 	}
 }

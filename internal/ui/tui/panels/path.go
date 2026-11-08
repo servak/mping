@@ -70,7 +70,11 @@ func FormatPath(target string, res *trace.Result, err error, theme *shared.Theme
 	if dst := res.Dst.String(); !strings.Contains(target, dst) {
 		title += " (" + dst + ")"
 	}
-	fmt.Fprintf(&sb, "[%s]%s[%s] · %d rounds\n", theme.Accent, title, theme.Primary, res.Rounds)
+	proto := res.Proto
+	if proto == "" {
+		proto = trace.ProtoICMP
+	}
+	fmt.Fprintf(&sb, "[%s]%s[%s] · %s · %d rounds\n", theme.Accent, title, theme.Primary, proto, res.Rounds)
 
 	rows := make([][]pathRow, len(res.Hops))
 	width := len("Host")
@@ -132,7 +136,7 @@ func FormatPath(target string, res *trace.Result, err error, theme *shared.Theme
 	if rateLimited {
 		fmt.Fprintf(&sb, "[%s]loss only at intermediate hops is usually router ICMP rate limiting[%s]\n", theme.Secondary, theme.Primary)
 	}
-	if !res.Privileged {
+	if proto == trace.ProtoICMP && !res.Privileged {
 		fmt.Fprintf(&sb, "[%s]unprivileged ICMP: intermediate hops may be missing on Linux[%s]\n", theme.Secondary, theme.Primary)
 	}
 	return strings.TrimRight(sb.String(), "\n")

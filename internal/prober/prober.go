@@ -31,6 +31,9 @@ type Event struct {
 	Rtt         time.Duration
 	Message     string
 	Details     *ProbeDetails // Added: detailed information
+	// ProbeType is the kind of prober (icmpv4, http, tcp, ...) that owns the
+	// target. It is set on REGISTER events.
+	ProbeType ProbeType
 }
 
 type Prober interface {
