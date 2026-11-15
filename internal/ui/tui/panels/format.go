@@ -72,6 +72,10 @@ func FormatHostDetail(metric stats.Metrics, theme *shared.Theme) string {
 		{"Last Error", accent, tview.Escape(metric.GetLastFailDetail())},
 	}, theme)
 
+	if conn := formatConnInfo(metric, theme, time.Now()); conn != "" {
+		basicInfo += "\n\n" + conn
+	}
+
 	basicInfo += "\n\n" + FormatOutages(metric, theme)
 
 	// Add history section
