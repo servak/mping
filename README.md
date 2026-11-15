@@ -181,6 +181,28 @@ The host list has a **History** column with the last 20 probes (oldest on the le
 
 Latency spikes and loss bursts are visible at a glance. The host details and JSON/CSV output include RTT p50/p95/p99 over the last 100 probes.
 
+## Path and Peer Changes
+
+During maintenance, a route change, a DNS / load balancer switchover or a certificate replacement often keeps the target reachable but changes *what* answers. The TUI host detail panel (`v`) shows the facts that reveal this:
+
+```
+Reply TTL: 52 (≈12 hops, est.), range 52–54
+TTL Changes: 1
+09:12:03  TTL 54→52 (+2 hops)
+
+Remote: 1.1.1.1:443
+TLS: TLS 1.3
+Certificate: CN example.com / Issuer R3 / expires 2027-01-02 (in 48d)
+```
+
+- **ICMP**: the TTL (IPv4) / hop limit (IPv6) of the last echo reply, the hop count estimated from it, the range seen so far and the most recent TTL changes (`+2 hops` = the reply crossed two more hops). A change is a successful reply whose TTL differs from the previous successful reply's.
+- **HTTP(S)**: the IP:port of the connection that served the final response (after redirects) and the TLS version and leaf certificate (subject CN, issuer, expiry; yellow within 30 days, red within 7 days or expired). The certificate is shown even with `skip_verify` (the default).
+
+Caveats:
+- The hop count is an **estimate of the return path** (responder to mping): the responder's initial TTL is guessed as the smallest of 64, 128 and 255 that fits. The forward path can differ (asymmetric routing) and cannot be seen in an echo reply; use the path view (`p`) for that.
+- A change to a path of the same length (e.g. another ECMP branch) does not change the TTL; it only shows in the path view.
+- Windows does not report the reply TTL, so the ICMP lines are not shown there.
+
 ## Target Expansion
 
 mping supports powerful target expansion syntax for monitoring large numbers of hosts efficiently:
