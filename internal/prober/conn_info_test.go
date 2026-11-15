@@ -134,6 +134,36 @@ func TestHTTPProberConnInfoTLS(t *testing.T) {
 	}
 }
 
+// A response that is received but rejected still reports its peer, so a
+// switchover to a peer answering 503 is visible.
+func TestHTTPProberConnInfoOnRejectedResponse(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprint(w, "down")
+	}))
+	defer srv.Close()
+	host := strings.TrimPrefix(srv.URL, "https://")
+
+	for name, cfg := range map[string]*HTTPConfig{
+		"status": {ExpectCodes: "200"},
+		"body":   {ExpectBody: "ok"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := probeOnce(t, NewHTTPProber(HTTPS, cfg, "https"), "https://"+host)
+			if e.Result != FAILED {
+				t.Fatalf("result = %v (%s), want FAILED", e.Result, e.Message)
+			}
+			if e.Details == nil || e.Details.HTTP == nil {
+				t.Fatal("rejected response without HTTP details")
+			}
+			h := e.Details.HTTP
+			if h.RemoteAddr != host || h.TLS == nil || h.StatusCode != http.StatusServiceUnavailable {
+				t.Errorf("details = %+v", h)
+			}
+		})
+	}
+}
+
 func TestHTTPProberConnInfoRedirect(t *testing.T) {
 	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "ok")

@@ -192,8 +192,13 @@ func (p *HTTPProber) resolveURL(target string) (scheme, rest string) {
 func (p *HTTPProber) probe(r chan *Event, target string) {
 	now := time.Now()
 	r <- sentEvent(target, target, now)
+	// details is set once a response has been received, so that failures
+	// with a response (unexpected status or body) still report the peer.
+	var details *ProbeDetails
 	fail := func(err error) {
-		r <- failureEvent(target, target, FAILED, now, time.Since(now), err.Error())
+		e := failureEvent(target, target, FAILED, now, time.Since(now), err.Error())
+		e.Details = details
+		r <- e
 	}
 
 	// Convert target to actual HTTP URL
@@ -201,7 +206,9 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 	actualURL := scheme + "://" + rest
 	failErr := func(err error) {
 		if classifyErr(err) == TIMEOUT {
-			r <- failureEvent(target, target, TIMEOUT, now, time.Since(now), "timeout")
+			e := failureEvent(target, target, TIMEOUT, now, time.Since(now), "timeout")
+			e.Details = details
+			r <- e
 		} else {
 			fail(err)
 		}
@@ -231,50 +238,47 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 	}
 	defer resp.Body.Close()
 
+	details = &ProbeDetails{
+		ProbeType: scheme,
+		HTTP: &HTTPDetails{
+			StatusCode: resp.StatusCode,
+			RemoteAddr: remote,
+			TLS:        tlsDetails(resp.TLS),
+		},
+	}
 	body, size, sizeTruncated, bodyTruncated, err := readBody(resp)
 	if err != nil {
 		failErr(err)
 		return
 	}
+	details.HTTP.ResponseSize, details.HTTP.SizeTruncated = size, sizeTruncated
 	if !p.isExpectedStatusCode(resp.StatusCode) {
 		fail(fmt.Errorf("unexpected status code: %d", resp.StatusCode))
-	} else if p.config.ExpectBody != "" && p.config.ExpectBody != strings.TrimRight(string(body), "\n") {
+		return
+	}
+	if p.config.ExpectBody != "" && p.config.ExpectBody != strings.TrimRight(string(body), "\n") {
 		msg := "invalid body"
 		if bodyTruncated {
 			msg += " (response body truncated at 1 MiB)"
 		}
 		fail(errors.New(msg))
-	} else {
-		// Create HTTP detail information
-		headers := make(map[string]string)
-		for key, values := range resp.Header {
-			if len(values) > 0 {
-				headers[key] = values[0] // Get only the first value
-			}
-		}
-
-		// Compare against the URL actually requested (not the target, which
-		// may carry a custom prefix) to detect redirects.
-		var redirects []string
-		if finalURL := resp.Request.URL.String(); finalURL != actualURL {
-			redirects = append(redirects, finalURL)
-		}
-
-		details := &ProbeDetails{
-			ProbeType: scheme,
-			HTTP: &HTTPDetails{
-				StatusCode:    resp.StatusCode,
-				ResponseSize:  size,
-				SizeTruncated: sizeTruncated,
-				Headers:       headers,
-				Redirects:     redirects,
-				RemoteAddr:    remote,
-				TLS:           tlsDetails(resp.TLS),
-			},
-		}
-
-		r <- successEvent(target, target, now, time.Since(now), details)
+		return
 	}
+
+	headers := make(map[string]string)
+	for key, values := range resp.Header {
+		if len(values) > 0 {
+			headers[key] = values[0] // Get only the first value
+		}
+	}
+	// Compare against the URL actually requested (not the target, which
+	// may carry a custom prefix) to detect redirects.
+	var redirects []string
+	if finalURL := resp.Request.URL.String(); finalURL != actualURL {
+		redirects = append(redirects, finalURL)
+	}
+	details.HTTP.Headers, details.HTTP.Redirects = headers, redirects
+	r <- successEvent(target, target, now, time.Since(now), details)
 }
 
 // tlsDetails summarizes the TLS state of a response, nil for plain HTTP.
