@@ -103,6 +103,14 @@ func (th *TargetHistory) GetRecentEntries(n int) []HistoryEntry {
 	return result
 }
 
+// eachNewest calls fn for every entry, newest first, without copying them.
+// fn must not modify the entries.
+func (th *TargetHistory) eachNewest(fn func(*HistoryEntry)) {
+	for i := 0; i < th.count; i++ {
+		fn(&th.entries[(th.index-1-i+th.size)%th.size])
+	}
+}
+
 // GetEntriesSince retrieves entries since the specified time
 func (th *TargetHistory) GetEntriesSince(since time.Time) []HistoryEntry {
 	if th.count == 0 {

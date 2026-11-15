@@ -138,3 +138,62 @@ func TestReplyTTLSnapshotIsolated(t *testing.T) {
 		t.Errorf("earlier snapshot changed: %+v", before.Changes)
 	}
 }
+
+// The range covers the replies kept in history, so an old transient TTL
+// drops out of it.
+func TestReplyTTLRangeIsRecent(t *testing.T) {
+	mm := NewMetricsManagerWithOptions(Options{HistorySize: 5})
+	events := []*prober.Event{icmpTTLEvent(at(0), 60)}
+	for i := 1; i <= 5; i++ {
+		events = append(events, icmpTTLEvent(at(i), 54))
+	}
+	feedEvents(mm, events[:3]...)
+	if s := replyTTLOf(t, mm); s.Min != 54 || s.Max != 60 {
+		t.Errorf("min/max with the transient TTL in history = %d/%d, want 54/60", s.Min, s.Max)
+	}
+	feedEvents(mm, events[3:]...)
+	s := replyTTLOf(t, mm)
+	if s.Last != 54 || s.Min != 54 || s.Max != 54 {
+		t.Errorf("last/min/max = %d/%d/%d, want 54/54/54", s.Last, s.Min, s.Max)
+	}
+	if s.ChangeCount != 1 {
+		t.Errorf("ChangeCount = %d, want 1 (changes outlive the range window)", s.ChangeCount)
+	}
+}
+
+// httpEvent is an HTTP(S) result; remote/tls empty means no response
+func httpEvent(sent time.Time, success bool, remote string, tls *prober.TLSDetails) *prober.Event {
+	e := &prober.Event{Key: "h", DisplayName: "h", Result: prober.SUCCESS, SentTime: sent}
+	if !success {
+		e.Result, e.Message = prober.FAILED, "unexpected status code: 503"
+	}
+	if remote != "" || tls != nil {
+		e.Details = &prober.ProbeDetails{ProbeType: "https", HTTP: &prober.HTTPDetails{StatusCode: 200, RemoteAddr: remote, TLS: tls}}
+	}
+	return e
+}
+
+func TestConnInfo(t *testing.T) {
+	mm := NewMetricsManager()
+	connOf := func() (ConnInfo, bool) { return mm.SortBy(Host, true)[0].GetConnInfo() }
+	feedEvents(mm, httpEvent(at(0), true, "192.0.2.1:443", &prober.TLSDetails{SubjectCN: "old"}))
+	ci, ok := connOf()
+	if !ok || ci.RemoteAddr != "192.0.2.1:443" || ci.TLS == nil || ci.TLS.SubjectCN != "old" {
+		t.Fatalf("after success: %+v, %v", ci, ok)
+	}
+	// A rejected response (e.g. 503 from the new peer) updates it; a
+	// failure without a response and a late older result do not.
+	feedEvents(mm,
+		httpEvent(at(2), false, "192.0.2.2:443", nil),
+		httpEvent(at(3), false, "", nil),
+		httpEvent(at(1), true, "192.0.2.1:443", nil),
+	)
+	ci, ok = connOf()
+	if !ok || ci.RemoteAddr != "192.0.2.2:443" || ci.TLS != nil || !ci.SentTime.Equal(at(2)) {
+		t.Errorf("after rejected response: %+v, %v", ci, ok)
+	}
+	mm.ResetAllMetrics()
+	if _, ok := connOf(); ok {
+		t.Error("reset did not clear the connection info")
+	}
+}
