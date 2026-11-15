@@ -68,7 +68,87 @@ type (
 		WriteTo(b []byte, dst net.Addr) (int, error)
 		Close() error
 	}
+
+	// ttlPacketConn is implemented by connections that also report the
+	// TTL (IPv4) or hop limit (IPv6) of each received packet. recvPkts uses
+	// it when available; ttl is 0 when unknown.
+	ttlPacketConn interface {
+		ReadFromTTL(b []byte) (n int, ttl int, src net.Addr, err error)
+	}
+
+	// icmpConn wraps *icmp.PacketConn to read the reply TTL / hop limit
+	// through the ipv4/ipv6 control messages. Where those are not supported
+	// (Windows), cm is false and reads fall back to plain ReadFrom.
+	icmpConn struct {
+		*icmp.PacketConn
+		cm bool
+	}
 )
+
+// newICMPConn enables the TTL / hop limit control message on c. Failure is
+// not an error: the prober still works, only without reply TTLs.
+func newICMPConn(c *icmp.PacketConn, t ProbeType) *icmpConn {
+	ic := &icmpConn{PacketConn: c}
+	// Request only the TTL / hop limit flag: on darwin, combining it with
+	// FlagSrc is rejected by setsockopt (EINVAL) for some sockets.
+	if t == ICMPV4 {
+		if p := c.IPv4PacketConn(); p != nil {
+			ic.cm = p.SetControlMessage(ipv4.FlagTTL, true) == nil
+		}
+	} else if p := c.IPv6PacketConn(); p != nil {
+		ic.cm = p.SetControlMessage(ipv6.FlagHopLimit, true) == nil
+	}
+	return ic
+}
+
+// ReadFromTTL reads an ICMP message like ReadFrom and returns the TTL or
+// hop limit of the packet that carried it, 0 when unknown. The ipv4/ipv6
+// PacketConns strip the IP header like icmp.PacketConn.ReadFrom does, so
+// b holds the ICMP message either way.
+func (c *icmpConn) ReadFromTTL(b []byte) (int, int, net.Addr, error) {
+	if c.cm {
+		if p := c.IPv4PacketConn(); p != nil {
+			n, cm, src, err := p.ReadFrom(b)
+			ttl := 0
+			if cm != nil {
+				ttl = cm.TTL
+			}
+			return n, ttl, src, err
+		}
+		if p := c.IPv6PacketConn(); p != nil {
+			n, cm, src, err := p.ReadFrom(b)
+			ttl := 0
+			if cm != nil {
+				ttl = cm.HopLimit
+			}
+			return n, ttl, src, err
+		}
+	}
+	n, src, err := c.ReadFrom(b)
+	return n, 0, src, err
+}
+
+// EstimateHops estimates the number of hops on the RETURN path (responder
+// to us) from the TTL / hop limit of a reply. The responder's initial TTL
+// is guessed as the smallest of the common defaults 64, 128 and 255 that is
+// not below replyTTL, so hops = initial - replyTTL. ok is false for an
+// unknown (<= 0) or out-of-range TTL.
+//
+// This is only an estimate: a responder may use another initial TTL, and
+// the forward path (us to responder) can differ from the return path. The
+// forward path length cannot be known from an echo reply; only a
+// traceroute shows it.
+func EstimateHops(replyTTL int) (hops int, ok bool) {
+	if replyTTL <= 0 || replyTTL > 255 {
+		return 0, false
+	}
+	for _, initial := range []int{64, 128, 255} {
+		if replyTTL <= initial {
+			return initial - replyTTL, true
+		}
+	}
+	return 0, false
+}
 
 // Validate validates the ICMP configuration
 func (cfg *ICMPConfig) Validate() error {
@@ -117,7 +197,7 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, er
 		_ = c.Close()
 		return nil, fmt.Errorf("cannot allocate ICMP echo ID: %w", err)
 	}
-	return newICMPProber(t, c, []byte(cfg.Body), prefix, lease), nil
+	return newICMPProber(t, newICMPConn(c, t), []byte(cfg.Body), prefix, lease), nil
 }
 
 // newICMPProber returns a prober on c with its own echo ID. The echo ID
@@ -265,7 +345,7 @@ func (p *ICMPProber) answered(rt runTime, table map[string]bool) {
 // success marks the reply from addr to round runCnt and returns its event,
 // or nil for a duplicate or unexpected reply. Events are returned rather than
 // sent so that p.mu is never held while blocking on the event channel.
-func (p *ICMPProber) success(runCnt int, addr string, payload icmp.Message, packetData []byte, packetSize int) *Event {
+func (p *ICMPProber) success(runCnt int, addr string, payload icmp.Message, packetData []byte, packetSize, ttl int) *Event {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for k, table := range p.tables {
@@ -291,6 +371,7 @@ func (p *ICMPProber) success(runCnt int, addr string, payload icmp.Message, pack
 			ProbeType: string(p.version),
 			ICMP:      p.extractICMPDetails(runCnt, addr, payload, packetData, packetSize),
 		}
+		details.ICMP.ReplyTTL = ttl
 		return successEvent(key, displayName, k.sentTime, elapse, details)
 	}
 	return nil
@@ -499,8 +580,15 @@ func (p *ICMPProber) recvPkts(r chan *Event) {
 		proto = ipv6.ICMPTypeEchoReply.Protocol()
 	}
 	pktbuf := make([]byte, maxPacketSize)
-	for {
+	read := func() (int, int, net.Addr, error) {
 		n, addr, err := p.c.ReadFrom(pktbuf)
+		return n, 0, addr, err
+	}
+	if tc, ok := p.c.(ttlPacketConn); ok {
+		read = func() (int, int, net.Addr, error) { return tc.ReadFromTTL(pktbuf) }
+	}
+	for {
+		n, ttl, addr, err := read()
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				return // closed by Start or Stop
@@ -521,7 +609,7 @@ func (p *ICMPProber) recvPkts(r chan *Event) {
 		if rm.Code == 0 {
 			switch rm.Type {
 			case ipv4.ICMPTypeEchoReply, ipv6.ICMPTypeEchoReply:
-				emit(r, p.success(int(seq), addr.String(), *rm, pktbuf[:n], n))
+				emit(r, p.success(int(seq), addr.String(), *rm, pktbuf[:n], n, ttl))
 			}
 		}
 	}

@@ -1,5 +1,7 @@
 package prober
 
+import "time"
+
 // Probe detail information (TargetIP and TCPDetails removed)
 type ProbeDetails struct {
 	ProbeType string `json:"probe_type"`
@@ -19,6 +21,9 @@ type ICMPDetails struct {
 	ICMPCode   int    `json:"icmp_code"`
 	Checksum   uint16 `json:"checksum"`
 	Payload    string `json:"payload"` // Actual payload content with length limit
+	// ReplyTTL is the TTL (IPv4) or hop limit (IPv6) of the echo reply as
+	// received, 0 when unknown (e.g. on Windows). See EstimateHops.
+	ReplyTTL int `json:"reply_ttl,omitempty"`
 }
 
 type HTTPDetails struct {
@@ -28,6 +33,20 @@ type HTTPDetails struct {
 	SizeTruncated bool              `json:"size_truncated,omitempty"`
 	Headers       map[string]string `json:"headers,omitempty"`
 	Redirects     []string          `json:"redirects,omitempty"`
+	// RemoteAddr is the IP:port of the connection that served the final
+	// response (after redirects).
+	RemoteAddr string `json:"remote_addr,omitempty"`
+	// TLS describes the final response's TLS connection; nil for plain HTTP.
+	TLS *TLSDetails `json:"tls,omitempty"`
+}
+
+// TLSDetails summarizes a TLS connection and its leaf certificate. It is
+// recorded whether or not the certificate was verified.
+type TLSDetails struct {
+	Version   string    `json:"version"`              // e.g. "TLS 1.3"
+	SubjectCN string    `json:"subject_cn,omitempty"` // leaf certificate subject CN
+	Issuer    string    `json:"issuer,omitempty"`     // issuer CN, or the full issuer name without a CN
+	NotAfter  time.Time `json:"not_after,omitzero"`   // leaf certificate expiry
 }
 
 type DNSDetails struct {

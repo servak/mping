@@ -112,7 +112,7 @@ func TestICMPProberLateReply(t *testing.T) {
 	p.timeout = 50 * time.Millisecond
 	p.addTable(1, time.Now().Add(-100*time.Millisecond))
 	msg := icmp.Message{Type: ipv4.ICMPTypeEchoReply, Body: &icmp.Echo{}}
-	e := p.success(1, "127.0.0.1", msg, nil, 0)
+	e := p.success(1, "127.0.0.1", msg, nil, 0, 0)
 	if e == nil || e.Result != TIMEOUT {
 		t.Fatalf("late reply: success() = %+v, want TIMEOUT", e)
 	}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"slices"
 	"strings"
@@ -210,7 +211,19 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 		fail(err)
 		return
 	}
-	req = req.WithContext(context.WithValue(req.Context(), origHostKey{}, req.URL.Host))
+	// GotConn runs for every request of the redirect chain (redirects
+	// inherit the context), so remote ends up as the final response's
+	// connection. It also reports reused keep-alive connections.
+	var remote string
+	trace := &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) {
+			if info.Conn != nil && info.Conn.RemoteAddr() != nil {
+				remote = info.Conn.RemoteAddr().String()
+			}
+		},
+	}
+	ctx := context.WithValue(req.Context(), origHostKey{}, req.URL.Host)
+	req = req.WithContext(httptrace.WithClientTrace(ctx, trace))
 	resp, err := p.client.Do(req)
 	if err != nil {
 		failErr(err)
@@ -255,11 +268,32 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 				SizeTruncated: sizeTruncated,
 				Headers:       headers,
 				Redirects:     redirects,
+				RemoteAddr:    remote,
+				TLS:           tlsDetails(resp.TLS),
 			},
 		}
 
 		r <- successEvent(target, target, now, time.Since(now), details)
 	}
+}
+
+// tlsDetails summarizes the TLS state of a response, nil for plain HTTP.
+// The peer certificates are present even when verification is skipped.
+func tlsDetails(cs *tls.ConnectionState) *TLSDetails {
+	if cs == nil {
+		return nil
+	}
+	d := &TLSDetails{Version: tls.VersionName(cs.Version)}
+	if len(cs.PeerCertificates) > 0 {
+		leaf := cs.PeerCertificates[0]
+		d.SubjectCN = leaf.Subject.CommonName
+		d.Issuer = leaf.Issuer.CommonName
+		if d.Issuer == "" {
+			d.Issuer = leaf.Issuer.String()
+		}
+		d.NotAfter = leaf.NotAfter
+	}
+	return d
 }
 
 // readBody reads up to maxBodyBytes of the body for expect_body matching and
