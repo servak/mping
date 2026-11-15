@@ -216,16 +216,16 @@ func TestICMPProberTableEvents(t *testing.T) {
 	p.addTable(1, time.Now().Add(-time.Millisecond))
 
 	msg := icmp.Message{Type: ipv4.ICMPTypeEchoReply, Body: &icmp.Echo{}}
-	if e := p.success(1, "127.0.0.1", msg, nil, 0); e == nil || e.Result != SUCCESS || e.Rtt <= 0 {
+	if e := p.success(1, "127.0.0.1", msg, nil, 0, 0); e == nil || e.Result != SUCCESS || e.Rtt <= 0 {
 		t.Errorf("success() = %+v, want SUCCESS", e)
 	}
-	if e := p.success(1, "127.0.0.1", msg, nil, 0); e != nil {
+	if e := p.success(1, "127.0.0.1", msg, nil, 0, 0); e != nil {
 		t.Errorf("duplicate reply: success() = %+v, want nil", e)
 	}
-	if e := p.success(2, "127.0.0.1", msg, nil, 0); e != nil {
+	if e := p.success(2, "127.0.0.1", msg, nil, 0, 0); e != nil {
 		t.Errorf("unknown round: success() = %+v, want nil", e)
 	}
-	if e := p.success(1, "192.0.2.1", msg, nil, 0); e != nil {
+	if e := p.success(1, "192.0.2.1", msg, nil, 0, 0); e != nil {
 		t.Errorf("unknown address: success() = %+v, want nil", e)
 	}
 	if events, pending, next := p.checkTimeout(); len(events) != 0 || pending != 1 || next.IsZero() {

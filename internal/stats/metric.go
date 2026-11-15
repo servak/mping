@@ -56,6 +56,7 @@ type metrics struct {
 	LastFailDetail string
 	history        *TargetHistory // 履歴情報
 	outage         *outageTracker
+	conn           ConnInfo  // latest HTTP(S) peer; zero SentTime if none
 	resetAt        time.Time // results of probes sent before this are stale
 }
 
@@ -113,6 +114,7 @@ func (m *metrics) Reset() {
 	m.LastFailTime = time.Time{}
 	m.LastSuccTime = time.Time{}
 	m.LastFailDetail = ""
+	m.conn = ConnInfo{}
 	if m.history != nil {
 		m.history.Clear()
 	}
@@ -277,6 +279,39 @@ func (m *metrics) GetRTTPercentiles(ps ...float64) []time.Duration {
 		res[i] = rtts[rank-1]
 	}
 	return res
+}
+
+// GetReplyTTL returns the reply TTL / hop limit statistics. Last, Min and
+// Max cover the successful replies kept in history (the last HistorySize
+// probes), so the range reflects the current path, not old events.
+// Changes only include results applied in send order, so they may lag
+// behind by the settle time.
+func (m *metrics) GetReplyTTL() ReplyTTLStats {
+	var s ReplyTTLStats
+	if m.history != nil {
+		m.history.eachNewest(func(e *HistoryEntry) {
+			if !e.Success || e.Details == nil || e.Details.ICMP == nil || e.Details.ICMP.ReplyTTL <= 0 {
+				return
+			}
+			ttl := e.Details.ICMP.ReplyTTL
+			if s.Last == 0 {
+				s.Last, s.Min, s.Max = ttl, ttl, ttl
+				return
+			}
+			s.Min, s.Max = min(s.Min, ttl), max(s.Max, ttl)
+		})
+	}
+	if m.outage != nil {
+		s.Changes = append([]TTLChange(nil), m.outage.ttl.changes...)
+		s.ChangeCount = m.outage.ttl.count
+	}
+	return s
+}
+
+// GetConnInfo returns the peer of the latest response from an HTTP(S)
+// target, whether or not the probe succeeded; ok is false if none.
+func (m *metrics) GetConnInfo() (ConnInfo, bool) {
+	return m.conn, !m.conn.SentTime.IsZero()
 }
 
 func (m *metrics) GetSuccessRateInPeriod(duration time.Duration) float64 {

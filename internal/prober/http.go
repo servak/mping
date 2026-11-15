@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"slices"
 	"strings"
@@ -191,8 +192,13 @@ func (p *HTTPProber) resolveURL(target string) (scheme, rest string) {
 func (p *HTTPProber) probe(r chan *Event, target string) {
 	now := time.Now()
 	r <- sentEvent(target, target, now)
+	// details is set once a response has been received, so that failures
+	// with a response (unexpected status or body) still report the peer.
+	var details *ProbeDetails
 	fail := func(err error) {
-		r <- failureEvent(target, target, FAILED, now, time.Since(now), err.Error())
+		e := failureEvent(target, target, FAILED, now, time.Since(now), err.Error())
+		e.Details = details
+		r <- e
 	}
 
 	// Convert target to actual HTTP URL
@@ -200,7 +206,9 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 	actualURL := scheme + "://" + rest
 	failErr := func(err error) {
 		if classifyErr(err) == TIMEOUT {
-			r <- failureEvent(target, target, TIMEOUT, now, time.Since(now), "timeout")
+			e := failureEvent(target, target, TIMEOUT, now, time.Since(now), "timeout")
+			e.Details = details
+			r <- e
 		} else {
 			fail(err)
 		}
@@ -210,7 +218,19 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 		fail(err)
 		return
 	}
-	req = req.WithContext(context.WithValue(req.Context(), origHostKey{}, req.URL.Host))
+	// GotConn runs for every request of the redirect chain (redirects
+	// inherit the context), so remote ends up as the final response's
+	// connection. It also reports reused keep-alive connections.
+	var remote string
+	trace := &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) {
+			if info.Conn != nil && info.Conn.RemoteAddr() != nil {
+				remote = info.Conn.RemoteAddr().String()
+			}
+		},
+	}
+	ctx := context.WithValue(req.Context(), origHostKey{}, req.URL.Host)
+	req = req.WithContext(httptrace.WithClientTrace(ctx, trace))
 	resp, err := p.client.Do(req)
 	if err != nil {
 		failErr(err)
@@ -218,48 +238,66 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 	}
 	defer resp.Body.Close()
 
+	details = &ProbeDetails{
+		ProbeType: scheme,
+		HTTP: &HTTPDetails{
+			StatusCode: resp.StatusCode,
+			RemoteAddr: remote,
+			TLS:        tlsDetails(resp.TLS),
+		},
+	}
 	body, size, sizeTruncated, bodyTruncated, err := readBody(resp)
 	if err != nil {
 		failErr(err)
 		return
 	}
+	details.HTTP.ResponseSize, details.HTTP.SizeTruncated = size, sizeTruncated
 	if !p.isExpectedStatusCode(resp.StatusCode) {
 		fail(fmt.Errorf("unexpected status code: %d", resp.StatusCode))
-	} else if p.config.ExpectBody != "" && p.config.ExpectBody != strings.TrimRight(string(body), "\n") {
+		return
+	}
+	if p.config.ExpectBody != "" && p.config.ExpectBody != strings.TrimRight(string(body), "\n") {
 		msg := "invalid body"
 		if bodyTruncated {
 			msg += " (response body truncated at 1 MiB)"
 		}
 		fail(errors.New(msg))
-	} else {
-		// Create HTTP detail information
-		headers := make(map[string]string)
-		for key, values := range resp.Header {
-			if len(values) > 0 {
-				headers[key] = values[0] // Get only the first value
-			}
-		}
-
-		// Compare against the URL actually requested (not the target, which
-		// may carry a custom prefix) to detect redirects.
-		var redirects []string
-		if finalURL := resp.Request.URL.String(); finalURL != actualURL {
-			redirects = append(redirects, finalURL)
-		}
-
-		details := &ProbeDetails{
-			ProbeType: scheme,
-			HTTP: &HTTPDetails{
-				StatusCode:    resp.StatusCode,
-				ResponseSize:  size,
-				SizeTruncated: sizeTruncated,
-				Headers:       headers,
-				Redirects:     redirects,
-			},
-		}
-
-		r <- successEvent(target, target, now, time.Since(now), details)
+		return
 	}
+
+	headers := make(map[string]string)
+	for key, values := range resp.Header {
+		if len(values) > 0 {
+			headers[key] = values[0] // Get only the first value
+		}
+	}
+	// Compare against the URL actually requested (not the target, which
+	// may carry a custom prefix) to detect redirects.
+	var redirects []string
+	if finalURL := resp.Request.URL.String(); finalURL != actualURL {
+		redirects = append(redirects, finalURL)
+	}
+	details.HTTP.Headers, details.HTTP.Redirects = headers, redirects
+	r <- successEvent(target, target, now, time.Since(now), details)
+}
+
+// tlsDetails summarizes the TLS state of a response, nil for plain HTTP.
+// The peer certificates are present even when verification is skipped.
+func tlsDetails(cs *tls.ConnectionState) *TLSDetails {
+	if cs == nil {
+		return nil
+	}
+	d := &TLSDetails{Version: tls.VersionName(cs.Version)}
+	if len(cs.PeerCertificates) > 0 {
+		leaf := cs.PeerCertificates[0]
+		d.SubjectCN = leaf.Subject.CommonName
+		d.Issuer = leaf.Issuer.CommonName
+		if d.Issuer == "" {
+			d.Issuer = leaf.Issuer.String()
+		}
+		d.NotAfter = leaf.NotAfter
+	}
+	return d
 }
 
 // readBody reads up to maxBodyBytes of the body for expect_body matching and

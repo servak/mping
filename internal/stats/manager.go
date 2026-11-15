@@ -111,12 +111,28 @@ func (mm *metricsManager) SuccessWithDetails(host string, rtt time.Duration, sen
 			Details:   details,
 		})
 	}
-	m.outage.add(sentTime, true, "", time.Now())
+	m.conn.add(sentTime, details)
+	m.outage.addResult(probeResult{sentTime: sentTime, success: true, ttl: replyTTL(details)}, time.Now())
 	mm.mu.Unlock()
+}
+
+// replyTTL returns the ICMP reply TTL of details, 0 if unknown
+func replyTTL(details *prober.ProbeDetails) int {
+	if details == nil || details.ICMP == nil {
+		return 0
+	}
+	return details.ICMP.ReplyTTL
 }
 
 // Register failure for host
 func (mm *metricsManager) Failed(host string, sentTime time.Time, msg string) {
+	mm.FailedWithDetails(host, sentTime, msg, nil)
+}
+
+// FailedWithDetails registers a failure for host. details, if set, come
+// from a response that was received but rejected (e.g. an unexpected HTTP
+// status); only its connection info is kept.
+func (mm *metricsManager) FailedWithDetails(host string, sentTime time.Time, msg string, details *prober.ProbeDetails) {
 	m := mm.getMetrics(host)
 
 	mm.mu.Lock()
@@ -134,6 +150,7 @@ func (mm *metricsManager) Failed(host string, sentTime time.Time, msg string) {
 			Error:     msg,
 		})
 	}
+	m.conn.add(sentTime, details)
 	m.outage.add(sentTime, false, msg, time.Now())
 	mm.mu.Unlock()
 
@@ -171,10 +188,8 @@ func (mm *metricsManager) Subscribe(res <-chan *prober.Event) <-chan struct{} {
 				mm.Sent(r.Key, r.SentTime)
 			case prober.SUCCESS:
 				mm.SuccessWithDetails(r.Key, r.Rtt, r.SentTime, r.Details)
-			case prober.TIMEOUT:
-				mm.Failed(r.Key, r.SentTime, r.Message)
-			case prober.FAILED:
-				mm.Failed(r.Key, r.SentTime, r.Message)
+			case prober.TIMEOUT, prober.FAILED:
+				mm.FailedWithDetails(r.Key, r.SentTime, r.Message, r.Details)
 			}
 		}
 	}()
