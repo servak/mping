@@ -56,6 +56,11 @@ func TestIntegrationICMPProberLifecycle(t *testing.T) {
 				if e.Details.ICMP.Payload != "mping-it" {
 					t.Errorf("payload = %q, want %q", e.Details.ICMP.Payload, "mping-it")
 				}
+				// The real socket must report the reply TTL / hop limit,
+				// except on Windows, which has no control messages.
+				if runtime.GOOS != "windows" && e.Details.ICMP.ReplyTTL <= 0 {
+					t.Errorf("ReplyTTL = %d, want > 0", e.Details.ICMP.ReplyTTL)
+				}
 			}
 			if goroutineRunning("(*ICMPProber).recvPkts") {
 				t.Error("receive goroutine still running after Stop")
