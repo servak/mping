@@ -54,6 +54,7 @@ type probeResult struct {
 	sentTime time.Time
 	success  bool
 	err      string
+	ttl      int // reply TTL / hop limit of a success, 0 if unknown
 }
 
 // outageTracker detects outages for one target.
@@ -61,6 +62,7 @@ type probeResult struct {
 // Probe results can arrive out of send order (e.g. a timeout is reported after
 // a later probe already succeeded), so results are held for `settle` and
 // applied in send-time order once no earlier result can still arrive.
+// Reply TTL changes are detected on the same ordered stream.
 type outageTracker struct {
 	settle time.Duration
 
@@ -75,6 +77,8 @@ type outageTracker struct {
 	count   int
 	total   time.Duration
 	longest time.Duration
+
+	ttl ttlChangeTracker
 }
 
 func newOutageTracker(settle time.Duration) *outageTracker {
@@ -83,10 +87,15 @@ func newOutageTracker(settle time.Duration) *outageTracker {
 
 // add records a probe result and applies every result that has settled
 func (t *outageTracker) add(sentTime time.Time, success bool, err string, now time.Time) {
-	if sentTime.IsZero() {
-		sentTime = now
+	t.addResult(probeResult{sentTime: sentTime, success: success, err: err}, now)
+}
+
+// addResult is add with the full result, including the reply TTL
+func (t *outageTracker) addResult(r probeResult, now time.Time) {
+	if r.sentTime.IsZero() {
+		r.sentTime = now
 	}
-	r := probeResult{sentTime: sentTime, success: success, err: err}
+	sentTime := r.sentTime
 	i := sort.Search(len(t.pending), func(i int) bool {
 		return t.pending[i].sentTime.After(sentTime)
 	})
@@ -124,6 +133,7 @@ func (t *outageTracker) flushUntil(deadline time.Time) {
 }
 
 func (t *outageTracker) apply(r probeResult) {
+	t.ttl.apply(r)
 	switch {
 	case r.success:
 		t.lostRun = t.lostRun[:0]
@@ -197,6 +207,7 @@ func (t *outageTracker) clone() *outageTracker {
 	c := *t
 	c.pending = append([]probeResult(nil), t.pending...)
 	c.lostRun = append([]probeResult(nil), t.lostRun...)
+	c.ttl = t.ttl.clone()
 	// closed is append-only and trimming reallocates it, so the clone can
 	// share the backing array as long as its capacity is capped.
 	c.closed = t.closed[:len(t.closed):len(t.closed)]

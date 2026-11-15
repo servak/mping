@@ -35,6 +35,9 @@ type Metrics interface {
 	GetOutages() []Outage
 	GetLastOutage() (Outage, bool)
 	GetOutageSummary() OutageSummary
+
+	// GetReplyTTL returns the ICMP reply TTL / hop limit statistics
+	GetReplyTTL() ReplyTTLStats
 }
 
 // MetricsProvider provides external API for metrics access

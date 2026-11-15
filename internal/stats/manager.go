@@ -111,8 +111,18 @@ func (mm *metricsManager) SuccessWithDetails(host string, rtt time.Duration, sen
 			Details:   details,
 		})
 	}
-	m.outage.add(sentTime, true, "", time.Now())
+	ttl := replyTTL(details)
+	m.ttl.add(ttl, sentTime)
+	m.outage.addResult(probeResult{sentTime: sentTime, success: true, ttl: ttl}, time.Now())
 	mm.mu.Unlock()
+}
+
+// replyTTL returns the ICMP reply TTL of details, 0 if unknown
+func replyTTL(details *prober.ProbeDetails) int {
+	if details == nil || details.ICMP == nil {
+		return 0
+	}
+	return details.ICMP.ReplyTTL
 }
 
 // Register failure for host

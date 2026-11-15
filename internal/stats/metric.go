@@ -56,6 +56,7 @@ type metrics struct {
 	LastFailDetail string
 	history        *TargetHistory // 履歴情報
 	outage         *outageTracker
+	ttl            ttlRange
 	resetAt        time.Time // results of probes sent before this are stale
 }
 
@@ -113,6 +114,7 @@ func (m *metrics) Reset() {
 	m.LastFailTime = time.Time{}
 	m.LastSuccTime = time.Time{}
 	m.LastFailDetail = ""
+	m.ttl = ttlRange{}
 	if m.history != nil {
 		m.history.Clear()
 	}
@@ -256,6 +258,18 @@ func (m *metrics) GetOutageSummary() OutageSummary {
 
 // GetRTTPercentiles returns RTT percentiles (0-100, nearest-rank method)
 // over the successful probes kept in history.
+// GetReplyTTL returns the reply TTL / hop limit statistics. Last, Min and
+// Max are up to date; Changes only include results applied in send order,
+// so they may lag behind by the settle time.
+func (m *metrics) GetReplyTTL() ReplyTTLStats {
+	s := ReplyTTLStats{Last: m.ttl.last, Min: m.ttl.min, Max: m.ttl.max}
+	if m.outage != nil {
+		s.Changes = append([]TTLChange(nil), m.outage.ttl.changes...)
+		s.ChangeCount = m.outage.ttl.count
+	}
+	return s
+}
+
 func (m *metrics) GetRTTPercentiles(ps ...float64) []time.Duration {
 	res := make([]time.Duration, len(ps))
 	if m.history == nil {
