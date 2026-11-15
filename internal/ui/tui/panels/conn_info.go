@@ -2,7 +2,6 @@ package panels
 
 import (
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -25,8 +24,8 @@ func formatConnInfo(metric stats.Metrics, theme *shared.Theme, now time.Time) st
 	if s := formatReplyTTL(metric.GetReplyTTL(), theme); s != "" {
 		sections = append(sections, s)
 	}
-	if s := formatHTTPConn(latestHTTPDetails(metric), theme, now); s != "" {
-		sections = append(sections, s)
+	if ci, ok := metric.GetConnInfo(); ok {
+		sections = append(sections, formatHTTPConn(ci, theme, now))
 	}
 	return strings.Join(sections, "\n\n")
 }
@@ -65,33 +64,9 @@ func formatReplyTTL(s stats.ReplyTTLStats, theme *shared.Theme) string {
 	return sb.String()
 }
 
-// latestHTTPDetails returns the HTTP details of the most recently sent
-// successful probe that carries connection info, or nil.
-func latestHTTPDetails(metric stats.Metrics) *prober.HTTPDetails {
-	var (
-		best   *prober.HTTPDetails
-		bestAt time.Time
-	)
-	for _, e := range metric.GetRecentHistory(math.MaxInt) {
-		if !e.Success || e.Details == nil || e.Details.HTTP == nil {
-			continue
-		}
-		h := e.Details.HTTP
-		if h.RemoteAddr == "" && h.TLS == nil {
-			continue
-		}
-		if best == nil || e.Timestamp.After(bestAt) {
-			best, bestAt = h, e.Timestamp
-		}
-	}
-	return best
-}
-
-// formatHTTPConn renders the remote address and the TLS certificate
-func formatHTTPConn(h *prober.HTTPDetails, theme *shared.Theme, now time.Time) string {
-	if h == nil {
-		return ""
-	}
+// formatHTTPConn renders the remote address and the TLS certificate of the
+// latest HTTP(S) response, which may have been a rejected one (e.g. 503)
+func formatHTTPConn(h stats.ConnInfo, theme *shared.Theme, now time.Time) string {
 	var rows []detailRow
 	if h.RemoteAddr != "" {
 		rows = append(rows, detailRow{"Remote", theme.Accent, tview.Escape(h.RemoteAddr)})

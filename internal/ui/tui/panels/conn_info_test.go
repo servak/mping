@@ -102,6 +102,15 @@ func TestFormatConnInfoHTTP(t *testing.T) {
 		t.Errorf("48 days left must not be highlighted: %q", raw)
 	}
 
+	// A rejected response (503 from a new peer) replaces the shown peer
+	rejected := ev(3, &prober.HTTPDetails{StatusCode: 503, RemoteAddr: "198.51.100.7:443"})
+	rejected.Result, rejected.Message = prober.FAILED, "unexpected status code: 503"
+	statstest.Feed(t, mm, rejected)
+	got = plainText(formatConnInfo(onlyMetrics(t, mm), &theme, now))
+	if !strings.Contains(got, "Remote: 198.51.100.7:443") || strings.Contains(got, "Certificate") {
+		t.Errorf("after a rejected response:\n%s", got)
+	}
+
 	tests := []struct {
 		left  time.Duration
 		color string
