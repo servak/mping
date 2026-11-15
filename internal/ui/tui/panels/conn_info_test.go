@@ -36,26 +36,27 @@ func TestFormatConnInfoReplyTTL(t *testing.T) {
 		return &prober.Event{Key: "h", DisplayName: "h", Result: prober.SUCCESS, SentTime: ts.Add(time.Duration(i) * time.Second), Rtt: time.Millisecond,
 			Details: &prober.ProbeDetails{ProbeType: "icmpv4", ICMP: &prober.ICMPDetails{ReplyTTL: ttl}}}
 	}
-	mm := statstest.FromEvents(t, ev(0, 54), ev(3, 52), ev(4, 53))
+	// A change is recorded once the new TTL is seen on 3 consecutive replies
+	mm := statstest.FromEvents(t, ev(0, 54), ev(3, 52), ev(4, 52), ev(5, 52), ev(6, 53), ev(7, 53), ev(8, 53))
 	got := plainText(formatConnInfo(onlyMetrics(t, mm), &theme, ts))
 	for _, want := range []string{
 		"Reply TTL: 53 (≈11 hops, est.), range 52–54",
 		"TTL Changes: 2",
-		"09:12:04  TTL 52→53 (-1 hop)",
+		"09:12:06  TTL 52→53 (-1 hop)",
 		"09:12:03  TTL 54→52 (+2 hops)",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
 	}
-	if i, j := strings.Index(got, "09:12:04"), strings.Index(got, "09:12:03"); i > j {
+	if i, j := strings.Index(got, "09:12:06"), strings.Index(got, "09:12:03"); i > j {
 		t.Errorf("changes not newest first:\n%s", got)
 	}
 
 	// Truncated list shows how many more there are
 	var events []*prober.Event
-	for i := 0; i <= 15; i++ {
-		events = append(events, ev(i, 50+i%2))
+	for i := 0; i < 16*3; i++ {
+		events = append(events, ev(i, 50+(i/3)%2))
 	}
 	got = plainText(formatConnInfo(onlyMetrics(t, statstest.FromEvents(t, events...)), &theme, ts))
 	if !strings.Contains(got, "TTL Changes: 15") || !strings.Contains(got, "... 5 more") {

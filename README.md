@@ -195,7 +195,7 @@ TLS: TLS 1.3
 Certificate: CN example.com / Issuer R3 / expires 2027-01-02 (in 48d)
 ```
 
-- **ICMP**: the TTL (IPv4) / hop limit (IPv6) of the last echo reply, the hop count estimated from it, the range over the last 100 probes (shown when replies currently arrive with different TTLs, e.g. over several paths) and the most recent TTL changes since start or reset (`+2 hops` = the reply crossed two more hops). A change is a successful reply whose TTL differs from the previous successful reply's.
+- **ICMP**: the TTL (IPv4) / hop limit (IPv6) of the last echo reply, the hop count estimated from it, the range over the last 100 probes (shown when replies currently arrive with different TTLs, e.g. over several paths) and the most recent TTL changes since start or reset (`+2 hops` = the reply crossed two more hops). A change is recorded once a new TTL is seen on 3 consecutive successful replies, timed at the first of them; replies alternating between ECMP paths of unequal length show up as a range instead of a stream of changes.
 - **HTTP(S)**: the IP:port of the connection that served the latest final response (after redirects), including responses rejected by `expect_codes` / `expect_body` such as a 503 from a new peer, and the TLS version and leaf certificate (subject CN, issuer, expiry; yellow within 30 days, red within 7 days or expired). The certificate is shown even with `skip_verify` (the default).
 
 Caveats:

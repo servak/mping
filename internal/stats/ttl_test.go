@@ -32,24 +32,19 @@ func replyTTLOf(t *testing.T, mm MetricsManager) ReplyTTLStats {
 	return ms[0].GetReplyTTL()
 }
 
-func TestReplyTTLTracking(t *testing.T) {
-	mm := NewMetricsManager()
-	feedEvents(mm,
-		icmpTTLEvent(at(0), 54),
-		icmpTTLEvent(at(1), 54),
-		icmpTTLEvent(at(2), 0), // unknown: ignored
-		&prober.Event{Key: "h", Result: prober.TIMEOUT, SentTime: at(3), Message: "timeout"},
-		icmpTTLEvent(at(4), 52),
-		icmpTTLEvent(at(5), 52),
-		icmpTTLEvent(at(6), 0),
-		icmpTTLEvent(at(7), 54),
-	)
-	s := replyTTLOf(t, mm)
-	if s.Last != 54 || s.Min != 52 || s.Max != 54 {
-		t.Errorf("last/min/max = %d/%d/%d, want 54/52/54", s.Last, s.Min, s.Max)
+// ttlSeq returns successful replies with the given TTLs, one per second
+// from at(start)
+func ttlSeq(start int, ttls ...int) []*prober.Event {
+	events := make([]*prober.Event, len(ttls))
+	for i, ttl := range ttls {
+		events[i] = icmpTTLEvent(at(start+i), ttl)
 	}
-	want := []TTLChange{{Time: at(4), Old: 54, New: 52}, {Time: at(7), Old: 52, New: 54}}
-	if s.ChangeCount != 2 || len(s.Changes) != 2 {
+	return events
+}
+
+func checkChanges(t *testing.T, s ReplyTTLStats, want ...TTLChange) {
+	t.Helper()
+	if s.ChangeCount != len(want) || len(s.Changes) != len(want) {
 		t.Fatalf("changes = %+v (count %d), want %+v", s.Changes, s.ChangeCount, want)
 	}
 	for i, c := range s.Changes {
@@ -57,8 +52,52 @@ func TestReplyTTLTracking(t *testing.T) {
 			t.Errorf("change %d = %+v, want %+v", i, c, want[i])
 		}
 	}
+}
+
+func TestReplyTTLTracking(t *testing.T) {
+	mm := NewMetricsManager()
+	events := ttlSeq(0, 54, 54, 52)
+	events = append(events,
+		icmpTTLEvent(at(3), 0), // unknown: neither advances nor clears the candidate
+		&prober.Event{Key: "h", Result: prober.TIMEOUT, SentTime: at(4), Message: "timeout"},
+	)
+	events = append(events, ttlSeq(5, 52, 52, 54, 54, 54)...)
+	feedEvents(mm, events...)
+	s := replyTTLOf(t, mm)
+	if s.Last != 54 || s.Min != 52 || s.Max != 54 {
+		t.Errorf("last/min/max = %d/%d/%d, want 54/52/54", s.Last, s.Min, s.Max)
+	}
+	checkChanges(t, s, TTLChange{Time: at(2), Old: 54, New: 52}, TTLChange{Time: at(7), Old: 52, New: 54})
 	if d := s.Changes[0].HopsDelta(); d != 2 {
 		t.Errorf("HopsDelta = %d, want 2", d)
+	}
+}
+
+func TestReplyTTLChangeNeedsConsecutiveReplies(t *testing.T) {
+	tests := []struct {
+		name string
+		ttls []int
+		want []TTLChange
+	}{
+		{"alternating ECMP paths", []int{54, 53, 54, 53, 54, 53, 54, 53}, nil},
+		{"persistent change", []int{54, 54, 52, 52, 52}, []TTLChange{{Time: at(2), Old: 54, New: 52}}},
+		{"interrupted candidate", []int{54, 52, 52, 54, 52, 52, 52}, []TTLChange{{Time: at(4), Old: 54, New: 52}}},
+		{"two short runs of the new TTL", []int{54, 52, 52, 54, 52, 52}, nil},
+		{"another candidate replaces it", []int{54, 52, 52, 50, 50, 50}, []TTLChange{{Time: at(3), Old: 54, New: 50}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mm := NewMetricsManager()
+			feedEvents(mm, ttlSeq(0, tt.ttls...)...)
+			s := replyTTLOf(t, mm)
+			checkChanges(t, s, tt.want...)
+		})
+	}
+	// Alternation stays visible as a range
+	mm := NewMetricsManager()
+	feedEvents(mm, ttlSeq(0, 54, 53, 54, 53)...)
+	if s := replyTTLOf(t, mm); s.Min != 53 || s.Max != 54 {
+		t.Errorf("alternating min/max = %d/%d, want 53/54", s.Min, s.Max)
 	}
 }
 
@@ -72,12 +111,16 @@ func TestReplyTTLNoData(t *testing.T) {
 
 func TestReplyTTLChangesCapped(t *testing.T) {
 	mm := NewMetricsManager()
-	var events []*prober.Event
+	// Blocks of ttlChangeMinReplies replies, alternating 50 and 51: every
+	// block after the first is a change at its first reply.
 	n := maxTTLChanges + 5
-	for i := 0; i <= n; i++ {
-		events = append(events, icmpTTLEvent(at(i), 50+i%2))
+	var ttls []int
+	for k := 0; k <= n; k++ {
+		for range ttlChangeMinReplies {
+			ttls = append(ttls, 50+k%2)
+		}
 	}
-	feedEvents(mm, events...)
+	feedEvents(mm, ttlSeq(0, ttls...)...)
 	s := replyTTLOf(t, mm)
 	if s.ChangeCount != n {
 		t.Errorf("ChangeCount = %d, want %d", s.ChangeCount, n)
@@ -85,36 +128,48 @@ func TestReplyTTLChangesCapped(t *testing.T) {
 	if len(s.Changes) != maxTTLChanges {
 		t.Fatalf("kept %d changes, want %d", len(s.Changes), maxTTLChanges)
 	}
-	if last := s.Changes[len(s.Changes)-1]; !last.Time.Equal(at(n)) {
-		t.Errorf("newest change at %v, want %v", last.Time, at(n))
+	m := ttlChangeMinReplies
+	if last := s.Changes[len(s.Changes)-1]; !last.Time.Equal(at(m * n)) {
+		t.Errorf("newest change at %v, want %v", last.Time, at(m*n))
 	}
-	if first := s.Changes[0]; !first.Time.Equal(at(n - maxTTLChanges + 1)) {
-		t.Errorf("oldest kept change at %v, want %v", first.Time, at(n-maxTTLChanges+1))
+	if first := s.Changes[0]; !first.Time.Equal(at(m * (n - maxTTLChanges + 1))) {
+		t.Errorf("oldest kept change at %v, want %v", first.Time, at(m*(n-maxTTLChanges+1)))
 	}
 }
 
-// Results that arrive out of send order are applied in send order, so a
-// late reply does not produce spurious changes.
+// Results that arrive out of send order are applied in send order: the
+// late 54 interrupts the run of 52s, so no change is recorded (in arrival
+// order the 52s would have been consecutive).
 func TestReplyTTLOutOfOrder(t *testing.T) {
+	// Recent send times, so that nothing settles before the channel closes
+	base := time.Now()
+	sec := func(n int) time.Time { return base.Add(time.Duration(n) * time.Second) }
 	mm := NewMetricsManagerWithOptions(Options{SettleTime: time.Hour})
 	feedEvents(mm,
-		icmpTTLEvent(at(0), 54),
-		icmpTTLEvent(at(2), 52),
-		icmpTTLEvent(at(1), 54), // late
+		icmpTTLEvent(sec(0), 54),
+		icmpTTLEvent(sec(1), 52),
+		icmpTTLEvent(sec(2), 52),
+		icmpTTLEvent(sec(4), 52),
+		icmpTTLEvent(sec(3), 54), // late
 	)
 	s := replyTTLOf(t, mm)
 	if s.Last != 52 {
 		t.Errorf("Last = %d, want 52 (newest send time)", s.Last)
 	}
-	if s.ChangeCount != 1 || len(s.Changes) != 1 || !s.Changes[0].Time.Equal(at(2)) {
-		t.Errorf("changes = %+v (count %d), want one at %v", s.Changes, s.ChangeCount, at(2))
-	}
+	checkChanges(t, s)
 }
 
 func TestReplyTTLReset(t *testing.T) {
 	mm := NewMetricsManager()
 	now := time.Now()
-	feedEvents(mm, icmpTTLEvent(now.Add(-2*time.Second), 54), icmpTTLEvent(now.Add(-time.Second), 52))
+	var events []*prober.Event
+	for i, ttl := range []int{54, 52, 52, 52} {
+		events = append(events, icmpTTLEvent(now.Add(time.Duration(i-5)*time.Second), ttl))
+	}
+	feedEvents(mm, events...)
+	if s := replyTTLOf(t, mm); s.ChangeCount != 1 {
+		t.Fatalf("before reset: ChangeCount = %d, want 1", s.ChangeCount)
+	}
 	mm.ResetAllMetrics()
 	// A result of a probe sent before the reset is dropped
 	feedEvents(mm, icmpTTLEvent(now.Add(-500*time.Millisecond), 60))
@@ -131,11 +186,14 @@ func TestReplyTTLReset(t *testing.T) {
 // Snapshots must not share the change list with the live metrics.
 func TestReplyTTLSnapshotIsolated(t *testing.T) {
 	mm := NewMetricsManager()
-	feedEvents(mm, icmpTTLEvent(at(0), 54), icmpTTLEvent(at(1), 52))
+	feedEvents(mm, ttlSeq(0, 54, 52, 52, 52)...)
 	before := replyTTLOf(t, mm)
-	feedEvents(mm, icmpTTLEvent(at(2), 54))
+	feedEvents(mm, ttlSeq(4, 54, 54, 54)...)
 	if len(before.Changes) != 1 || before.Changes[0].New != 52 {
 		t.Errorf("earlier snapshot changed: %+v", before.Changes)
+	}
+	if s := replyTTLOf(t, mm); s.ChangeCount != 2 {
+		t.Errorf("ChangeCount = %d, want 2", s.ChangeCount)
 	}
 }
 
@@ -143,10 +201,7 @@ func TestReplyTTLSnapshotIsolated(t *testing.T) {
 // drops out of it.
 func TestReplyTTLRangeIsRecent(t *testing.T) {
 	mm := NewMetricsManagerWithOptions(Options{HistorySize: 5})
-	events := []*prober.Event{icmpTTLEvent(at(0), 60)}
-	for i := 1; i <= 5; i++ {
-		events = append(events, icmpTTLEvent(at(i), 54))
-	}
+	events := ttlSeq(0, 60, 54, 54, 54, 54, 54)
 	feedEvents(mm, events[:3]...)
 	if s := replyTTLOf(t, mm); s.Min != 54 || s.Max != 60 {
 		t.Errorf("min/max with the transient TTL in history = %d/%d, want 54/60", s.Min, s.Max)
@@ -156,9 +211,7 @@ func TestReplyTTLRangeIsRecent(t *testing.T) {
 	if s.Last != 54 || s.Min != 54 || s.Max != 54 {
 		t.Errorf("last/min/max = %d/%d/%d, want 54/54/54", s.Last, s.Min, s.Max)
 	}
-	if s.ChangeCount != 1 {
-		t.Errorf("ChangeCount = %d, want 1 (changes outlive the range window)", s.ChangeCount)
-	}
+	checkChanges(t, s, TTLChange{Time: at(1), Old: 60, New: 54}) // changes outlive the range window
 }
 
 // httpEvent is an HTTP(S) result; remote/tls empty means no response

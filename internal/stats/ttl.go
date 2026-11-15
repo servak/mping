@@ -10,10 +10,11 @@ import (
 // ReplyTTLStats.ChangeCount keeps counting beyond it.
 const maxTTLChanges = 20
 
-// TTLChange is a change of the reply TTL (IPv4) / hop limit (IPv6) between
-// two consecutive successful replies, in send order.
+// TTLChange is a confirmed change of the reply TTL (IPv4) / hop limit
+// (IPv6): the new TTL was seen on ttlChangeMinReplies consecutive
+// successful replies.
 type TTLChange struct {
-	Time time.Time // send time of the probe whose reply had the new TTL
+	Time time.Time // send time of the first reply with the new TTL
 	Old  int
 	New  int
 }
@@ -38,27 +39,57 @@ type ReplyTTLStats struct {
 	ChangeCount int
 }
 
-// ttlChangeTracker detects TTL changes between consecutive successful
-// replies. It is fed by outageTracker, which applies results in send order
-// once they have settled, so a late reply cannot fake a change.
+// ttlChangeMinReplies is the number of consecutive successful replies a
+// new TTL must be seen on before it is recorded as a change (like the 3
+// consecutive losses that make an outage). Replies alternating between
+// unequal ECMP paths therefore show up as a range, not as a flood of
+// changes.
+const ttlChangeMinReplies = 3
+
+// ttlChangeTracker detects TTL changes between successful replies. It is
+// fed by outageTracker, which applies results in send order once they have
+// settled, so a late reply cannot fake a change.
+//
+// prev is the confirmed TTL. A reply with another TTL starts (or extends)
+// a candidate; once the candidate's TTL has been seen on
+// ttlChangeMinReplies consecutive replies it is recorded as a change at the
+// send time of its first reply. A reply with the confirmed TTL drops the
+// candidate. Failures and replies with an unknown TTL change nothing.
 type ttlChangeTracker struct {
-	prev    int // TTL of the previous successful reply with a known TTL
-	changes []TTLChange
-	count   int
+	prev     int // confirmed TTL; 0 until the first reply with a known TTL
+	candTTL  int // candidate TTL; 0 if none
+	candSent time.Time
+	candRun  int
+	changes  []TTLChange
+	count    int
 }
 
 func (t *ttlChangeTracker) apply(r probeResult) {
 	if !r.success || r.ttl <= 0 {
 		return
 	}
-	if t.prev != 0 && r.ttl != t.prev {
-		t.changes = append(t.changes, TTLChange{Time: r.sentTime, Old: t.prev, New: r.ttl})
-		t.count++
-		if len(t.changes) > maxTTLChanges {
-			t.changes = append([]TTLChange(nil), t.changes[len(t.changes)-maxTTLChanges:]...)
-		}
+	switch {
+	case t.prev == 0:
+		t.prev = r.ttl // the first known TTL is not a change
+		return
+	case r.ttl == t.prev:
+		t.candTTL, t.candRun = 0, 0
+		return
+	case r.ttl == t.candTTL:
+		t.candRun++
+	default:
+		t.candTTL, t.candSent, t.candRun = r.ttl, r.sentTime, 1
 	}
-	t.prev = r.ttl
+	if t.candRun < ttlChangeMinReplies {
+		return
+	}
+	t.changes = append(t.changes, TTLChange{Time: t.candSent, Old: t.prev, New: t.candTTL})
+	t.count++
+	if len(t.changes) > maxTTLChanges {
+		t.changes = append([]TTLChange(nil), t.changes[len(t.changes)-maxTTLChanges:]...)
+	}
+	t.prev = t.candTTL
+	t.candTTL, t.candRun = 0, 0
 }
 
 func (t ttlChangeTracker) clone() ttlChangeTracker {
