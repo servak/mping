@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"slices"
 	"time"
 
 	"github.com/servak/mping/internal/prober"
@@ -11,26 +12,33 @@ import (
 const maxTTLChanges = 20
 
 // TTLChange is a confirmed change of the reply TTL (IPv4) / hop limit
-// (IPv6): the new TTL was seen on ttlChangeMinReplies consecutive
-// successful replies.
+// (IPv6): the new TTL was seen on enough consecutive successful replies
+// (see ttlChangeMinReplies).
 type TTLChange struct {
 	Time time.Time // send time of the first reply with the new TTL
 	Old  int
 	New  int
 }
 
-// HopsDelta returns the change of the estimated return path length: Old -
-// New, positive when the reply crossed more hops. It assumes the responder's
-// initial TTL did not change.
-func (c TTLChange) HopsDelta() int {
-	return c.Old - c.New
+// HopsDelta returns the change of the estimated return path length,
+// positive when the reply crossed more hops. ok is false when the two TTLs
+// imply different initial TTLs (e.g. 54 and 245): then another kind of
+// responder probably answers, and the difference says nothing about hops.
+func (c TTLChange) HopsDelta() (hops int, ok bool) {
+	oldHops, okOld := prober.EstimateHops(c.Old)
+	newHops, okNew := prober.EstimateHops(c.New)
+	if !okOld || !okNew || c.Old+oldHops != c.New+newHops {
+		return 0, false
+	}
+	return newHops - oldHops, true
 }
 
 // ReplyTTLStats describes the reply TTLs / hop limits of a target. Last,
-// Min and Max are 0 when no recent reply carried a known TTL.
+// Min and Max are 0 when no reply carried a known TTL.
 type ReplyTTLStats struct {
-	Last int // TTL of the reply to the most recently sent probe
-	// Min and Max cover the replies kept in history (recent probes only)
+	Last int // TTL of the most recent reply, however long ago
+	// Min and Max cover the replies kept in history (recent probes only);
+	// both equal Last when history holds no reply (a long outage)
 	Min int
 	Max int
 	// Changes holds the most recent changes (at most maxTTLChanges),
@@ -39,35 +47,58 @@ type ReplyTTLStats struct {
 	ChangeCount int
 }
 
-// ttlChangeMinReplies is the number of consecutive successful replies a
-// new TTL must be seen on before it is recorded as a change (like the 3
-// consecutive losses that make an outage). Replies alternating between
-// unequal ECMP paths therefore show up as a range, not as a flood of
-// changes.
-const ttlChangeMinReplies = 3
+const (
+	// ttlChangeMinReplies is the number of consecutive successful replies a
+	// new TTL must be seen on before it is recorded as a change (like the 3
+	// consecutive losses that make an outage).
+	ttlChangeMinReplies = 3
+
+	// ttlChangeMinRepliesRecent applies instead when the TTL was already
+	// seen among the ttlRecentReplies replies before the run. Per-packet
+	// load balancing over unequal paths mixes TTLs at random, where runs of
+	// 3 are common (every 14 replies for an even split) but runs of 10 are
+	// rare. A real switch back to a recent path is still recorded, only
+	// later.
+	ttlChangeMinRepliesRecent = 10
+	ttlRecentReplies          = 50
+)
 
 // ttlChangeTracker detects TTL changes between successful replies. It is
 // fed by outageTracker, which applies results in send order once they have
 // settled, so a late reply cannot fake a change.
 //
 // prev is the confirmed TTL. A reply with another TTL starts (or extends)
-// a candidate; once the candidate's TTL has been seen on
-// ttlChangeMinReplies consecutive replies it is recorded as a change at the
-// send time of its first reply. A reply with the confirmed TTL drops the
-// candidate. Failures and replies with an unknown TTL change nothing.
+// a candidate; once the candidate's TTL has been seen on candNeed
+// consecutive replies it is recorded as a change at the send time of its
+// first reply. A reply with the confirmed TTL drops the candidate. Failures
+// and replies with an unknown TTL change nothing.
 type ttlChangeTracker struct {
 	prev     int // confirmed TTL; 0 until the first reply with a known TTL
 	candTTL  int // candidate TTL; 0 if none
 	candSent time.Time
 	candRun  int
+	candNeed int // candRun needed to record the candidate
 	changes  []TTLChange
 	count    int
+
+	recent [ttlRecentReplies]uint8 // ring of the latest TTLs; 0 = unused
+	next   int                     // next slot of recent
+	last   int                     // latest known TTL
 }
 
 func (t *ttlChangeTracker) apply(r probeResult) {
-	if !r.success || r.ttl <= 0 {
+	if !r.success || r.ttl <= 0 || r.ttl > 255 {
 		return
 	}
+	t.detect(r)
+	t.last = r.ttl
+	t.recent[t.next] = uint8(r.ttl)
+	t.next = (t.next + 1) % len(t.recent)
+}
+
+// detect applies a reply to prev and the candidate; recent still holds only
+// the replies before it.
+func (t *ttlChangeTracker) detect(r probeResult) {
 	switch {
 	case t.prev == 0:
 		t.prev = r.ttl // the first known TTL is not a change
@@ -79,8 +110,12 @@ func (t *ttlChangeTracker) apply(r probeResult) {
 		t.candRun++
 	default:
 		t.candTTL, t.candSent, t.candRun = r.ttl, r.sentTime, 1
+		t.candNeed = ttlChangeMinReplies
+		if slices.Contains(t.recent[:], uint8(r.ttl)) {
+			t.candNeed = ttlChangeMinRepliesRecent
+		}
 	}
-	if t.candRun < ttlChangeMinReplies {
+	if t.candRun < t.candNeed {
 		return
 	}
 	t.changes = append(t.changes, TTLChange{Time: t.candSent, Old: t.prev, New: t.candTTL})

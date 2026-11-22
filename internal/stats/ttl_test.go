@@ -1,6 +1,8 @@
 package stats
 
 import (
+	"math/rand/v2"
+	"slices"
 	"testing"
 	"time"
 
@@ -61,16 +63,71 @@ func TestReplyTTLTracking(t *testing.T) {
 		icmpTTLEvent(at(3), 0), // unknown: neither advances nor clears the candidate
 		&prober.Event{Key: "h", Result: prober.TIMEOUT, SentTime: at(4), Message: "timeout"},
 	)
-	events = append(events, ttlSeq(5, 52, 52, 54, 54, 54)...)
+	events = append(events, ttlSeq(5, 52, 52)...)
+	// 54 was seen recently, so switching back takes more replies
+	events = append(events, ttlSeq(7, repeatTTL(54, ttlChangeMinRepliesRecent)...)...)
 	feedEvents(mm, events...)
 	s := replyTTLOf(t, mm)
 	if s.Last != 54 || s.Min != 52 || s.Max != 54 {
 		t.Errorf("last/min/max = %d/%d/%d, want 54/52/54", s.Last, s.Min, s.Max)
 	}
 	checkChanges(t, s, TTLChange{Time: at(2), Old: 54, New: 52}, TTLChange{Time: at(7), Old: 52, New: 54})
-	if d := s.Changes[0].HopsDelta(); d != 2 {
-		t.Errorf("HopsDelta = %d, want 2", d)
+	if d, ok := s.Changes[0].HopsDelta(); d != 2 || !ok {
+		t.Errorf("HopsDelta = %d, %v, want 2, true", d, ok)
 	}
+}
+
+func TestTTLChangeHopsDelta(t *testing.T) {
+	tests := []struct {
+		old, new, want int
+		ok             bool
+	}{
+		{54, 52, 2, true},
+		{114, 118, -4, true},
+		{250, 245, 5, true},
+		{54, 245, 0, false}, // 64 -> 255
+		{120, 60, 0, false}, // 128 -> 64
+	}
+	for _, tt := range tests {
+		if d, ok := (TTLChange{Old: tt.old, New: tt.new}).HopsDelta(); d != tt.want || ok != tt.ok {
+			t.Errorf("HopsDelta(%d→%d) = %d, %v, want %d, %v", tt.old, tt.new, d, ok, tt.want, tt.ok)
+		}
+	}
+}
+
+// repeatTTL returns ttl n times
+func repeatTTL(ttl, n int) []int {
+	return slices.Repeat([]int{ttl}, n)
+}
+
+// Per-packet load balancing mixes TTLs at random: runs of 3 are frequent,
+// but must not be recorded as a stream of changes.
+func TestReplyTTLRandomBalancing(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	var tr ttlChangeTracker
+	const n = 20000
+	for i := range n {
+		tr.apply(probeResult{sentTime: at(i), success: true, ttl: 53 + rng.IntN(2)})
+	}
+	// About one per 2000 replies is expected; runs of 3 would give 1400
+	if tr.count > n/500 {
+		t.Errorf("%d changes in %d randomly balanced replies", tr.count, n)
+	}
+}
+
+// The last TTL and the changes stay known when an outage outlasts the history.
+func TestReplyTTLSurvivesLongOutage(t *testing.T) {
+	mm := NewMetricsManagerWithOptions(Options{HistorySize: 5})
+	events := ttlSeq(0, 54, 52, 52, 52)
+	for i := 4; i < 12; i++ {
+		events = append(events, &prober.Event{Key: "h", Result: prober.TIMEOUT, SentTime: at(i), Message: "timeout"})
+	}
+	feedEvents(mm, events...)
+	s := replyTTLOf(t, mm)
+	if s.Last != 52 || s.Min != 52 || s.Max != 52 {
+		t.Errorf("last/min/max = %d/%d/%d, want 52/52/52", s.Last, s.Min, s.Max)
+	}
+	checkChanges(t, s, TTLChange{Time: at(1), Old: 54, New: 52})
 }
 
 func TestReplyTTLChangeNeedsConsecutiveReplies(t *testing.T) {
@@ -81,7 +138,9 @@ func TestReplyTTLChangeNeedsConsecutiveReplies(t *testing.T) {
 	}{
 		{"alternating ECMP paths", []int{54, 53, 54, 53, 54, 53, 54, 53}, nil},
 		{"persistent change", []int{54, 54, 52, 52, 52}, []TTLChange{{Time: at(2), Old: 54, New: 52}}},
-		{"interrupted candidate", []int{54, 52, 52, 54, 52, 52, 52}, []TTLChange{{Time: at(4), Old: 54, New: 52}}},
+		{"recent TTL needs a longer run", append([]int{54, 52, 52, 54}, repeatTTL(52, ttlChangeMinRepliesRecent-1)...), nil},
+		{"interrupted candidate", append([]int{54, 52, 52, 54}, repeatTTL(52, ttlChangeMinRepliesRecent)...), []TTLChange{{Time: at(4), Old: 54, New: 52}}},
+		{"TTL no longer recent", slices.Concat([]int{54, 52}, repeatTTL(54, ttlRecentReplies), repeatTTL(52, 3)), []TTLChange{{Time: at(2 + ttlRecentReplies), Old: 54, New: 52}}},
 		{"two short runs of the new TTL", []int{54, 52, 52, 54, 52, 52}, nil},
 		{"another candidate replaces it", []int{54, 52, 52, 50, 50, 50}, []TTLChange{{Time: at(3), Old: 54, New: 50}}},
 	}
@@ -111,13 +170,13 @@ func TestReplyTTLNoData(t *testing.T) {
 
 func TestReplyTTLChangesCapped(t *testing.T) {
 	mm := NewMetricsManager()
-	// Blocks of ttlChangeMinReplies replies, alternating 50 and 51: every
+	// Blocks of ttlChangeMinReplies replies, each with a new TTL: every
 	// block after the first is a change at its first reply.
 	n := maxTTLChanges + 5
 	var ttls []int
 	for k := 0; k <= n; k++ {
 		for range ttlChangeMinReplies {
-			ttls = append(ttls, 50+k%2)
+			ttls = append(ttls, 100+k)
 		}
 	}
 	feedEvents(mm, ttlSeq(0, ttls...)...)
@@ -188,7 +247,7 @@ func TestReplyTTLSnapshotIsolated(t *testing.T) {
 	mm := NewMetricsManager()
 	feedEvents(mm, ttlSeq(0, 54, 52, 52, 52)...)
 	before := replyTTLOf(t, mm)
-	feedEvents(mm, ttlSeq(4, 54, 54, 54)...)
+	feedEvents(mm, ttlSeq(4, 50, 50, 50)...)
 	if len(before.Changes) != 1 || before.Changes[0].New != 52 {
 		t.Errorf("earlier snapshot changed: %+v", before.Changes)
 	}
