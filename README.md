@@ -54,7 +54,7 @@ Only ICMP needs permissions; the HTTP, TCP, DNS and NTP probers never do. The IC
 | Linux | nothing if your group is within `net.ipv4.ping_group_range` (it governs IPv6 too); otherwise `cap_net_raw` or root |
 | Windows | Administrator (raw sockets) |
 
-Many Linux distributions allow datagram ICMP for everyone, but the kernel default (`1 0`) allows it for nobody, not even root. Check and change it with:
+The deb and rpm packages grant no privileges. Many Linux distributions allow datagram ICMP for everyone, and ICMP works there right after the installation. The kernel default (`1 0`) allows it for nobody, not even root, and some distributions keep it (Debian 12 and Ubuntu 24.04, for example). Check and change it with:
 
 ```bash
 sysctl net.ipv4.ping_group_range
@@ -62,15 +62,17 @@ sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"   # all groups, until re
 echo 'net.ipv4.ping_group_range = 0 2147483647' | sudo tee /etc/sysctl.d/99-ping.conf   # permanently
 ```
 
-Or allow mping to use raw sockets (the deb and rpm packages do this on installation):
+Or allow mping to use raw sockets:
 
 ```bash
-sudo setcap cap_net_raw=+ep mping
+sudo setcap cap_net_raw=+ep "$(command -v mping)"
 ```
 
-Where file capabilities are not available, `sudo chown root mping && sudo chmod u+s mping` does the same with far more privileges than needed.
+The capability belongs to the file, so run this again after every upgrade or reinstallation; the sysctl stays. Earlier deb and rpm packages ran `setcap` on installation, and upgrading from one of them removes the capability: where datagram ICMP is not allowed, do one of the two then.
 
-Where datagram ICMP is allowed, nothing in mping needs `cap_net_raw` or root: ICMP path traces see every hop on datagram sockets too. UDP path traces (for HTTP, TCP, DNS and NTP targets) need no permission on Linux and macOS in any case, see [the table](#path-trace-mtr).
+Where file capabilities are not available, `sudo chown root /path/to/mping && sudo chmod u+s /path/to/mping` does the same with far more privileges than needed.
+
+Where datagram ICMP is allowed, nothing in mping needs `cap_net_raw` or root: ICMP path traces see every hop on datagram sockets too. UDP path traces (for HTTP, TCP, DNS and NTP targets) need no permission on Linux (the socket's error queue, `IP_RECVERR`) and macOS in any case, see [the table](#path-trace-mtr).
 
 In Kubernetes, set the sysctl for the pod instead of adding the `NET_RAW` capability; it is a [safe sysctl](https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/) since 1.18:
 
