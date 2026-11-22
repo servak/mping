@@ -684,9 +684,9 @@ go vet -tags 'integration e2e' ./...
 These use real sockets on loopback only (`127.0.0.1`, `::1`) plus HTTP/HTTPS/TCP/DNS/NTP servers started by the tests, so they need no external network. CI runs them in the `Integration / E2E` job.
 
 ```bash
-# ICMP prober, path tracer and TUI path view (integration build tag).
+# ICMP prober, sessions, path tracer and TUI path view (integration build tag).
 # Without MPING_IT_TARGETS / MPING_IT_HOSTS they probe public hosts.
-go test -tags integration -run Integration -v ./internal/prober/
+go test -tags integration -run Integration -v ./internal/prober/ ./internal/session/
 MPING_IT_TARGETS=127.0.0.1,::1 MPING_IT_ROUNDS=10 MPING_IT_INTERVAL=200ms \
   go test -tags integration -run Integration -v ./internal/trace/
 MPING_IT_HOSTS=127.0.0.3,127.0.0.1,127.0.0.2 MPING_IT_DURATION=8s \

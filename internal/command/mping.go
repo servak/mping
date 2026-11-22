@@ -11,6 +11,7 @@ import (
 
 	"github.com/servak/mping/internal/beep"
 	"github.com/servak/mping/internal/config"
+	"github.com/servak/mping/internal/session"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/ui/shared"
 	"github.com/servak/mping/internal/ui/tui"
@@ -73,9 +74,9 @@ mping dns://8.8.8.8/google.com`,
 			notifier := beep.NewNotifier()
 			defer notifier.Close()
 
-			sess, err := newSession(sessionParams{
-				Cfg:             cfg,
-				Hosts:           hosts,
+			sess, err := session.New(session.Params{
+				Config:          cfg,
+				Targets:         hosts,
 				SourceInterface: sourceInterface,
 				Interval:        interval,
 				Timeout:         timeout,
@@ -87,12 +88,12 @@ mping dns://8.8.8.8/google.com`,
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			probeErr := sess.start(ctx)
+			probeErr := sess.Start(ctx)
 
-			startTUI(sess.metrics, notifier, cfg.UI, interval, timeout)
+			startTUI(sess.Metrics(), notifier, cfg.UI, interval, timeout)
 
 			// Stop probing when TUI exits
-			sess.stop()
+			sess.Stop()
 
 			// A ProbeManager failure is reported only now: printing while
 			// the TUI owns the screen would corrupt the display.
@@ -103,7 +104,7 @@ mping dns://8.8.8.8/google.com`,
 			}
 
 			// Final results
-			metrics := sess.metrics.SortBy(stats.Fail, false)
+			metrics := sess.Metrics().SortBy(stats.Fail, false)
 			return shared.WriteReport(cmd.OutOrStderr(), shared.FormatTable, metrics, stats.Fail, false)
 		},
 	}

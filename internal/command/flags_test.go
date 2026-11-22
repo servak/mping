@@ -91,19 +91,3 @@ func TestLoadConfigExplicitPathMustExist(t *testing.T) {
 		t.Fatal("expected error for unreadable config")
 	}
 }
-
-func TestNewSessionRejectsBadTarget(t *testing.T) {
-	cfg, err := loadConfig("/nonexistent/mping.yml", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = newSession(sessionParams{
-		Cfg:      cfg,
-		Hosts:    []string{"bogusprober:foo"},
-		Interval: time.Second,
-		Timeout:  time.Second,
-	})
-	if err == nil || !strings.Contains(err.Error(), "failed to add targets") {
-		t.Errorf("expected add targets error, got %v", err)
-	}
-}

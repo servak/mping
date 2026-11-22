@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/servak/mping/internal/session"
 	"github.com/servak/mping/internal/stats"
 	"github.com/servak/mping/internal/ui/shared"
 )
@@ -107,9 +108,9 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 				return err
 			}
 
-			sess, err := newSession(sessionParams{
-				Cfg:             cfg,
-				Hosts:           hosts,
+			sess, err := session.New(session.Params{
+				Config:          cfg,
+				Targets:         hosts,
 				SourceInterface: sourceInterface,
 				Interval:        interval,
 				Timeout:         timeout,
@@ -130,7 +131,7 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 			// stdout stays clean for piping into other tools.
 			progress := progressWriter()
 			fmt.Fprint(progress, "probe")
-			probeErr := sess.start(ctx)
+			probeErr := sess.Start(ctx)
 
 			// Probers send the first round immediately and then one round per
 			// interval, so round N goes out at (N-1)*interval. Stopping half an
@@ -168,7 +169,7 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 			}
 
 			// Stop probing
-			sess.stop()
+			sess.Stop()
 			fmt.Fprint(progress, "\r\033[K")
 			var runErr error
 			select {
@@ -177,7 +178,7 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 			default:
 			}
 
-			metrics := sess.metrics.SortBy(stats.Success, true)
+			metrics := sess.Metrics().SortBy(stats.Success, true)
 			if err := shared.WriteReport(cmd.OutOrStdout(), output, metrics, stats.Success, true); err != nil {
 				return err
 			}

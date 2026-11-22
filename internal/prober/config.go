@@ -2,6 +2,7 @@ package prober
 
 import (
 	"fmt"
+	"maps"
 )
 
 type (
@@ -14,6 +15,37 @@ type (
 		NTP   *NTPConfig  `yaml:"ntp,omitempty"`
 	}
 )
+
+// Clone returns a deep copy of pc. A new pointer, map or slice field in any
+// prober's config must be copied here (config.TestCloneSharesNothing checks).
+func (pc *ProberConfig) Clone() *ProberConfig {
+	c := clonePtr(pc)
+	if c == nil {
+		return nil
+	}
+	c.ICMP = clonePtr(pc.ICMP)
+	c.HTTP = clonePtr(pc.HTTP)
+	if h := c.HTTP; h != nil {
+		h.Header = maps.Clone(h.Header)
+		h.TLS = clonePtr(h.TLS)
+		if h.TLS != nil {
+			h.TLS.SkipVerify = clonePtr(h.TLS.SkipVerify)
+		}
+	}
+	c.TCP = clonePtr(pc.TCP)
+	c.DNS = clonePtr(pc.DNS)
+	c.NTP = clonePtr(pc.NTP)
+	return c
+}
+
+// clonePtr returns a pointer to a shallow copy of *p, or nil.
+func clonePtr[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+	c := *p
+	return &c
+}
 
 // Validate validates the prober configuration
 func (pc *ProberConfig) Validate() error {
