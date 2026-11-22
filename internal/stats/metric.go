@@ -281,9 +281,10 @@ func (m *metrics) GetRTTPercentiles(ps ...float64) []time.Duration {
 	return res
 }
 
-// GetReplyTTL returns the reply TTL / hop limit statistics. Last, Min and
-// Max cover the successful replies kept in history (the last HistorySize
-// probes), so the range reflects the current path, not old events.
+// GetReplyTTL returns the reply TTL / hop limit statistics. Min and Max
+// cover the successful replies kept in history (the last HistorySize
+// probes), so the range reflects the current path, not old events. Last
+// survives an outage longer than the history.
 // Changes only include results applied in send order, so they may lag
 // behind by the settle time.
 func (m *metrics) GetReplyTTL() ReplyTTLStats {
@@ -302,6 +303,10 @@ func (m *metrics) GetReplyTTL() ReplyTTLStats {
 		})
 	}
 	if m.outage != nil {
+		if s.Last == 0 { // no reply left in history: a long outage
+			s.Last = m.outage.ttl.last
+			s.Min, s.Max = s.Last, s.Last
+		}
 		s.Changes = append([]TTLChange(nil), m.outage.ttl.changes...)
 		s.ChangeCount = m.outage.ttl.count
 	}

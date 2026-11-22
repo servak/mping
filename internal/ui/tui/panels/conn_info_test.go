@@ -56,11 +56,17 @@ func TestFormatConnInfoReplyTTL(t *testing.T) {
 	// Truncated list shows how many more there are
 	var events []*prober.Event
 	for i := 0; i < 16*3; i++ {
-		events = append(events, ev(i, 50+(i/3)%2))
+		events = append(events, ev(i, 100+i/3))
 	}
 	got = plainText(formatConnInfo(onlyMetrics(t, statstest.FromEvents(t, events...)), &theme, ts))
 	if !strings.Contains(got, "TTL Changes: 15") || !strings.Contains(got, "... 5 more") {
 		t.Errorf("truncation not shown:\n%s", got)
+	}
+
+	// No hop count across different initial TTLs
+	got = plainText(formatConnInfo(onlyMetrics(t, statstest.FromEvents(t, ev(0, 54), ev(1, 245), ev(2, 245), ev(3, 245))), &theme, ts))
+	if !strings.Contains(got, "09:12:01  TTL 54→245 (different initial TTL)") {
+		t.Errorf("initial TTL change not shown:\n%s", got)
 	}
 
 	// Constant TTL: no range, no changes

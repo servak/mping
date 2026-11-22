@@ -52,10 +52,13 @@ func formatReplyTTL(s stats.ReplyTTLStats, theme *shared.Theme) string {
 	shown := 0
 	for i := len(s.Changes) - 1; i >= 0 && shown < maxDetailTTLChanges; i-- {
 		c := s.Changes[i]
-		d := c.HopsDelta()
-		fmt.Fprintf(&sb, "\n[%s]%s[%s]  [%s]TTL %d→%d (%+d %s)[%s]",
+		note := "different initial TTL"
+		if d, ok := c.HopsDelta(); ok {
+			note = fmt.Sprintf("%+d %s", d, plural(d, "hop", "hops"))
+		}
+		fmt.Fprintf(&sb, "\n[%s]%s[%s]  [%s]TTL %d→%d (%s)[%s]",
 			theme.Timestamp, shared.TimeFormater(c.Time), theme.Primary,
-			theme.Warning, c.Old, c.New, d, plural(d, "hop", "hops"), theme.Primary)
+			theme.Warning, c.Old, c.New, note, theme.Primary)
 		shown++
 	}
 	if more := s.ChangeCount - shown; more > 0 {
