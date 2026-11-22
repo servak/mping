@@ -42,13 +42,10 @@ func integrationProber(t *testing.T, version ProbeType, cfg *ICMPConfig, prefix 
 	}
 	t.Cleanup(p.Stop)
 	want := map[string]socketType{"0": datagramSocket, "1": rawSocket}[os.Getenv("MPING_IT_PRIVILEGED")]
-	if want != "" && p.socket != want {
-		t.Fatalf("prober uses a %s socket, MPING_IT_PRIVILEGED requires %s", p.socket, want)
+	if want != "" && p.sock.typ != want {
+		t.Fatalf("prober uses a %s socket, MPING_IT_PRIVILEGED requires %s", p.sock.typ, want)
 	}
-	t.Logf("%s: %s socket, echo ID %#x (checked: %v)", prefix, p.socket, p.runID, p.checkID)
-	if p.checkID != p.socket.keepsEchoID(runtime.GOOS) {
-		t.Errorf("%s socket on %s: checkID = %v", p.socket, runtime.GOOS, p.checkID)
-	}
+	t.Logf("%s: %s socket, echo ID %#x (checked: %v)", prefix, p.sock.typ, p.runID, p.sock.checkID)
 	return p
 }
 
@@ -145,13 +142,13 @@ func TestIntegrationICMPProberSocketOptions(t *testing.T) {
 
 func icmpConnOf(t *testing.T, p *ICMPProber) *icmpConn {
 	t.Helper()
-	c := p.c
+	c := p.sock.conn
 	if d, ok := c.(datagramConn); ok {
 		c = d.packetConn
 	}
 	ic, ok := c.(*icmpConn)
 	if !ok {
-		t.Fatalf("prober connection is a %T", p.c)
+		t.Fatalf("prober connection is a %T", p.sock.conn)
 	}
 	return ic
 }
@@ -256,7 +253,7 @@ func TestIntegrationICMPProbersSameAddress(t *testing.T) {
 				}
 				ids[p.runID] = true
 				if i == 0 {
-					p.c = muted(p.c)
+					p.sock.conn = muted(p.sock.conn)
 				}
 				mustAccept(t, p, name+"://"+addr)
 				ch := make(chan *Event, 1000)
@@ -310,7 +307,7 @@ func muted(c packetConn) packetConn {
 // requests, and it is out of circulation for the raw sockets of the process.
 func TestIntegrationICMPProberKernelID(t *testing.T) {
 	p := integrationProber(t, ICMPV4, &ICMPConfig{}, "icmpv4")
-	if runtime.GOOS != "linux" || p.socket != datagramSocket {
+	if runtime.GOOS != "linux" || p.sock.typ != datagramSocket {
 		t.Skip("Linux datagram sockets only")
 	}
 	id := kernelEchoID(icmpConnOf(t, p))

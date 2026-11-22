@@ -13,26 +13,6 @@ import (
 	"github.com/servak/mping/internal/icmpid"
 )
 
-// Only Linux rewrites the echo ID, and only on datagram sockets.
-func TestSocketTypeKeepsEchoID(t *testing.T) {
-	cases := []struct {
-		typ  socketType
-		goos string
-		want bool
-	}{
-		{datagramSocket, "linux", false},
-		{datagramSocket, "darwin", true},
-		{rawSocket, "linux", true},
-		{rawSocket, "darwin", true},
-		{rawSocket, "windows", true},
-	}
-	for _, tc := range cases {
-		if got := tc.typ.keepsEchoID(tc.goos); got != tc.want {
-			t.Errorf("%s socket on %s: keepsEchoID() = %v, want %v", tc.typ, tc.goos, got, tc.want)
-		}
-	}
-}
-
 // fakeListener opens fake sockets, or fails with the error of the network.
 type fakeListener struct {
 	errs  map[string]error

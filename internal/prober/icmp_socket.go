@@ -24,14 +24,13 @@ const (
 	rawSocket socketType = "raw"
 )
 
-// keepsEchoID reports whether replies on a socket of this type carry the
-// echo ID we put in the request. Linux replaces the ID on datagram sockets
-// with one of its own per socket and delivers to a socket only the replies
-// to that ID, so there the ID must not, and need not, be checked. Everywhere
-// else it must: raw sockets receive the replies to every socket on the host,
-// and so do datagram sockets on macOS.
-func (s socketType) keepsEchoID(goos string) bool {
-	return s != datagramSocket || goos != "linux"
+// datagramKeepsEchoID reports whether replies on a datagram socket carry the
+// echo ID we put in the request. Linux replaces the ID with one of its own
+// per socket and delivers to a socket only the replies to that ID, so there
+// the ID must not, and need not, be checked. On macOS it must, as on raw
+// sockets everywhere: they receive the replies to every socket on the host.
+func datagramKeepsEchoID(goos string) bool {
+	return goos != "linux"
 }
 
 // datagramICMPSupported reports whether golang.org/x/net/icmp supports
@@ -100,7 +99,7 @@ func openICMPSocket(goos string, t ProbeType, address string, listen listenFunc)
 		if err != nil {
 			return nil, err
 		}
-		return &icmpSocket{conn: c, typ: rawSocket, checkID: rawSocket.keepsEchoID(goos), lease: lease}, nil
+		return &icmpSocket{conn: c, typ: rawSocket, checkID: true, lease: lease}, nil
 	}
 
 	hint := addressHint(err)
@@ -128,7 +127,7 @@ const maxReserveAttempts = 3
 // ID already (the kernel does not know about those), another socket gets
 // another ID.
 func openDatagram(goos, network, address string, listen listenFunc) (*icmpSocket, error) {
-	checkID := datagramSocket.keepsEchoID(goos)
+	checkID := datagramKeepsEchoID(goos)
 	for attempt := 1; ; attempt++ {
 		c, err := listen(network, address)
 		if err != nil {

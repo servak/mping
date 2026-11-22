@@ -15,8 +15,6 @@ import (
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
-
-	"github.com/servak/mping/internal/icmpid"
 )
 
 const (
@@ -28,15 +26,12 @@ type (
 	ICMPProber struct {
 		version ProbeType
 		prefix  string // Custom prefix like "my-ping", "icmpv4", etc.
-		c       packetConn
-		socket  socketType
-		checkID bool // whether replies carry runID, see socketType.keepsEchoID
+		sock    *icmpSocket
 		body    []byte
 		targets map[string]icmpTarget // IPAddr string -> event key and name
 		timeout time.Duration
 		runCnt  int
-		runID   int                         // echo ID, unique per prober in the process
-		lease   *icmpid.Lease               // owns runID until the socket is closed
+		runID   int                         // echo ID, unique per prober in the process; see icmpSocket
 		tables  map[runTime]map[string]bool // guarded by mu
 		mu      sync.Mutex
 		loop    *runLoop
@@ -182,25 +177,19 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, er
 	return newICMPProber(t, sock, []byte(cfg.Body), prefix), nil
 }
 
-// newICMPProber returns a prober on sock with its own echo ID. The echo ID
-// tells the replies of this prober apart from those of the other
-// probers and path tracers of the process, which ping with overlapping
-// sequence numbers: raw ICMP sockets, and datagram ones on macOS, receive the
-// echo replies of every socket on the host. IDs come from the process-wide
-// allocator in internal/icmpid, shared with internal/trace, and are released
-// when the socket is closed. On Linux datagram sockets the kernel does the
-// telling apart instead (see socketType.keepsEchoID).
+// newICMPProber returns a prober on sock. The echo ID of sock tells the
+// replies of this prober apart from those of the other probers and path
+// tracers of the process, which ping with overlapping sequence numbers (see
+// datagramKeepsEchoID for the sockets where the kernel does that). It is
+// released when the socket is closed.
 func newICMPProber(t ProbeType, sock *icmpSocket, body []byte, prefix string) *ICMPProber {
 	return &ICMPProber{
 		version: t,
 		prefix:  prefix,
-		c:       sock.conn,
-		socket:  sock.typ,
-		checkID: sock.checkID,
+		sock:    sock,
 		tables:  make(map[runTime]map[string]bool),
 		targets: make(map[string]icmpTarget),
 		runID:   int(sock.lease.ID()),
-		lease:   sock.lease,
 		runCnt:  0,
 		body:    body,
 		loop:    newRunLoop(),
@@ -535,7 +524,7 @@ func (p *ICMPProber) probe(r chan *Event) {
 			emit(r, p.failed(p.runCnt, ipStr, err))
 			continue
 		}
-		_, err = p.c.WriteTo(b, ip)
+		_, err = p.sock.conn.WriteTo(b, ip)
 		key, displayName := p.getTargetInfo(ipStr)
 		r <- sentEvent(key, displayName, n)
 		if err != nil {
@@ -561,10 +550,10 @@ func (p *ICMPProber) recvPkts(r chan *Event) {
 	}
 	pktbuf := make([]byte, maxPacketSize)
 	read := func() (int, int, net.Addr, error) {
-		n, addr, err := p.c.ReadFrom(pktbuf)
+		n, addr, err := p.sock.conn.ReadFrom(pktbuf)
 		return n, 0, addr, err
 	}
-	if tc, ok := p.c.(ttlPacketConn); ok {
+	if tc, ok := p.sock.conn.(ttlPacketConn); ok {
 		read = func() (int, int, net.Addr, error) { return tc.ReadFromTTL(pktbuf) }
 	}
 	for {
@@ -582,7 +571,7 @@ func (p *ICMPProber) recvPkts(r chan *Event) {
 			continue // not a packet of ours; skip it
 		}
 		id := binary.BigEndian.Uint16(pktbuf[4:6])
-		if p.checkID && id != uint16(p.runID) {
+		if p.sock.checkID && id != uint16(p.runID) {
 			continue
 		}
 		seq := binary.BigEndian.Uint16(pktbuf[6:8])
@@ -597,8 +586,8 @@ func (p *ICMPProber) recvPkts(r chan *Event) {
 
 func (p *ICMPProber) closeConn() {
 	p.closeOnce.Do(func() {
-		_ = p.c.Close()
-		p.lease.Release()
+		_ = p.sock.conn.Close()
+		p.sock.lease.Release()
 	})
 }
 

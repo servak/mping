@@ -45,55 +45,53 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 // sequence numbers.
 func TestICMPProbersDoNotShareReplies(t *testing.T) {
 	for _, typ := range []socketType{rawSocket, datagramSocket} {
-		t.Run(string(typ), func(t *testing.T) { testProbersDoNotShareReplies(t, typ) })
-	}
-}
+		t.Run(string(typ), func(t *testing.T) {
+			// newProber opens a socket of type typ on macOS
+			newProber := func(conn *fakeICMPConn, prefix string) *ICMPProber {
+				l := &fakeListener{conns: []packetConn{conn}}
+				if typ == rawSocket {
+					l.errs = map[string]error{"udp4": syscall.EPERM}
+				}
+				s, err := openICMPSocket("darwin", ICMPV4, "0.0.0.0", l.listen)
+				if err != nil {
+					t.Fatal(err)
+				}
+				p := newICMPProber(ICMPV4, s, []byte("x"), prefix)
+				if p.sock.typ != typ {
+					t.Fatalf("prober uses a %s socket, want %s", p.sock.typ, typ)
+				}
+				return p
+			}
+			var host fakeICMPNet
+			lost := host.newConn()
+			lost.noReply = true // e.g. TTL=1: the requests never reach the target
+			ok := host.newConn()
 
-func testProbersDoNotShareReplies(t *testing.T, typ socketType) {
-	// newProber opens a socket of type typ on macOS
-	newProber := func(conn *fakeICMPConn, prefix string) *ICMPProber {
-		l := &fakeListener{conns: []packetConn{conn}}
-		if typ == rawSocket {
-			l.errs = map[string]error{"udp4": syscall.EPERM}
-		}
-		s, err := openICMPSocket("darwin", ICMPV4, "0.0.0.0", l.listen)
-		if err != nil {
-			t.Fatal(err)
-		}
-		p := newICMPProber(ICMPV4, s, []byte("x"), prefix)
-		if p.socket != typ {
-			t.Fatalf("prober uses a %s socket, want %s", p.socket, typ)
-		}
-		return p
-	}
-	var host fakeICMPNet
-	lost := host.newConn()
-	lost.noReply = true // e.g. TTL=1: the requests never reach the target
-	ok := host.newConn()
+			pLost := newProber(lost, "ttl1")
+			if err := pLost.Accept("ttl1://127.0.0.1"); err != nil {
+				t.Fatal(err)
+			}
+			pOK := newProber(ok, "icmpv4")
+			if err := pOK.Accept("icmpv4://127.0.0.1"); err != nil {
+				t.Fatal(err)
+			}
+			if pLost.runID == pOK.runID {
+				t.Errorf("probers share echo ID %d", pLost.runID)
+			}
 
-	pLost := newProber(lost, "ttl1")
-	if err := pLost.Accept("ttl1://127.0.0.1"); err != nil {
-		t.Fatal(err)
-	}
-	pOK := newProber(ok, "icmpv4")
-	if err := pOK.Accept("icmpv4://127.0.0.1"); err != nil {
-		t.Fatal(err)
-	}
-	if pLost.runID == pOK.runID {
-		t.Errorf("probers share echo ID %d", pLost.runID)
-	}
+			logLost, stopLost := startFake(t, pLost, 20*time.Millisecond, 50*time.Millisecond)
+			logOK, stopOK := startFake(t, pOK, 20*time.Millisecond, 50*time.Millisecond)
+			waitFor(t, "rounds", func() bool { return logLost.count(TIMEOUT) >= 3 && logOK.count(SUCCESS) >= 3 })
+			stopLost()
+			stopOK()
 
-	logLost, stopLost := startFake(t, pLost, 20*time.Millisecond, 50*time.Millisecond)
-	logOK, stopOK := startFake(t, pOK, 20*time.Millisecond, 50*time.Millisecond)
-	waitFor(t, "rounds", func() bool { return logLost.count(TIMEOUT) >= 3 && logOK.count(SUCCESS) >= 3 })
-	stopLost()
-	stopOK()
-
-	if n := logLost.count(SUCCESS); n != 0 {
-		t.Errorf("prober without replies counted %d SUCCESS from the other prober's replies", n)
-	}
-	if n := logOK.count(TIMEOUT); n != 0 {
-		t.Errorf("answered prober reported %d TIMEOUT", n)
+			if n := logLost.count(SUCCESS); n != 0 {
+				t.Errorf("prober without replies counted %d SUCCESS from the other prober's replies", n)
+			}
+			if n := logOK.count(TIMEOUT); n != 0 {
+				t.Errorf("answered prober reported %d TIMEOUT", n)
+			}
+		})
 	}
 }
 
