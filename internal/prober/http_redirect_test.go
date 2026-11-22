@@ -177,6 +177,14 @@ func TestHTTPProberRedirectHeaders(t *testing.T) {
 
 // Same-port scheme changes cannot be served by redirectSite.
 func TestKeepsHeaders(t *testing.T) {
+	parse := func(s string) *url.URL {
+		t.Helper()
+		u, err := url.Parse(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
 	tests := []struct {
 		orig, target string
 		want         bool
@@ -190,15 +198,7 @@ func TestKeepsHeaders(t *testing.T) {
 		{"https://h/", "https://h./", false},
 	}
 	for _, tt := range tests {
-		orig, err := url.Parse(tt.orig)
-		if err != nil {
-			t.Fatal(err)
-		}
-		target, err := url.Parse(tt.target)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := keepsHeaders(orig, target); got != tt.want {
+		if got := keepsHeaders(parse(tt.orig), parse(tt.target)); got != tt.want {
 			t.Errorf("keepsHeaders(%s, %s) = %v, want %v", tt.orig, tt.target, got, tt.want)
 		}
 	}
