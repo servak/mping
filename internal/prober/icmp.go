@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -28,6 +29,8 @@ type (
 		version ProbeType
 		prefix  string // Custom prefix like "my-ping", "icmpv4", etc.
 		c       packetConn
+		socket  socketType
+		checkID bool // whether replies carry runID, see socketType.keepsEchoID
 		body    []byte
 		targets map[string]icmpTarget // IPAddr string -> event key and name
 		timeout time.Duration
@@ -62,7 +65,8 @@ type (
 		sentTime time.Time
 	}
 
-	// packetConn is the part of *icmp.PacketConn the prober uses
+	// packetConn is the part of *icmp.PacketConn the prober uses. The one
+	// of a prober takes and returns *net.IPAddr on either socket type.
 	packetConn interface {
 		ReadFrom(b []byte) (int, net.Addr, error)
 		WriteTo(b []byte, dst net.Addr) (int, error)
@@ -162,65 +166,41 @@ func (cfg *ICMPConfig) Validate() error {
 	return nil
 }
 
+// NewICMPProber returns a prober with an open ICMP socket: a datagram socket,
+// which needs no privileges, or a raw one where datagram ICMP is not
+// available (see openICMPSocket).
 func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, error) {
-	var (
-		c   *icmp.PacketConn
-		err error
-	)
-
 	// Resolve source interface to IP address if specified
 	sourceAddr, err := resolveSourceInterface(cfg.SourceInterface, t)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve source interface: %v", err)
 	}
-
-	if t == ICMPV4 {
-		c, err = icmp.ListenPacket("ip4:icmp", sourceAddr)
-		if err != nil {
-			return nil, err
-		}
-		p := c.IPv4PacketConn()
-		if cfg.TOS != 0 {
-			p.SetTOS(cfg.TOS)
-		}
-		if cfg.TTL != 0 {
-			p.SetTTL(cfg.TTL)
-		}
-	} else {
-		c, err = icmp.ListenPacket("ip6:ipv6-icmp", sourceAddr)
-		if err != nil {
-			return nil, err
-		}
-	}
-	lease, err := icmpid.Acquire()
+	sock, err := openICMPSocket(runtime.GOOS, t, sourceAddr, listenICMP(t, cfg))
 	if err != nil {
-		_ = c.Close()
-		return nil, fmt.Errorf("cannot allocate ICMP echo ID: %w", err)
+		return nil, err
 	}
-	return newICMPProber(t, newICMPConn(c, t), []byte(cfg.Body), prefix, lease), nil
+	return newICMPProber(t, sock, []byte(cfg.Body), prefix), nil
 }
 
-// newICMPProber returns a prober on c with its own echo ID. The echo ID
+// newICMPProber returns a prober on sock with its own echo ID. The echo ID
 // tells the replies of this prober apart from those of the other
 // probers and path tracers of the process, which ping with overlapping
-// sequence numbers: a raw ICMP socket receives the echo replies of every
-// socket on the host. IDs come from the process-wide allocator in
-// internal/icmpid, shared with internal/trace, and are released when the
-// socket is closed.
-//
-// The probers only use raw sockets. Datagram ICMP sockets (Linux
-// "ping" sockets) would need different matching: the kernel rewrites the
-// echo ID to the socket's port and delivers each socket only its own
-// replies, so the ID check in recvPkts would have to be skipped there.
-func newICMPProber(t ProbeType, c packetConn, body []byte, prefix string, lease *icmpid.Lease) *ICMPProber {
+// sequence numbers: raw ICMP sockets, and datagram ones on macOS, receive the
+// echo replies of every socket on the host. IDs come from the process-wide
+// allocator in internal/icmpid, shared with internal/trace, and are released
+// when the socket is closed. On Linux datagram sockets the kernel does the
+// telling apart instead (see socketType.keepsEchoID).
+func newICMPProber(t ProbeType, sock *icmpSocket, body []byte, prefix string) *ICMPProber {
 	return &ICMPProber{
 		version: t,
 		prefix:  prefix,
-		c:       c,
+		c:       sock.conn,
+		socket:  sock.typ,
+		checkID: sock.checkID,
 		tables:  make(map[runTime]map[string]bool),
 		targets: make(map[string]icmpTarget),
-		runID:   int(lease.ID()),
-		lease:   lease,
+		runID:   int(sock.lease.ID()),
+		lease:   sock.lease,
 		runCnt:  0,
 		body:    body,
 		loop:    newRunLoop(),
@@ -602,7 +582,7 @@ func (p *ICMPProber) recvPkts(r chan *Event) {
 			continue // not a packet of ours; skip it
 		}
 		id := binary.BigEndian.Uint16(pktbuf[4:6])
-		if id != uint16(p.runID) {
+		if p.checkID && id != uint16(p.runID) {
 			continue
 		}
 		seq := binary.BigEndian.Uint16(pktbuf[6:8])

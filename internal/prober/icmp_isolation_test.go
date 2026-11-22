@@ -1,6 +1,7 @@
 package prober
 
 import (
+	"syscall"
 	"testing"
 	"time"
 
@@ -38,20 +39,43 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// Raw ICMP sockets receive every echo reply on the host. A prober must only
-// count the replies to its own requests, even when another prober in the
-// process pings the same address with the same sequence numbers.
+// Raw ICMP sockets, and datagram ones on macOS, receive every echo reply on
+// the host. A prober must only count the replies to its own requests, even
+// when another prober in the process pings the same address with the same
+// sequence numbers.
 func TestICMPProbersDoNotShareReplies(t *testing.T) {
+	for _, typ := range []socketType{rawSocket, datagramSocket} {
+		t.Run(string(typ), func(t *testing.T) { testProbersDoNotShareReplies(t, typ) })
+	}
+}
+
+func testProbersDoNotShareReplies(t *testing.T, typ socketType) {
+	// newProber opens a socket of type typ on macOS
+	newProber := func(conn *fakeICMPConn, prefix string) *ICMPProber {
+		l := &fakeListener{conns: []packetConn{conn}}
+		if typ == rawSocket {
+			l.errs = map[string]error{"udp4": syscall.EPERM}
+		}
+		s, err := openICMPSocket("darwin", ICMPV4, "0.0.0.0", l.listen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := newICMPProber(ICMPV4, s, []byte("x"), prefix)
+		if p.socket != typ {
+			t.Fatalf("prober uses a %s socket, want %s", p.socket, typ)
+		}
+		return p
+	}
 	var host fakeICMPNet
 	lost := host.newConn()
 	lost.noReply = true // e.g. TTL=1: the requests never reach the target
 	ok := host.newConn()
 
-	pLost := newTestProber(t, ICMPV4, lost, []byte("x"), "ttl1")
+	pLost := newProber(lost, "ttl1")
 	if err := pLost.Accept("ttl1://127.0.0.1"); err != nil {
 		t.Fatal(err)
 	}
-	pOK := newTestProber(t, ICMPV4, ok, []byte("x"), "icmpv4")
+	pOK := newProber(ok, "icmpv4")
 	if err := pOK.Accept("icmpv4://127.0.0.1"); err != nil {
 		t.Fatal(err)
 	}

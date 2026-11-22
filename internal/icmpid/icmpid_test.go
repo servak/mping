@@ -120,6 +120,34 @@ func TestQuarantine(t *testing.T) {
 	}
 }
 
+// Reserve takes exactly the given ID, unless it is 0, held or quarantined.
+func TestReserve(t *testing.T) {
+	clk := &fakeClock{t: time.Unix(1000, 0)}
+	a := New(7, 10*time.Second, clk.now)
+	if _, ok := a.Reserve(0); ok {
+		t.Error("Reserve(0) succeeded")
+	}
+	l, ok := a.Reserve(7)
+	if !ok || l.ID() != 7 {
+		t.Fatalf("Reserve(7) = %v, %v", l, ok)
+	}
+	if _, ok := a.Reserve(7); ok {
+		t.Error("a held ID was reserved")
+	}
+	if got := mustAcquire(t, a); got.ID() != 8 {
+		t.Errorf("Acquire() = %d, want 8: 7 is reserved", got.ID())
+	}
+	l.Release()
+	clk.advance(9 * time.Second)
+	if _, ok := a.Reserve(7); ok {
+		t.Error("a quarantined ID was reserved")
+	}
+	clk.advance(time.Second)
+	if _, ok := a.Reserve(7); !ok {
+		t.Error("a free ID was not reserved")
+	}
+}
+
 // Reviewer repro: an ID held across a full wrap and then released must not be
 // handed out by the very next Acquire.
 func TestHeldAcrossWrapNotReissued(t *testing.T) {

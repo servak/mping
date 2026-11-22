@@ -2,10 +2,12 @@
 // in the process: the ICMP probers (internal/prober) and the path tracers
 // (internal/trace).
 //
-// Raw ICMP sockets receive the echo replies of every socket on the host, so
-// the echo ID is what tells the replies of one prober or tracer apart from
-// another's. Drawing all IDs from one allocator guarantees that the IDs held
-// at the same time within a process are distinct.
+// Raw ICMP sockets receive the echo replies of every socket on the host, and
+// so do datagram ones on macOS, so the echo ID is what tells the replies of
+// one prober or tracer apart from another's. Drawing all IDs from one
+// allocator guarantees that the IDs held at the same time within a process
+// are distinct. The IDs of datagram sockets on Linux are chosen by the
+// kernel; the probers Reserve those.
 //
 // IDs are handed out by a cursor that starts at a random per-process base, so
 // concurrent mping processes rarely pick the same IDs (PID-derived IDs
@@ -58,6 +60,10 @@ var global = New(uint16(rand.Uint32()), DefaultQuarantine, nil)
 // Acquire takes an ID from the process-wide allocator. See Allocator.Acquire.
 func Acquire() (*Lease, error) { return global.Acquire() }
 
+// Reserve takes the given ID from the process-wide allocator. See
+// Allocator.Reserve.
+func Reserve(id uint16) (*Lease, bool) { return global.Reserve(id) }
+
 // Lease is the ownership of one echo ID. Only the lease can release the ID,
 // and releasing is idempotent, so a double Release never affects a later
 // owner of the same ID.
@@ -86,22 +92,41 @@ func (a *Allocator) Acquire() (*Lease, error) {
 	for range 1 << 16 {
 		id := a.cursor
 		a.cursor++
-		if id == 0 {
-			continue
+		if a.take(id, now) {
+			return &Lease{a: a, id: id}, nil
 		}
-		if _, ok := a.held[id]; ok {
-			continue
-		}
-		if at, ok := a.released[id]; ok {
-			if now.Sub(at) < a.quarantine {
-				continue
-			}
-			delete(a.released, id)
-		}
-		a.held[id] = struct{}{}
-		return &Lease{a: a, id: id}, nil
 	}
 	return nil, ErrExhausted
+}
+
+// Reserve returns a lease on id, an ID chosen by the kernel, or false if id
+// is 0, held or quarantined.
+func (a *Allocator) Reserve(id uint16) (*Lease, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.take(id, a.now()) {
+		return nil, false
+	}
+	return &Lease{a: a, id: id}, true
+}
+
+// take marks id as held unless it is 0, held or quarantined, and reports
+// whether it did. a.mu must be held.
+func (a *Allocator) take(id uint16, now time.Time) bool {
+	if id == 0 {
+		return false
+	}
+	if _, ok := a.held[id]; ok {
+		return false
+	}
+	if at, ok := a.released[id]; ok {
+		if now.Sub(at) < a.quarantine {
+			return false
+		}
+		delete(a.released, id)
+	}
+	a.held[id] = struct{}{}
+	return true
 }
 
 func (a *Allocator) release(id uint16) {

@@ -3,7 +3,7 @@ package prober
 // Start/Stop lifecycle tests: every prober is started against a server on
 // loopback, must report REGISTER, SENT and SUCCESS for each target, and must
 // return from Start promptly once Stop is called without leaking goroutines.
-// ICMP needs a raw socket and is covered by icmp_integration_test.go.
+// ICMP may need privileges and is covered by icmp_integration_test.go.
 
 import (
 	"encoding/binary"

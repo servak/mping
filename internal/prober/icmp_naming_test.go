@@ -90,13 +90,13 @@ func TestICMPCustomDefaultPlainTargets(t *testing.T) {
 	}
 }
 
-// newTestProber builds a prober with an echo ID from the process-wide
-// allocator.
+// newTestProber builds a prober on a raw socket c with an echo ID from the
+// process-wide allocator.
 func newTestProber(t testing.TB, typ ProbeType, c packetConn, body []byte, prefix string) *ICMPProber {
 	t.Helper()
 	lease, err := icmpid.Acquire()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newICMPProber(typ, c, body, prefix, lease)
+	return newICMPProber(typ, &icmpSocket{conn: c, typ: rawSocket, checkID: true, lease: lease}, body, prefix)
 }
