@@ -24,8 +24,8 @@ func TestEchoIDsDisjointFromTracer(t *testing.T) {
 		}
 		held[id] = true
 		// a tracer starting and stopping between probers (trace uses
-		// icmpid.Acquire / Release for its transports)
-		lease, err := icmpid.Acquire()
+		// Acquire / Release for its transports)
+		lease, err := icmpid.Default().Acquire()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -94,7 +94,7 @@ func TestICMPCustomDefaultPlainTargets(t *testing.T) {
 // process-wide allocator.
 func newTestProber(t testing.TB, typ ProbeType, c packetConn, body []byte, prefix string) *ICMPProber {
 	t.Helper()
-	lease, err := icmpid.Acquire()
+	lease, err := icmpid.Default().Acquire()
 	if err != nil {
 		t.Fatal(err)
 	}

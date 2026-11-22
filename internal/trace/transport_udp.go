@@ -26,10 +26,6 @@ const (
 	// rotate through: every port from UDPBasePort up to 65535. It is not a
 	// multiple of udpRoundStride, see udpPortRange.
 	maxUDPPortRange = 65536 - UDPBasePort
-
-	// sendRetries is how often a send is retried when the socket reports an
-	// earlier ICMP error instead of sending (Linux with IP_RECVERR)
-	sendRetries = 3
 )
 
 var udpPayload = []byte("mping-trace")
@@ -110,6 +106,12 @@ var errUDPUnsupported = errors.New("UDP trace needs root (or cap_net_raw) on thi
 //   - a raw ICMP socket (root / cap_net_raw), or
 //   - the UDP socket's error queue (Linux, IP_RECVERR, unprivileged), or
 //   - a datagram ICMP socket (macOS, unprivileged)
+//
+// in that order. The raw socket stays first because the error queue returns
+// less: not the quoted UDP header but only the payload behind it, so a quote
+// of the minimum length does not tell the probe's TTL. Such a reply cannot be
+// checked against the probe pending under its port, and has to be rejected
+// when the quoted destination was rewritten on the way (see errQueueReply).
 type udpTransport struct {
 	v6      bool
 	dst     net.IP
@@ -122,6 +124,7 @@ type udpTransport struct {
 	writeMu sync.Mutex // TTL is a socket option, so set+write must be atomic
 }
 
+// newUDPTransport opens the sockets of a UDP trace, see udpTransport.
 func newUDPTransport(dst *net.IPAddr, v6 bool) (*udpTransport, error) {
 	udpNet, rawNet, dgramNet, laddr := "udp4", "ip4:icmp", "udp4", "0.0.0.0"
 	if v6 {
@@ -162,6 +165,8 @@ func newUDPTransport(dst *net.IPAddr, v6 bool) (*udpTransport, error) {
 
 func (t *udpTransport) privileged() bool { return t.raw }
 
+func (t *udpTransport) hidesHops() bool { return false }
+
 func (t *udpTransport) close() error {
 	err := t.conn.Close()
 	if t.icmp != nil {
@@ -186,20 +191,21 @@ func (t *udpTransport) send(ttl int, port uint16) error {
 	}
 	dst := &net.UDPAddr{IP: t.dst, Port: int(port), Zone: t.zone}
 	payload := udpProbePayload(ttl)
-	for i := 0; ; i++ {
-		_, err = t.conn.WriteToUDP(payload, dst)
-		// With IP_RECVERR Linux also reports a received ICMP error once
-		// as the result of the next socket call. The error itself is
-		// still queued for receive, so just send again.
-		if err == nil || i >= sendRetries || !isICMPErrno(err) {
-			return err
-		}
-	}
+	return retrySend(func() error {
+		_, err := t.conn.WriteToUDP(payload, dst)
+		return err
+	})
 }
 
 func (t *udpTransport) receive(deliver func(reply, string, time.Time)) {
 	if t.icmp == nil {
-		t.receiveErrQueue(deliver)
+		receiveQueues(t.conn, func(e queuedError) {
+			if r, from, ok := t.errQueueReply(e); ok {
+				deliver(r, from, e.at)
+			}
+		}, func([]byte, string, time.Time) {
+			// Discard data: a destination actually listening on the port
+		})
 		return
 	}
 	buf := make([]byte, maxPacketSize)
@@ -215,6 +221,25 @@ func (t *udpTransport) receive(deliver func(reply, string, time.Time)) {
 		}
 		deliver(r, peerIP(peer), now)
 	}
+}
+
+// errQueueReply returns the reply that the ICMP error e from the error queue
+// stands for, its sender, and whether it is about one of our probes.
+//
+// The kernel returns the payload quoted by the ICMP error, so the TTL check
+// only works when the router quoted more than the 8 bytes of the UDP header
+// (RFC 792 minimum; RFC 1812 asks for more). With a short quote the TTL is
+// unknown and the port scheme (no port is reused while a probe on it is
+// pending) is what keeps replies on their hop; the quoted destination is then
+// checked as well.
+func (t *udpTransport) errQueueReply(e queuedError) (reply, string, bool) {
+	r, from, err := parseExtendedErr(e.data, e.dst.Port())
+	if err != nil {
+		return reply{}, "", false
+	}
+	// The error queue belongs to our socket, so the source port is ours
+	r.id, r.ttl, r.dst = t.srcPort, errQueuePayloadTTL(e.payload), e.dst.Addr()
+	return r, from, e.dst.IsValid() && t.accept(r)
 }
 
 // accept reports whether the ICMP error r quotes one of our probes: our

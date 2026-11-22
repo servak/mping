@@ -84,23 +84,31 @@ func parseReply(v6 bool, b []byte) (reply, error) {
 		return reply{}, err
 	}
 	proto := protocolICMP
-	echoType := byte(ipv4.ICMPTypeEcho)
 	if v6 {
-		proto, echoType = protocolICMPv6, byte(ipv6.ICMPTypeEchoRequest)
+		proto = protocolICMPv6
 	}
 	inner, dst, err := quotedTransport(v6, data, proto, icmpEchoHdrLen)
 	if err != nil {
 		return reply{}, err
 	}
-	if inner[0] != echoType {
-		return reply{}, errNotOurs
+	id, seq, err := quotedEcho(v6, inner)
+	if err != nil {
+		return reply{}, err
 	}
-	return reply{
-		kind: kind,
-		id:   binary.BigEndian.Uint16(inner[4:6]),
-		seq:  binary.BigEndian.Uint16(inner[6:8]),
-		dst:  dst,
-	}, nil
+	return reply{kind: kind, id: id, seq: seq, dst: dst}, nil
+}
+
+// quotedEcho returns the ID and sequence of the echo request that an ICMP
+// error quotes from its ICMP header on.
+func quotedEcho(v6 bool, b []byte) (id, seq uint16, err error) {
+	echoType := byte(ipv4.ICMPTypeEcho)
+	if v6 {
+		echoType = byte(ipv6.ICMPTypeEchoRequest)
+	}
+	if len(b) < icmpEchoHdrLen || b[0] != echoType {
+		return 0, 0, errNotOurs
+	}
+	return binary.BigEndian.Uint16(b[4:6]), binary.BigEndian.Uint16(b[6:8]), nil
 }
 
 // parseUDPReply parses an ICMP error received while tracing with UDP. The

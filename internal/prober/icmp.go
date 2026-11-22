@@ -180,8 +180,8 @@ func NewICMPProber(t ProbeType, cfg *ICMPConfig, prefix string) (*ICMPProber, er
 // newICMPProber returns a prober on sock. The echo ID of sock tells the
 // replies of this prober apart from those of the other probers and path
 // tracers of the process, which ping with overlapping sequence numbers (see
-// datagramKeepsEchoID for the sockets where the kernel does that). It is
-// released when the socket is closed.
+// icmpsock.DatagramKeepsEchoID for the sockets where the kernel does that).
+// It is released when the socket is closed.
 func newICMPProber(t ProbeType, sock *icmpSocket, body []byte, prefix string) *ICMPProber {
 	return &ICMPProber{
 		version: t,

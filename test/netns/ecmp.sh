@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds a small IPv4 network with a real ECMP hop out of Linux network
-# namespaces, for the ECMP path trace test (internal/trace/ecmp_integration_test.go).
+# Builds a small network with a real ECMP hop out of Linux network
+# namespaces, for the path trace tests (internal/trace/ecmp_integration_test.go).
 #
 #                          +-- mping-ra (10.101.0.2) --+
 #   mping-c --- mping-r1 --+                           +-- mping-d (10.200.0.1)
@@ -10,6 +10,10 @@
 # the L4 ports (fib_multipath_hash_policy=1), like the routers in the field.
 # A UDP trace from mping-c must therefore see both mping-ra and mping-rb at
 # hop 2, an ICMP trace (fixed echo ID, no ports) only one of them.
+#
+# IPv6 has the same links as fd00:100::/64, fd00:101::/64 and fd00:103::/64, and
+# a single path over mping-ra to fd00:200::1. mping-r1 reports 10.201.0.0/24 and
+# fd00:201::/64 as unreachable, 10.202.0.0/24 and fd00:202::/64 as prohibited.
 #
 # Usage (as root):
 #   test/netns/ecmp.sh up     create the namespaces
@@ -34,6 +38,11 @@ link() {
 	ip -n "$4" link set "$5" up
 }
 
+# addr6 <ns> <if> <addr>
+addr6() {
+	ip -n "$1" -6 addr add "$3" dev "$2" nodad
+}
+
 up() {
 	down
 	for ns in "${NS[@]}"; do
@@ -44,6 +53,10 @@ up() {
 		ip netns exec "$ns" sysctl -qw net.ipv4.ip_forward=1 \
 			net.ipv4.icmp_ratelimit=0 net.ipv4.icmp_msgs_per_sec=100000 \
 			net.ipv4.conf.all.rp_filter=0 net.ipv4.conf.default.rp_filter=0
+		ip netns exec "$ns" sysctl -qw \
+			net.ipv6.conf.all.disable_ipv6=0 net.ipv6.conf.default.disable_ipv6=0 \
+			net.ipv6.conf.all.forwarding=1 net.ipv6.conf.default.forwarding=1 \
+			net.ipv6.conf.default.accept_dad=0 net.ipv6.icmp.ratelimit=0
 	done
 
 	link mping-c c-r1 10.100.0.2/24 mping-r1 r1-c 10.100.0.1/24
@@ -64,8 +77,28 @@ up() {
 	ip -n mping-rb route add 10.100.0.0/24 via 10.102.0.1
 	ip -n mping-d route add 10.100.0.0/24 via 10.103.0.1
 
+	ip -n mping-r1 route add unreachable 10.201.0.0/24
+	ip -n mping-r1 route add prohibit 10.202.0.0/24
+
+	addr6 mping-c c-r1 fd00:100::2/64
+	addr6 mping-r1 r1-c fd00:100::1/64
+	addr6 mping-r1 r1-a fd00:101::1/64
+	addr6 mping-ra ra-r1 fd00:101::2/64
+	addr6 mping-ra ra-d fd00:103::1/64
+	addr6 mping-d d-a fd00:103::2/64
+	addr6 mping-d lo fd00:200::1/128
+	ip -n mping-c -6 route add default via fd00:100::1
+	ip -n mping-r1 -6 route add fd00:200::/64 via fd00:101::2
+	ip -n mping-ra -6 route add fd00:200::/64 via fd00:103::2
+	ip -n mping-ra -6 route add fd00:100::/64 via fd00:101::1
+	ip -n mping-d -6 route add fd00:100::/64 via fd00:103::1
+	ip -n mping-r1 -6 route add unreachable fd00:201::/64
+	ip -n mping-r1 -6 route add prohibit fd00:202::/64
+
 	ip -n mping-r1 route show
+	ip -n mping-r1 -6 route show
 	ip netns exec mping-c ping -c 1 -W 2 10.200.0.1
+	ip netns exec mping-c ping -6 -c 1 -W 5 fd00:200::1
 }
 
 case "${1:-}" in

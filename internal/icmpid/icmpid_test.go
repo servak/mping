@@ -226,13 +226,13 @@ func TestAcquireConcurrent(t *testing.T) {
 	}
 }
 
-// The process-wide Acquire shares one allocator.
+// Default shares one allocator process-wide.
 func TestGlobal(t *testing.T) {
-	a, err := Acquire()
+	a, err := Default().Acquire()
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := Acquire()
+	b, err := Default().Acquire()
 	if err != nil {
 		t.Fatal(err)
 	}

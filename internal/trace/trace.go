@@ -143,7 +143,8 @@ type Result struct {
 	Hops       []Hop
 	Proto      Proto
 	Reached    bool // the destination (or an unreachable report) ended the path
-	Privileged bool // raw socket in use; false means an unprivileged fallback
+	Privileged bool // raw socket in use; false means it needs no privileges
+	HopsHidden bool // only the destination can be seen (no ICMP errors are received)
 }
 
 // HasRateLimitedHops reports whether an intermediate hop shows loss while the
@@ -329,7 +330,7 @@ type Tracer struct {
 }
 
 // New opens the sockets for tracing target with cfg.Proto. See
-// newICMPTransport and newUDPTransport for the sockets used per platform.
+// openICMPTransport and newUDPTransport for the sockets used per platform.
 func New(target string, cfg Config) (*Tracer, error) {
 	cfg = cfg.withDefaults()
 	host, preferV6 := HostFromTarget(target)
@@ -666,6 +667,7 @@ func (t *Tracer) Snapshot() Result {
 		Proto:      t.cfg.Proto,
 		Reached:    t.reached,
 		Privileged: t.tp != nil && t.tp.privileged(),
+		HopsHidden: t.tp != nil && t.tp.hidesHops(),
 		Hops:       make([]Hop, 0, last),
 	}
 	for i := 0; i < last; i++ {

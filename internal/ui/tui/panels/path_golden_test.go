@@ -74,7 +74,7 @@ func pathFixtures() map[string]*trace.Result {
 			hopOf(1, 42, 42, many...),
 			dest),
 		// UDP trace without privileges (Linux error queue): several ECMP
-		// branches per hop and no unprivileged-ICMP note
+		// branches per hop and no note
 		"udp_ecmp": {Dst: dst, Proto: trace.ProtoUDP, Rounds: 42, Reached: true, Hops: []trace.Hop{
 			hopOf(1, 42, 42, resp("192.0.2.1", "", 42, 1, 1, 1, 2, false)),
 			hopOf(2, 42, 42,

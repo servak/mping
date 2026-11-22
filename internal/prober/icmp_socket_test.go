@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/servak/mping/internal/icmpid"
+	"github.com/servak/mping/internal/icmpsock"
 )
 
 // fakeListener opens fake sockets, or fails with the error of the network.
@@ -207,7 +208,7 @@ func (c portConn) LocalAddr() net.Addr { return &net.UDPAddr{Port: int(c.id)} }
 // so that a path tracer on a raw socket does not get the same one; a socket
 // whose ID a tracer already holds is replaced. Elsewhere the ID is our own.
 func TestOpenDatagramReservesKernelID(t *testing.T) {
-	tracer, err := icmpid.Acquire()
+	tracer, err := icmpid.Default().Acquire()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,21 +231,21 @@ func TestOpenDatagramReservesKernelID(t *testing.T) {
 	if !clash.isClosed() {
 		t.Error("the socket with the tracer's ID was not closed")
 	}
-	if _, ok := icmpid.Reserve(free); ok {
+	if _, ok := icmpid.Default().Reserve(free); ok {
 		t.Error("the ID of the open socket is still free")
 	}
 	s.lease.Release()
 
 	// A clash that persists does not keep the prober from starting
 	l = &fakeListener{}
-	for range maxReserveAttempts {
+	for range icmpsock.MaxReserveAttempts {
 		l.conns = append(l.conns, portConn{newFakeICMPConn(), tracer.ID()})
 	}
 	s, err = openICMPSocket("linux", ICMPV4, "0.0.0.0", l.listen)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(l.calls) != maxReserveAttempts || s.lease.ID() == tracer.ID() {
+	if len(l.calls) != icmpsock.MaxReserveAttempts || s.lease.ID() == tracer.ID() {
 		t.Errorf("%d sockets opened, lease %#x", len(l.calls), s.lease.ID())
 	}
 	s.lease.Release()

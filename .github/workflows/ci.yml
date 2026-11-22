@@ -143,8 +143,9 @@ jobs:
       run: sudo sysctl -w net.ipv4.icmp_ratelimit=0 net.ipv6.icmp.ratelimit=0
 
     # Without privileges: datagram ICMP for the ICMP prober and for ICMP
-    # traces, as used by unprivileged users on distros that allow it, and the
-    # UDP socket error queue (IP_RECVERR) for UDP traces. The runner disables
+    # traces, as on distros that allow it, and the socket error queue
+    # (IP_RECVERR) for the ICMP errors of ICMP and UDP traces (the latter need
+    # routers: see the network namespaces below). The runner disables
     # datagram ICMP (ping_group_range "1 0"), so enable it for all groups on
     # this throwaway VM.
     - name: Integration tests (unprivileged datagram ICMP / UDP error queue)
@@ -162,9 +163,9 @@ jobs:
 
     # Raw socket path: compile the test binaries and grant them cap_net_raw
     # instead of running go test as root. UDP traces then receive their ICMP
-    # errors on a raw ICMP socket. Traces prefer raw sockets anyway, but the
-    # ICMP prober prefers datagram ones, so disable those again
-    # (MPING_IT_PRIVILEGED=1 fails if one is used).
+    # errors on a raw ICMP socket. The ICMP prober and ICMP traces prefer
+    # datagram sockets, so disable those again (MPING_IT_PRIVILEGED=1 fails if
+    # one is used).
     - name: Integration tests (raw ICMP via cap_net_raw)
       env:
         MPING_IT_TARGETS: 127.0.0.1,::1
@@ -185,8 +186,10 @@ jobs:
 
     # Real ECMP: network namespaces with a multipath route hashed on L4 ports
     # (test/netns/ecmp.sh). A UDP trace must see both branches, an ICMP trace
-    # exactly one. Run as root in the client namespace (raw ICMP socket) and
-    # as the runner user (UDP error queue; ICMP needs a raw socket there).
+    # exactly one, and both every router and unreachable answer on the path,
+    # IPv4 and IPv6. Run as root in the client namespace (raw ICMP socket;
+    # datagram ICMP disabled, ping_group_range is per namespace) and as the
+    # runner user without any capability (datagram ICMP, error queues).
     - name: ECMP path trace (network namespaces)
       env:
         MPING_IT_ECMP_TARGET: 10.200.0.1
@@ -198,12 +201,14 @@ jobs:
         go test -c -tags integration -o "$bin" ./internal/trace/
         sudo test/netns/ecmp.sh up
         trap 'sudo test/netns/ecmp.sh down' EXIT
+        sudo ip netns exec mping-c sysctl -w net.ipv4.ping_group_range="1 0"
         sudo --preserve-env=MPING_IT_ECMP_TARGET,MPING_IT_ECMP_HOP,MPING_IT_ROUNDS,MPING_IT_INTERVAL \
           ip netns exec mping-c env MPING_IT_PRIVILEGED=1 \
           "$bin" -test.count=1 -test.v -test.run IntegrationECMP
+        sudo ip netns exec mping-c sysctl -w net.ipv4.ping_group_range="0 2147483647"
         sudo --preserve-env=MPING_IT_ECMP_TARGET,MPING_IT_ECMP_HOP,MPING_IT_ROUNDS,MPING_IT_INTERVAL \
           ip netns exec mping-c setpriv --reuid="$(id -u)" --regid="$(id -g)" --clear-groups \
-          env MPING_IT_PRIVILEGED=0 "$bin" -test.count=1 -test.v -test.run 'IntegrationECMP/udp'
+          env MPING_IT_PRIVILEGED=0 "$bin" -test.count=1 -test.v -test.run IntegrationECMP
 
     - name: Build mping
       run: go build -o "$RUNNER_TEMP/mping" ./cmd/mping
