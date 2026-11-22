@@ -8,8 +8,11 @@
 // Environment:
 //
 //	MPING_BIN       mping binary to test (default: built from ./cmd/mping)
-//	MPING_E2E_ICMP  "require" fails ICMP cases that cannot open a raw socket
-//	                instead of skipping them (CI grants cap_net_raw)
+//	MPING_E2E_ICMP  "require" fails ICMP cases that cannot open an ICMP
+//	                socket instead of skipping them. mping uses a datagram
+//	                socket where it may (always on macOS, on Linux within
+//	                net.ipv4.ping_group_range) and a raw one otherwise
+//	                (root or cap_net_raw); CI runs the tests on both
 //	MPING_E2E_IPV6  "require" fails IPv6 cases when ::1 is unavailable
 package e2e
 
@@ -179,11 +182,14 @@ func (r result) mustFail(t *testing.T, wantTargets int, reason string) {
 var failOnLoss = []string{"--max-loss", "0"}
 
 // requireICMP skips (or fails, with MPING_E2E_ICMP=require) when the binary
-// cannot open a raw ICMP socket.
+// may open neither a datagram nor a raw ICMP socket.
 func requireICMP(t *testing.T, r result) {
 	t.Helper()
-	if r.exitCode == 1 && strings.Contains(r.stdout+r.stderr, "not permitted") {
-		msg := "mping cannot open a raw ICMP socket (run as root or grant cap_net_raw):\n" + r.stderr
+	out := r.stdout + r.stderr
+	// "permission denied" / "operation not permitted", depending on the socket
+	if r.exitCode == 1 && strings.Contains(out, "ICMP socket") &&
+		(strings.Contains(out, "permission denied") || strings.Contains(out, "not permitted")) {
+		msg := "mping cannot open an ICMP socket:\n" + r.stderr
 		if os.Getenv("MPING_E2E_ICMP") == "require" {
 			t.Fatal(msg)
 		}
@@ -215,6 +221,43 @@ func TestICMPv6(t *testing.T) {
 	r := mping(t, options{}, "icmpv6:::1")
 	requireICMP(t, r)
 	r.mustSucceed(t, 1)
+}
+
+// Several ICMP probers in one run, with the built-in one probing the same
+// address, each count their own replies.
+func TestICMPCustomProbers(t *testing.T) {
+	t.Parallel()
+	cfg := `
+prober:
+  low-ttl:
+    probe: icmpv4
+    icmp:
+      body: low-ttl
+      ttl: 5
+  ef:
+    probe: icmpv4
+    icmp:
+      body: ef
+      tos: 184
+      source_interface: 127.0.0.1
+`
+	r := mping(t, options{config: cfg}, "127.0.0.1", "low-ttl://127.0.0.1", "ef://127.0.0.1")
+	requireICMP(t, r)
+	r.mustSucceed(t, 3)
+}
+
+// A source address of another host is a configuration error, whatever the
+// socket type.
+func TestICMPBadSourceInterface(t *testing.T) {
+	t.Parallel()
+	r := mping(t, options{extra: []string{"-I", "192.0.2.77"}}, "127.0.0.1")
+	if !strings.Contains(r.stderr+r.stdout, "source_interface") {
+		requireICMP(t, r)
+		t.Fatalf("exit code %d without naming the source interface:\n%s", r.exitCode, r.stderr)
+	}
+	if r.exitCode != 1 {
+		t.Errorf("exit code = %d, want 1", r.exitCode)
+	}
 }
 
 func TestHTTP(t *testing.T) {

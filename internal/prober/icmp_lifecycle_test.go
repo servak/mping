@@ -14,20 +14,24 @@ import (
 
 // fakeICMPConn answers every echo request it is asked to send, after first
 // delivering a read error and an unparsable packet, which the prober must
-// survive. It stands in for the raw socket, which unit tests cannot open.
+// survive. It stands in for the real socket, which unit tests may not be
+// able to open.
 type fakeICMPConn struct {
 	pkts      chan fakePacket
 	closed    chan struct{}
 	closeOnce sync.Once
 	noReply   bool
+	// rewriteID answers with another echo ID than that of the request, as
+	// the kernel makes it look on Linux datagram sockets
+	rewriteID bool
 	// replyDelay delays every reply, to simulate a slow path
 	replyDelay time.Duration
 	// net, when set, delivers every reply to all of its connections, as
-	// the kernel does for raw ICMP sockets
+	// the kernel does for raw ICMP sockets, and macOS for datagram ones
 	net *fakeICMPNet
 }
 
-// fakeICMPNet is a host on which every raw ICMP socket sees every reply.
+// fakeICMPNet is a host on which every ICMP socket sees every reply.
 type fakeICMPNet struct {
 	mu    sync.Mutex
 	conns []*fakeICMPConn
@@ -90,6 +94,9 @@ func (c *fakeICMPConn) WriteTo(b []byte, dst net.Addr) (int, error) {
 	req, err := icmp.ParseMessage(1, b)
 	if err != nil {
 		return 0, err
+	}
+	if echo, ok := req.Body.(*icmp.Echo); ok && c.rewriteID {
+		echo.ID ^= 0xffff
 	}
 	reply := icmp.Message{Type: ipv4.ICMPTypeEchoReply, Body: req.Body}
 	data, err := reply.Marshal(nil)

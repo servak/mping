@@ -46,16 +46,43 @@ go install github.com/servak/mping/cmd/mping@latest
 ```
 ## Permission
 
+Only ICMP needs permissions; the HTTP, TCP, DNS and NTP probers never do. The ICMP probers use unprivileged datagram ICMP ("ping") sockets and fall back to raw sockets where those are not permitted or not supported:
+
+| Platform | What ICMP probing needs |
+|----------|-------------------------|
+| macOS | nothing |
+| Linux | nothing if your group is within `net.ipv4.ping_group_range` (it governs IPv6 too); otherwise `cap_net_raw` or root |
+| Windows | Administrator (raw sockets) |
+
+Many Linux distributions allow datagram ICMP for everyone, but the kernel default (`1 0`) allows it for nobody, not even root. Check and change it with:
+
+```bash
+sysctl net.ipv4.ping_group_range
+sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"   # all groups, until reboot
+echo 'net.ipv4.ping_group_range = 0 2147483647' | sudo tee /etc/sysctl.d/99-ping.conf   # permanently
 ```
+
+Or allow mping to use raw sockets (the deb and rpm packages do this on installation):
+
+```bash
 sudo setcap cap_net_raw=+ep mping
 ```
 
-or
+Where file capabilities are not available, `sudo chown root mping && sudo chmod u+s mping` does the same with far more privileges than needed.
 
+The [path trace](#path-trace-mtr) makes its own choice of sockets: it prefers raw sockets, and on Linux an ICMP trace shows the intermediate hops only with `cap_net_raw` or root.
+
+In Kubernetes, set the sysctl for the pod instead of adding the `NET_RAW` capability; it is a [safe sysctl](https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/) since 1.18:
+
+```yaml
+spec:
+  securityContext:
+    sysctls:
+      - name: net.ipv4.ping_group_range
+        value: "0 2147483647"
 ```
-sudo chown root mping
-sudo chmod u+s mping
-```
+
+With Docker it is `docker run --sysctl net.ipv4.ping_group_range="0 2147483647" ...`.
 
 ## Quick Start
 
@@ -655,8 +682,9 @@ go vet -tags 'integration e2e' ./...
 These use real sockets on loopback only (`127.0.0.1`, `::1`) plus HTTP/HTTPS/TCP/DNS/NTP servers started by the tests, so they need no external network. CI runs them in the `Integration / E2E` job.
 
 ```bash
-# Path tracer and TUI path view (integration build tag).
+# ICMP prober, path tracer and TUI path view (integration build tag).
 # Without MPING_IT_TARGETS / MPING_IT_HOSTS they probe public hosts.
+go test -tags integration -run Integration -v ./internal/prober/
 MPING_IT_TARGETS=127.0.0.1,::1 MPING_IT_ROUNDS=10 MPING_IT_INTERVAL=200ms \
   go test -tags integration -run Integration -v ./internal/trace/
 MPING_IT_HOSTS=127.0.0.3,127.0.0.1,127.0.0.2 MPING_IT_DURATION=8s \
@@ -667,20 +695,26 @@ MPING_IT_HOSTS=127.0.0.3,127.0.0.1,127.0.0.2 MPING_IT_DURATION=8s \
 go test -tags e2e -v ./test/e2e/
 ```
 
-The ICMP prober uses raw sockets, so the ICMP end-to-end cases are skipped unless the binary has `cap_net_raw` (set `MPING_E2E_ICMP=require` to fail instead of skip). On Linux:
+The ICMP prober prefers datagram sockets and the tracer raw ones, see [Permission](#permission). The ICMP cases are skipped where no ICMP socket can be opened (`MPING_E2E_ICMP=require` / `MPING_IT_STRICT=1` fail instead); on Linux, `sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"` lets all of them run without privileges. For the raw socket path on Linux:
 
 ```bash
+# Without datagram ICMP the prober falls back to raw sockets
+sudo sysctl -w net.ipv4.ping_group_range="1 0"
+
 go build -o /tmp/mping ./cmd/mping
 sudo setcap cap_net_raw=+ep /tmp/mping
 MPING_BIN=/tmp/mping MPING_E2E_ICMP=require go test -tags e2e -v ./test/e2e/
 
-# Raw-socket path of the tracer: grant the compiled test binary, not go test
+# Grant the compiled test binary, not go test
+go test -c -tags integration -o /tmp/prober.test ./internal/prober/
+sudo setcap cap_net_raw=+ep /tmp/prober.test
+(cd internal/prober && MPING_IT_PRIVILEGED=1 /tmp/prober.test -test.run Integration -test.v)
 go test -c -tags integration -o /tmp/trace.test ./internal/trace/
 sudo setcap cap_net_raw=+ep /tmp/trace.test
 (cd internal/trace && MPING_IT_TARGETS=127.0.0.1,::1 MPING_IT_PRIVILEGED=1 /tmp/trace.test -test.run Integration -test.v)
 ```
 
-The tracer integration test traces every target with ICMP and with UDP. Without privileges the ICMP trace falls back to datagram ICMP, which Linux only allows when the user's group is within `net.ipv4.ping_group_range` (otherwise the integration tests skip; `MPING_IT_STRICT=1` makes them fail); the UDP trace uses the socket error queue. `MPING_IT_PRIVILEGED=1` / `0` asserts which socket type was used. Linux rate-limits ICMP errors (`net.ipv4.icmp_ratelimit`, `net.ipv6.icmp.ratelimit`); CI sets both to 0.
+The tracer integration test traces every target with ICMP and with UDP. Without privileges the ICMP trace falls back to datagram ICMP, which Linux only allows when the user's group is within `net.ipv4.ping_group_range` (otherwise the integration tests skip; `MPING_IT_STRICT=1` makes them fail); the UDP trace uses the socket error queue. `MPING_IT_PRIVILEGED=1` / `0` asserts which socket type was used, in the prober tests too (raw / datagram). Linux rate-limits ICMP errors (`net.ipv4.icmp_ratelimit`, `net.ipv6.icmp.ratelimit`); CI sets both to 0.
 
 Real ECMP is tested with Linux network namespaces (root required): `test/netns/ecmp.sh up` builds a client, a router with a two-way multipath route hashed on L4 ports (`fib_multipath_hash_policy=1`), two branch routers and a destination. The ECMP test then asserts that a UDP trace sees both branches at hop 2 and an ICMP trace exactly one:
 
@@ -691,4 +725,4 @@ sudo ip netns exec mping-c env MPING_IT_ECMP_TARGET=10.200.0.1 /tmp/trace.test -
 sudo test/netns/ecmp.sh down
 ```
 
-On macOS everything except the ICMP prober cases runs without privileges: the tracer falls back to unprivileged datagram ICMP, and HTTP/HTTPS/TCP/DNS/NTP need none. The ICMP prober cases need `sudo` (setcap does not exist on macOS) and are skipped otherwise.
+On macOS everything runs without privileges: the ICMP prober and the tracer use unprivileged datagram ICMP, and HTTP/HTTPS/TCP/DNS/NTP need none. The raw socket path of the prober is not reachable there, as it never needs the fallback.
