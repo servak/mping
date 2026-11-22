@@ -4,7 +4,6 @@ on:
   pull_request:
     paths:
       - '.goreleaser.yml'
-      - 'packaging/**'
       - '.github/workflows/release.yml'
       - '.github/workflows/test-release.yml'
 
@@ -47,17 +46,28 @@ jobs:
           path: |
             dist/*_linux_amd64.deb
             dist/*_linux_amd64.rpm
+      # A release whose packages granted cap_net_raw in a postinstall script,
+      # to upgrade from. The snapshot always has a higher version.
+      - name: Download packages that granted cap_net_raw
+        run: gh release download v0.14.0 --dir previous --pattern '*_linux_amd64.deb' --pattern '*_linux_amd64.rpm'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload packages that granted cap_net_raw
+        uses: actions/upload-artifact@v7
+        with:
+          name: previous-packages
+          path: previous/
 
-  # Install the built packages on real distros and check that a non-root user
-  # can send ICMP. The ICMP prober only uses raw sockets, so this passes only
-  # when postinstall.sh has granted cap_net_raw as effective (+ep).
+  # Install the built packages on real distros. They grant no privileges, so a
+  # non-root user can send ICMP where net.ipv4.ping_group_range allows datagram
+  # ICMP, and otherwise only after a setcap by hand.
   test-packages:
     needs: test-goreleaser
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
+        package:
           - image: debian:12
             format: deb
           - image: ubuntu:24.04
@@ -66,8 +76,12 @@ jobs:
             format: rpm
           - image: fedora:latest
             format: rpm
+        # Everyone, and the kernel default: nobody.
+        ping_group_range: ['0 2147483647', '1 0']
     container:
-      image: ${{ matrix.image }}
+      image: ${{ matrix.package.image }}
+      # Docker's own default allows datagram ICMP for everyone.
+      options: --sysctl "net.ipv4.ping_group_range=${{ matrix.ping_group_range }}"
     env:
       DEBIAN_FRONTEND: noninteractive
     steps:
@@ -76,43 +90,95 @@ jobs:
         with:
           name: linux-packages
           path: pkgs
+      - name: Download packages that granted cap_net_raw
+        uses: actions/download-artifact@v8
+        with:
+          name: previous-packages
+          path: previous
+      - name: Check ping_group_range
+        run: |
+          range=$(tr '\t' ' ' < /proc/sys/net/ipv4/ping_group_range)
+          echo "$range"
+          [ "$range" = "${{ matrix.ping_group_range }}" ]
+      - name: Install test tools
+        run: |
+          if [ "${{ matrix.package.format }}" = deb ]; then
+            apt-get update
+            apt-get install -y libcap2-bin
+          else
+            dnf install -y shadow-utils util-linux libcap
+          fi
+          useradd -m tester
       - name: Install package
         run: |
-          pkg=$(ls pkgs/*.${{ matrix.format }})
-          if [ "${{ matrix.format }}" = deb ]; then
-            apt-get update
+          pkg=$(ls pkgs/*.${{ matrix.package.format }})
+          if [ "${{ matrix.package.format }}" = deb ]; then
             apt-get install -y "./$pkg"
           else
-            dnf install -y shadow-utils util-linux
             dnf install -y "./$pkg"
           fi
-      - name: Check dependencies and capability
+      - name: No capability, install script or libcap dependency
         run: |
-          if [ "${{ matrix.format }}" = deb ]; then
-            dpkg -s mping | grep '^Depends:.*libcap2-bin'
+          if [ "${{ matrix.package.format }}" = deb ]; then
+            deps=$(dpkg-query -W -f='${Depends}' mping)
+            scripts=$(ls /var/lib/dpkg/info/mping.postinst 2>/dev/null || true)
           else
-            rpm -qR mping | grep '^libcap'
+            deps=$(rpm -qR mping | grep libcap || true)
+            scripts=$(rpm -q --scripts mping)
           fi
-          getcap /usr/local/bin/mping | grep 'cap_net_raw=ep'
-      - name: Ping as non-root user
+          caps=$(getcap /usr/local/bin/mping)
+          echo "dependencies: '$deps' scripts: '$scripts' capabilities: '$caps'"
+          [ -z "$deps$scripts$caps" ]
+      - name: Non-root ICMP works
+        if: matrix.ping_group_range != '1 0'
+        run: runuser -u tester -- mping batch --count 3 --interval 200 127.0.0.1
+      - name: Non-root ICMP fails and says how to allow it
+        if: matrix.ping_group_range == '1 0'
         run: |
-          useradd -m tester
-          runuser -u tester -- mping batch --count 3 --interval 200 127.0.0.1
-      - name: Ping without capability fails (sanity check)
-        run: |
-          cp /usr/local/bin/mping /tmp/mping-nocap
-          chmod 755 /tmp/mping-nocap
-          if runuser -u tester -- /tmp/mping-nocap batch --count 1 127.0.0.1; then
-            echo "expected failure without cap_net_raw" >&2
+          if runuser -u tester -- mping batch --count 1 127.0.0.1 > out.txt 2>&1; then
+            cat out.txt
+            echo "expected failure outside of ping_group_range" >&2
             exit 1
           fi
-      - name: Reinstall keeps capability (postinstall on upgrade path)
+          cat out.txt
+          grep -F 'sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"' out.txt
+          grep -F 'sudo setcap cap_net_raw=+ep' out.txt
+      - name: Non-root ICMP works after setcap by hand
         run: |
-          pkg=$(ls pkgs/*.${{ matrix.format }})
-          if [ "${{ matrix.format }}" = deb ]; then
+          setcap cap_net_raw=+ep /usr/local/bin/mping
+          runuser -u tester -- mping batch --count 3 --interval 200 127.0.0.1
+      # dpkg and rpm replace the file, and a capability belongs to the file.
+      - name: Reinstall drops the capability
+        run: |
+          pkg=$(ls pkgs/*.${{ matrix.package.format }})
+          getcap /usr/local/bin/mping | grep 'cap_net_raw=ep'
+          if [ "${{ matrix.package.format }}" = deb ]; then
             apt-get install -y --reinstall "./$pkg"
           else
             dnf reinstall -y "./$pkg"
           fi
+          caps=$(getcap /usr/local/bin/mping)
+          echo "capabilities after the reinstallation: '$caps'"
+          [ -z "$caps" ]
+      - name: Upgrade drops the capability granted by earlier packages
+        run: |
+          old=$(ls previous/*.${{ matrix.package.format }})
+          new=$(ls pkgs/*.${{ matrix.package.format }})
+          if [ "${{ matrix.package.format }}" = deb ]; then
+            apt-get purge -y mping
+            apt-get install -y "./$old"
+          else
+            dnf remove -y mping
+            dnf install -y "./$old"
+          fi
           getcap /usr/local/bin/mping | grep 'cap_net_raw=ep'
-          runuser -u tester -- mping batch --count 3 --interval 200 127.0.0.1
+          before=$(sha256sum /usr/local/bin/mping)
+          if [ "${{ matrix.package.format }}" = deb ]; then
+            apt-get install -y "./$new"
+          else
+            dnf upgrade -y "./$new"
+          fi
+          [ "$before" != "$(sha256sum /usr/local/bin/mping)" ]
+          caps=$(getcap /usr/local/bin/mping)
+          echo "capabilities after the upgrade: '$caps'"
+          [ -z "$caps" ]

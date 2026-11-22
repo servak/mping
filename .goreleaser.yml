@@ -61,18 +61,9 @@ nfpms:
       - deb
       - rpm
     bindir: /usr/local/bin
-    scripts:
-      postinstall: ./packaging/postinstall.sh
     rpm:
       group: Applications/Internet
       summary: Multi-protocol network monitoring tool
-    overrides:
-      deb:
-        dependencies:
-          - libcap2-bin
-      rpm:
-        dependencies:
-          - libcap
 
 release:
   # Published by hand on GitHub, which then creates the tag at this commit.
