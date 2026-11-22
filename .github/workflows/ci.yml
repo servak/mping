@@ -142,9 +142,9 @@ jobs:
     - name: Disable ICMP error rate limiting
       run: sudo sysctl -w net.ipv4.icmp_ratelimit=0 net.ipv6.icmp.ratelimit=0
 
-    # Unprivileged fallbacks of the tracer: datagram ICMP for ICMP traces, as
-    # used by unprivileged users on distros that allow it, and the UDP
-    # socket error queue (IP_RECVERR) for UDP traces. The runner disables
+    # Without privileges: datagram ICMP for the ICMP prober and for ICMP
+    # traces, as used by unprivileged users on distros that allow it, and the
+    # UDP socket error queue (IP_RECVERR) for UDP traces. The runner disables
     # datagram ICMP (ping_group_range "1 0"), so enable it for all groups on
     # this throwaway VM.
     - name: Integration tests (unprivileged datagram ICMP / UDP error queue)
@@ -158,12 +158,13 @@ jobs:
         MPING_IT_PRIVILEGED: '0'
       run: |
         sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
-        go test -tags integration -count=1 -v -run Integration ./internal/trace/ ./internal/ui/tui/
+        go test -tags integration -count=1 -v -run Integration ./internal/trace/ ./internal/ui/tui/ ./internal/prober/
 
     # Raw socket path: compile the test binaries and grant them cap_net_raw
     # instead of running go test as root. UDP traces then receive their ICMP
-    # errors on a raw ICMP socket. The ICMP prober only supports raw
-    # sockets, so its lifecycle test runs here and not in the datagram step.
+    # errors on a raw ICMP socket. Traces prefer raw sockets anyway, but the
+    # ICMP prober prefers datagram ones, so disable those again
+    # (MPING_IT_PRIVILEGED=1 fails if one is used).
     - name: Integration tests (raw ICMP via cap_net_raw)
       env:
         MPING_IT_TARGETS: 127.0.0.1,::1
@@ -174,6 +175,7 @@ jobs:
         MPING_IT_STRICT: '1'
         MPING_IT_PRIVILEGED: '1'
       run: |
+        sudo sysctl -w net.ipv4.ping_group_range="1 0"
         for pkg in trace ui/tui prober; do
           bin="$RUNNER_TEMP/$(basename "$pkg").test"
           go test -c -tags integration -o "$bin" "./internal/$pkg/"
@@ -203,15 +205,26 @@ jobs:
           ip netns exec mping-c setpriv --reuid="$(id -u)" --regid="$(id -g)" --clear-groups \
           env MPING_IT_PRIVILEGED=0 "$bin" -test.count=1 -test.v -test.run 'IntegrationECMP/udp'
 
-    - name: Build mping with cap_net_raw
-      run: |
-        go build -o "$RUNNER_TEMP/mping" ./cmd/mping
-        sudo setcap cap_net_raw=+ep "$RUNNER_TEMP/mping"
-        getcap "$RUNNER_TEMP/mping"
+    - name: Build mping
+      run: go build -o "$RUNNER_TEMP/mping" ./cmd/mping
 
-    - name: End-to-end tests (mping batch against local servers)
+    # The same binary without any privileges, then with cap_net_raw only.
+    - name: End-to-end tests (unprivileged datagram ICMP)
       env:
         MPING_BIN: ${{ runner.temp }}/mping
         MPING_E2E_ICMP: require
         MPING_E2E_IPV6: require
-      run: go test -tags e2e -count=1 -v ./test/e2e/
+      run: |
+        sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
+        go test -tags e2e -count=1 -v ./test/e2e/
+
+    - name: End-to-end tests (raw ICMP via cap_net_raw)
+      env:
+        MPING_BIN: ${{ runner.temp }}/mping
+        MPING_E2E_ICMP: require
+        MPING_E2E_IPV6: require
+      run: |
+        sudo sysctl -w net.ipv4.ping_group_range="1 0"
+        sudo setcap cap_net_raw=+ep "$RUNNER_TEMP/mping"
+        getcap "$RUNNER_TEMP/mping"
+        go test -tags e2e -count=1 -v ./test/e2e/
