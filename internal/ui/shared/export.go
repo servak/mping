@@ -114,14 +114,7 @@ func NewTargetReport(m stats.Metrics) TargetReport {
 	summary := m.GetOutageSummary()
 	outages := make([]OutageReport, 0)
 	for _, o := range m.GetOutages() {
-		outages = append(outages, OutageReport{
-			Start:      o.Start,
-			End:        timePtr(o.End),
-			DurationMs: durationToMs(o.Duration(now)),
-			LostProbes: o.LostProbes,
-			Ongoing:    o.Ongoing(),
-			LastError:  o.LastError,
-		})
+		outages = append(outages, NewOutageReport(o, now))
 	}
 	return TargetReport{
 		Host:           m.GetName(),
@@ -145,6 +138,19 @@ func NewTargetReport(m stats.Metrics) TargetReport {
 		TotalDowntimeMs: durationToMs(summary.Total),
 		LongestOutageMs: durationToMs(summary.Longest),
 		Outages:         outages,
+	}
+}
+
+// NewOutageReport converts an outage into an OutageReport. An ongoing one lasts
+// until now.
+func NewOutageReport(o stats.Outage, now time.Time) OutageReport {
+	return OutageReport{
+		Start:      o.Start,
+		End:        timePtr(o.End),
+		DurationMs: durationToMs(o.Duration(now)),
+		LostProbes: o.LostProbes,
+		Ongoing:    o.Ongoing(),
+		LastError:  o.LastError,
 	}
 }
 
