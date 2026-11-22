@@ -39,7 +39,8 @@ type Options struct {
 	// processing goroutine outside the manager's lock, so it must not block,
 	// nor wait until processing has ended (see OnEvent).
 	OnFailure func(name string)
-	// OnEvent, if set, is called with each outage and change of a target.
+	// OnEvent, if set, is called with each outage of a target and each change
+	// of its reply TTL (ICMP), or its peer or certificate (HTTP(S)).
 	//
 	// Events are facts of the results in send order, so they are established
 	// only once those have settled (see SettleTime). Each is reported once,
@@ -163,7 +164,7 @@ func (mm *metricsManager) SuccessWithDetails(host string, rtt time.Duration, sen
 		})
 	}
 	m.conn.add(sentTime, details)
-	m.outage.addResult(probeResult{sentTime: sentTime, success: true, ttl: replyTTL(details)}, time.Now())
+	m.outage.addResult(probeResult{sentTime: sentTime, success: true, ttl: replyTTL(details), http: mm.httpDetails(details)}, time.Now())
 	dispatch := len(mm.events) > 0
 	mm.mu.Unlock()
 
@@ -178,6 +179,15 @@ func replyTTL(details *prober.ProbeDetails) int {
 		return 0
 	}
 	return details.ICMP.ReplyTTL
+}
+
+// httpDetails returns the HTTP details of details, nil if none. They are
+// only needed for events.
+func (mm *metricsManager) httpDetails(details *prober.ProbeDetails) *prober.HTTPDetails {
+	if mm.onEvent == nil || details == nil {
+		return nil
+	}
+	return details.HTTP
 }
 
 // Register failure for host
@@ -207,7 +217,7 @@ func (mm *metricsManager) FailedWithDetails(host string, sentTime time.Time, msg
 		})
 	}
 	m.conn.add(sentTime, details)
-	m.outage.add(sentTime, false, msg, time.Now())
+	m.outage.addResult(probeResult{sentTime: sentTime, err: msg, http: mm.httpDetails(details)}, time.Now())
 	dispatch := len(mm.events) > 0
 	mm.mu.Unlock()
 

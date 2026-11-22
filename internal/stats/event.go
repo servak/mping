@@ -1,6 +1,10 @@
 package stats
 
-import "time"
+import (
+	"time"
+
+	"github.com/servak/mping/internal/prober"
+)
 
 // EventKind is what an Event reports
 type EventKind string
@@ -9,6 +13,8 @@ const (
 	EventOutageStart EventKind = "outage_start" // Event.Outage
 	EventOutageEnd   EventKind = "outage_end"   // Event.Outage
 	EventTTLChange   EventKind = "ttl_change"   // Event.TTL
+	EventPeerChange  EventKind = "peer_change"  // Event.Peer
+	EventCertChange  EventKind = "cert_change"  // Event.Cert
 )
 
 // Event is a fact about a target, see Options.OnEvent. It shares nothing with
@@ -33,6 +39,39 @@ type Event struct {
 	// LostProbes and LastError cover the losses that made it an outage.
 	Outage *Outage
 	TTL    *TTLChange
+	Peer   *PeerChange
+	Cert   *CertChange
+}
+
+// PeerChange is a confirmed change of the address (IP:port) that answers an
+// HTTP(S) target. Like a TTLChange it takes several consecutive responses,
+// and more of them for a recent address, so that DNS round robin is not a
+// stream of changes. Every response counts, also a rejected one (e.g. a 503).
+// Probes that failed without a response change nothing.
+type PeerChange struct {
+	Old, New string
+}
+
+// CertChange is a confirmed change of the leaf certificate of an HTTPS
+// target, following the rules of PeerChange. A certificate is identified by
+// subject, issuer and expiry. The TLS version belongs to the connection and
+// is left empty. Plain HTTP responses (e.g. after a redirect) tell nothing
+// about the certificate and change nothing: they neither end the old
+// certificate nor interrupt the run of a new one. Their address counts for
+// PeerChange, though.
+type CertChange struct {
+	Old, New prober.TLSDetails
+}
+
+// certificate returns what identifies the certificate of a connection; ok is
+// false for plain HTTP and if nothing is known about it.
+func certificate(d *prober.TLSDetails) (cert prober.TLSDetails, ok bool) {
+	if d == nil {
+		return cert, false
+	}
+	// UTC without monotonic clock, so that == compares the instant
+	cert = prober.TLSDetails{SubjectCN: d.SubjectCN, Issuer: d.Issuer, NotAfter: d.NotAfter.Round(0).UTC()}
+	return cert, cert != prober.TLSDetails{}
 }
 
 // eventQueue collects the events of all targets in the order in which they

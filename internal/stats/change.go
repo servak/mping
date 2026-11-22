@@ -13,9 +13,10 @@ const (
 
 	// changeMinRepliesRecent applies instead when the value was already seen
 	// among the changeRecentReplies replies before the run. Load balancing
-	// mixes values at random, where runs of 3 are common (every 14 replies
-	// for an even split) but runs of 10 are rare. A real switch back to a
-	// recent value is still recorded, only later.
+	// (per packet over unequal paths, or by DNS round robin) mixes values at
+	// random, where runs of 3 are common (every 14 replies for an even
+	// split) but runs of 10 are rare. A real switch back to a recent value
+	// is still recorded, only later.
 	changeMinRepliesRecent = 10
 	changeRecentReplies    = 50
 )
@@ -27,7 +28,7 @@ type valueChange[T any] struct {
 }
 
 // changeTracker detects changes of a value carried by the replies of one
-// target (e.g. the reply TTL). It must be fed in send order by
+// target (reply TTL, peer, certificate). It must be fed in send order by
 // outageTracker, so that a late reply cannot fake a change. Replies that do
 // not tell the value must not be fed; they change nothing.
 //

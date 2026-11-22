@@ -3,6 +3,8 @@ package stats
 import (
 	"sort"
 	"time"
+
+	"github.com/servak/mping/internal/prober"
 )
 
 const (
@@ -55,6 +57,8 @@ type probeResult struct {
 	success  bool
 	err      string
 	ttl      int // reply TTL / hop limit of a success, 0 if unknown
+	// http is the response of an HTTP(S) probe, accepted or not; nil if none
+	http *prober.HTTPDetails
 }
 
 // outageTracker detects outages for one target.
@@ -62,7 +66,8 @@ type probeResult struct {
 // Probe results can arrive out of send order (e.g. a timeout is reported after
 // a later probe already succeeded), so results are held for `settle` and
 // applied in send-time order once no earlier result can still arrive.
-// Reply TTL changes are detected on the same ordered stream.
+// Changes of the reply TTL, the HTTP(S) peer and its certificate are detected
+// on the same ordered stream.
 type outageTracker struct {
 	settle time.Duration
 
@@ -81,18 +86,17 @@ type outageTracker struct {
 	ttl *ttlChangeTracker // nil until the first reply with a known TTL
 
 	emit func(Event) // reports events; nil = off, as in clones
+
+	// Only for events, unlike ttl; nil until the first response that tells
+	peer *changeTracker[string]
+	cert *changeTracker[prober.TLSDetails]
 }
 
 func newOutageTracker(settle time.Duration) *outageTracker {
 	return &outageTracker{settle: settle}
 }
 
-// add records a probe result and applies every result that has settled
-func (t *outageTracker) add(sentTime time.Time, success bool, err string, now time.Time) {
-	t.addResult(probeResult{sentTime: sentTime, success: success, err: err}, now)
-}
-
-// addResult is add with the full result, including the reply TTL
+// addResult records a probe result and applies every result that has settled
 func (t *outageTracker) addResult(r probeResult, now time.Time) {
 	if r.sentTime.IsZero() {
 		r.sentTime = now
@@ -136,6 +140,9 @@ func (t *outageTracker) flushUntil(deadline time.Time) {
 
 func (t *outageTracker) apply(r probeResult) {
 	t.applyTTL(r)
+	if r.http != nil && t.emit != nil {
+		t.applyConn(r.http, r.sentTime)
+	}
 	switch {
 	case r.success:
 		t.lostRun = t.lostRun[:0]
@@ -168,6 +175,26 @@ func (t *outageTracker) applyTTL(r probeResult) {
 	if c, ok := t.ttl.apply(r); ok && t.emit != nil {
 		ev := c // only what is reported goes to the heap
 		t.emit(Event{Kind: EventTTLChange, Time: ev.Time, TTL: &ev})
+	}
+}
+
+// applyConn applies the peer and the certificate of a response
+func (t *outageTracker) applyConn(h *prober.HTTPDetails, sentTime time.Time) {
+	if h.RemoteAddr != "" {
+		if t.peer == nil {
+			t.peer = &changeTracker[string]{}
+		}
+		if c, ok := t.peer.observe(h.RemoteAddr, sentTime); ok {
+			t.emit(Event{Kind: EventPeerChange, Time: c.Time, Peer: &PeerChange{Old: c.Old, New: c.New}})
+		}
+	}
+	if cert, ok := certificate(h.TLS); ok {
+		if t.cert == nil {
+			t.cert = &changeTracker[prober.TLSDetails]{}
+		}
+		if c, ok := t.cert.observe(cert, sentTime); ok {
+			t.emit(Event{Kind: EventCertChange, Time: c.Time, Cert: &CertChange{Old: c.Old, New: c.New}})
+		}
 	}
 }
 
@@ -232,7 +259,7 @@ func (t *outageTracker) summary(now time.Time) OutageSummary {
 // clone returns a copy to read from; it reports no events
 func (t *outageTracker) clone() *outageTracker {
 	c := *t
-	c.emit = nil
+	c.emit, c.peer, c.cert = nil, nil, nil
 	c.pending = append([]probeResult(nil), t.pending...)
 	c.lostRun = append([]probeResult(nil), t.lostRun...)
 	c.ttl = t.ttl.clone()

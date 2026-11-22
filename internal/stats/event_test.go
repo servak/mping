@@ -2,7 +2,9 @@ package stats
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -45,6 +47,10 @@ func describe(e Event, base time.Time) string {
 		s += fmt.Sprintf(" %d-%d lost %d %s", sec(e.Outage.Start), sec(e.Outage.End), e.Outage.LostProbes, e.Outage.LastError)
 	case e.TTL != nil:
 		s += fmt.Sprintf(" %d->%d", e.TTL.Old, e.TTL.New)
+	case e.Peer != nil:
+		s += fmt.Sprintf(" %s->%s", e.Peer.Old, e.Peer.New)
+	case e.Cert != nil:
+		s += fmt.Sprintf(" %s->%s", e.Cert.Old.SubjectCN, e.Cert.New.SubjectCN)
 	}
 	return s
 }
@@ -563,5 +569,238 @@ func testOnEventConcurrent(t *testing.T, resets bool) {
 	}
 	if len(byTarget) != subscribers*targets {
 		t.Errorf("events of %d targets, want %d", len(byTarget), subscribers*targets)
+	}
+}
+
+// tlsFor returns the details of a connection with the certificate cn
+func tlsFor(cn string) *prober.TLSDetails {
+	return &prober.TLSDetails{Version: "TLS 1.3", SubjectCN: cn, Issuer: "CA", NotAfter: t0}
+}
+
+// httpProbes returns one HTTP(S) result per second from start for each field:
+// "x" failed without a response, otherwise "<peer>[/<cert>][!]", with "!" for
+// a rejected response.
+func httpProbes(start time.Time, fields ...string) []*prober.Event {
+	var events []*prober.Event
+	for i, f := range fields {
+		sent := start.Add(time.Duration(i) * time.Second)
+		if f == "x" {
+			events = append(events, httpEvent(sent, false, "", nil))
+			continue
+		}
+		f, rejected := strings.CutSuffix(f, "!")
+		peer, cn, hasTLS := strings.Cut(f, "/")
+		var tls *prober.TLSDetails
+		if hasTLS {
+			tls = tlsFor(cn)
+		}
+		events = append(events, httpEvent(sent, !rejected, peer, tls))
+	}
+	return events
+}
+
+func TestOnEventPeerAndCertificate(t *testing.T) {
+	repeat := func(s string, n int) string { return strings.Repeat(s+" ", n) }
+	tests := []struct {
+		name    string
+		results string
+		want    []string
+	}{
+		{"first values", "A/a A/a A/a", nil},
+		{"peer change", "A/a B/a B/a B/a", []string{"1 peer_change A->B"}},
+		{"certificate change", "A/a A/b A/b A/b", []string{"1 cert_change a->b"}},
+		{"both", "A/a B/b B/b B/b", []string{"1 peer_change A->B", "1 cert_change a->b"}},
+		{"too short", "A/a B/b B/b A/a", nil},
+		{"switch and back", "A B B B " + repeat("A", changeMinRepliesRecent), []string{"1 peer_change A->B", "4 peer_change B->A"}},
+		{"recent peer needs a longer run", "A B A " + repeat("B", changeMinRepliesRecent-1), nil},
+		{"strict round robin", repeat("A/a B/b C/c", 100), nil},
+		{"round robin of two", repeat("A/a B/b", 100), nil},
+		{"rejected responses count", "A/a B/b! B/b! B/b!", []string{
+			"1 peer_change A->B", "1 cert_change a->b", "1 outage_start 1- lost 3 unexpected status code: 503"}},
+		{"accepted and rejected", "A B! B B!", []string{"1 peer_change A->B"}},
+		{"failures without a response change nothing", "A B x B x B", []string{"1 peer_change A->B"}},
+		{"change over an outage", "A/a x x x B/a B/a B/a", []string{
+			"1 outage_start 1- lost 3 unexpected status code: 503", "4 outage_end 1-4 lost 3 unexpected status code: 503",
+			"4 peer_change A->B"}},
+		{"HTTP after HTTPS", "A/a A A A", nil},
+		{"HTTP after HTTPS on another port", "A:443/a A:80 A:80 A:80", []string{"1 peer_change A:443->A:80"}},
+		{"HTTPS after HTTP", "A A A A/a A/a A/a", nil},
+		{"same certificate after HTTP", "A/a A A A A/a A/a A/a", nil},
+		{"new certificate after HTTP", "A/a A A/b A A/b A/b", []string{"2 cert_change a->b"}},
+		{"certificate without peer", "/a /b /b /b", []string{"1 cert_change a->b"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mm, log := newEventManager(0)
+			feedEvents(mm, httpProbes(t0, strings.Fields(tt.results)...)...)
+			checkEvents(t, log.take(), t0, tt.want...)
+		})
+	}
+}
+
+// Random round robin has no runs to speak of either.
+func TestOnEventPeerRandomRoundRobin(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	for _, pool := range []int{2, 3, 8, 100} {
+		mm, log := newEventManager(0)
+		const n = 20000
+		events := make([]*prober.Event, n)
+		for i := range events {
+			events[i] = httpProbes(at(i), fmt.Sprintf("A%d/c%d", rng.IntN(pool), rng.IntN(pool)))[0]
+		}
+		feedEvents(mm, events...)
+		if got := len(log.take()); got > 2*n/500 {
+			t.Errorf("pool of %d: %d changes in %d responses", pool, got, n)
+		}
+	}
+}
+
+func TestOnEventCertificateIdentity(t *testing.T) {
+	old := prober.TLSDetails{Version: "TLS 1.2", SubjectCN: "a", Issuer: "CA", NotAfter: t0}
+	tests := []struct {
+		name string
+		edit func(*prober.TLSDetails)
+		want bool
+	}{
+		{"TLS version", func(d *prober.TLSDetails) { d.Version = "TLS 1.3" }, false},
+		{"time zone of the expiry", func(d *prober.TLSDetails) { d.NotAfter = t0.In(time.FixedZone("JST", 9*3600)) }, false},
+		{"subject", func(d *prober.TLSDetails) { d.SubjectCN = "b" }, true},
+		{"issuer", func(d *prober.TLSDetails) { d.Issuer = "CA2" }, true},
+		{"renewal", func(d *prober.TLSDetails) { d.NotAfter = t0.Add(90 * 24 * time.Hour) }, true},
+		{"no certificate", func(d *prober.TLSDetails) { *d = prober.TLSDetails{Version: "TLS 1.3"} }, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mm, log := newEventManager(0)
+			renewed := old
+			tt.edit(&renewed)
+			feedEvents(mm, httpEvent(at(0), true, "A", &old))
+			for i := range changeMinRepliesRecent {
+				d := renewed // every response has its own details
+				feedEvents(mm, httpEvent(at(i+1), true, "A", &d))
+			}
+			events := log.take()
+			if !tt.want {
+				checkEvents(t, events, t0)
+				return
+			}
+			if len(events) != 1 || events[0].Kind != EventCertChange || !events[0].Time.Equal(at(1)) {
+				t.Fatalf("events = %+v", events)
+			}
+			wantOld, wantNew := old, renewed
+			wantOld.Version, wantNew.Version = "", ""
+			if c := events[0].Cert; c.Old != wantOld || c.New != wantNew {
+				t.Errorf("change = %+v", c)
+			}
+		})
+	}
+}
+
+// The peer is judged in send order once settled, while ConnInfo follows the
+// newest response at once.
+func TestOnEventPeerSendOrder(t *testing.T) {
+	base := time.Now()
+	tests := []struct {
+		name    string
+		arrival []int // order in which the results arrive
+		results string
+		want    []string
+	}{
+		{"late response interrupts the run", []int{0, 1, 2, 4, 3}, "A/a B/b B/b A/a B/b", nil},
+		{"late response completes the run", []int{0, 1, 2, 4, 3}, "A/a B/b B/b B/b A/a", []string{"1 peer_change A->B", "1 cert_change a->b"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mm, log := newEventManager(time.Hour)
+			events := httpProbes(base, strings.Fields(tt.results)...)
+			for _, i := range tt.arrival {
+				mm.SuccessWithDetails("h", time.Millisecond, events[i].SentTime, events[i].Details)
+			}
+			if ci, ok := mm.GetMetrics("h").GetConnInfo(); !ok || !ci.SentTime.Equal(events[4].SentTime) {
+				t.Errorf("ConnInfo = %+v, %v", ci, ok)
+			}
+			if got := log.take(); len(got) != 0 {
+				t.Errorf("%d events before anything settled", len(got))
+			}
+			mm.flushOutages()
+			checkEvents(t, log.take(), base, tt.want...)
+		})
+	}
+}
+
+// A response that comes after newer ones were applied is not judged.
+func TestOnEventPeerTooLate(t *testing.T) {
+	mm, log := newEventManager(0)
+	feedEvents(mm, httpProbes(t0, strings.Fields("A B B")...)...)
+	feedEvents(mm, httpProbes(at(1), "B")...) // would complete the run
+	feedEvents(mm, httpProbes(at(1), "A")...) // would interrupt it
+	if got := log.take(); len(got) != 0 {
+		t.Errorf("late responses made %d events", len(got))
+	}
+	feedEvents(mm, httpProbes(at(3), "B")...)
+	checkEvents(t, log.take(), t0, "1 peer_change A->B")
+}
+
+func TestOnEventPeerReset(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mm, log := newEventManager(0)
+		base := time.Now()
+		feed := func(results string) {
+			for f := range strings.FieldsSeq(results) {
+				feedEvents(mm, httpProbes(time.Now(), f)...)
+				time.Sleep(time.Second)
+			}
+		}
+		feed("A/a A/a B/b B/b") // a candidate
+		mm.ResetAllMetrics()
+		feedEvents(mm, httpProbes(base, "A/a")...) // sent before the reset
+		feed("B/b B/b B/b")                        // neither completed nor new
+		if got := log.take(); len(got) != 0 {
+			t.Errorf("%d events across the reset", len(got))
+		}
+		feed("A/a A/a A/a") // not recent since the reset
+		checkEvents(t, log.take(), base, "7 peer_change B->A", "7 cert_change b->a")
+	})
+}
+
+// State for peers and certificates exists only where there is something to
+// report, and snapshots do not copy it.
+func TestOnEventPeerState(t *testing.T) {
+	mm, _ := newEventManager(0)
+	probes(mm, t0, 0, "..xx.")
+	if o := mm.metrics["h"].outage; o.ttl != nil || o.peer != nil || o.cert != nil {
+		t.Error("a target without TTLs and responses has trackers")
+	}
+	feedEvents(mm, httpProbes(at(9), "A")...)
+	if o := mm.metrics["h"].outage; o.peer == nil || o.cert != nil {
+		t.Error("an HTTP target tracks its peer only")
+	}
+	if o := mm.SortBy(Host, true)[0].(*metrics).outage; o.peer != nil || o.emit != nil {
+		t.Error("the snapshot has event state")
+	}
+	off := NewMetricsManager().(*metricsManager)
+	feedEvents(off, httpProbes(t0, "A/a")...)
+	if o := off.metrics["h"].outage; o.peer != nil || o.cert != nil {
+		t.Error("tracked without a hook")
+	}
+}
+
+// Without a hook nobody needs the HTTP details of pending results, so they
+// are not kept.
+func TestHTTPDetailsOnlyKeptForEvents(t *testing.T) {
+	for _, hook := range []func(Event){nil, func(Event) {}} {
+		mm := NewMetricsManagerWithOptions(Options{SettleTime: time.Hour, OnEvent: hook}).(*metricsManager)
+		d := &prober.ProbeDetails{ProbeType: "http", HTTP: &prober.HTTPDetails{StatusCode: 503, RemoteAddr: "192.0.2.1:80"}}
+		mm.SuccessWithDetails("h", time.Millisecond, time.Now(), d)
+		mm.FailedWithDetails("h", time.Now(), "unexpected status code: 503", d)
+		pending := mm.metrics["h"].outage.pending
+		if len(pending) != 2 {
+			t.Fatalf("%d pending results, want 2", len(pending))
+		}
+		for _, r := range pending {
+			if (r.http != nil) != (hook != nil) {
+				t.Errorf("hook %v: details kept: %v", hook != nil, r.http != nil)
+			}
+		}
 	}
 }

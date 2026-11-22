@@ -25,13 +25,15 @@ func benchDetails() map[string]*prober.ProbeDetails {
 
 func BenchmarkSuccess(b *testing.B) {
 	for name, d := range benchDetails() {
-		b.Run(name, func(b *testing.B) {
-			mm := NewMetricsManager().(*metricsManager)
-			b.ReportAllocs()
-			for i := 0; b.Loop(); i++ {
-				mm.SuccessWithDetails("h", time.Millisecond, benchSent(i), d)
-			}
-		})
+		for hook, opts := range map[string]Options{"": {}, "/hook": {OnEvent: func(Event) {}}} {
+			b.Run(name+hook, func(b *testing.B) {
+				mm := NewMetricsManagerWithOptions(opts).(*metricsManager)
+				b.ReportAllocs()
+				for i := 0; b.Loop(); i++ {
+					mm.SuccessWithDetails("h", time.Millisecond, benchSent(i), d)
+				}
+			})
+		}
 	}
 }
 
