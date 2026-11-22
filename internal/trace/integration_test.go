@@ -13,9 +13,10 @@ package trace
 //	MPING_IT_INTERVAL  interval between rounds (default 1s, same as the TUI)
 //	MPING_IT_STRICT    "1" fails instead of skipping when a target cannot be
 //	                   traced (no ICMP socket); CI sets it with loopback targets
-//	MPING_IT_PRIVILEGED "1" requires the raw socket, "0" the unprivileged
-//	                   fallback (datagram ICMP; for UDP traces the Linux
-//	                   socket error queue or datagram ICMP on macOS)
+//	MPING_IT_PRIVILEGED "1" requires the raw socket (an ICMP trace on Linux
+//	                   only uses it with net.ipv4.ping_group_range="1 0"), "0"
+//	                   unprivileged sockets (datagram ICMP; for UDP traces the
+//	                   Linux socket error queue or datagram ICMP on macOS)
 //
 // Every target is traced with ICMP and with UDP (TestIntegrationTrace/icmp,
 // TestIntegrationTrace/udp).
@@ -100,18 +101,28 @@ func runIntegrationTrace(t *testing.T, proto Proto) {
 			if res.Proto != proto {
 				t.Errorf("Proto = %q, want %q", res.Proto, proto)
 			}
-			switch os.Getenv("MPING_IT_PRIVILEGED") {
-			case "1":
-				if !res.Privileged {
-					t.Errorf("traced without a raw socket, want one (cap_net_raw)")
-				}
-			case "0":
-				if res.Privileged {
-					t.Errorf("traced with a raw socket, want the unprivileged fallback")
-				}
-			}
+			checkSocket(t, res)
 			checkInvariants(t, res, log)
 		})
+	}
+}
+
+// checkSocket checks that the socket used is the one MPING_IT_PRIVILEGED asks
+// for, and that it receives the ICMP errors of the intermediate hops.
+func checkSocket(t *testing.T, res Result) {
+	t.Helper()
+	switch os.Getenv("MPING_IT_PRIVILEGED") {
+	case "1":
+		if !res.Privileged {
+			t.Errorf("traced without a raw socket, want one (cap_net_raw)")
+		}
+	case "0":
+		if res.Privileged {
+			t.Errorf("traced with a raw socket, want an unprivileged one")
+		}
+	}
+	if res.HopsHidden {
+		t.Errorf("traced with a socket that does not see the intermediate hops")
 	}
 }
 
