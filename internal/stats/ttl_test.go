@@ -65,7 +65,7 @@ func TestReplyTTLTracking(t *testing.T) {
 	)
 	events = append(events, ttlSeq(5, 52, 52)...)
 	// 54 was seen recently, so switching back takes more replies
-	events = append(events, ttlSeq(7, repeatTTL(54, ttlChangeMinRepliesRecent)...)...)
+	events = append(events, ttlSeq(7, repeatTTL(54, changeMinRepliesRecent)...)...)
 	feedEvents(mm, events...)
 	s := replyTTLOf(t, mm)
 	if s.Last != 54 || s.Min != 52 || s.Max != 54 {
@@ -138,9 +138,9 @@ func TestReplyTTLChangeNeedsConsecutiveReplies(t *testing.T) {
 	}{
 		{"alternating ECMP paths", []int{54, 53, 54, 53, 54, 53, 54, 53}, nil},
 		{"persistent change", []int{54, 54, 52, 52, 52}, []TTLChange{{Time: at(2), Old: 54, New: 52}}},
-		{"recent TTL needs a longer run", append([]int{54, 52, 52, 54}, repeatTTL(52, ttlChangeMinRepliesRecent-1)...), nil},
-		{"interrupted candidate", append([]int{54, 52, 52, 54}, repeatTTL(52, ttlChangeMinRepliesRecent)...), []TTLChange{{Time: at(4), Old: 54, New: 52}}},
-		{"TTL no longer recent", slices.Concat([]int{54, 52}, repeatTTL(54, ttlRecentReplies), repeatTTL(52, 3)), []TTLChange{{Time: at(2 + ttlRecentReplies), Old: 54, New: 52}}},
+		{"recent TTL needs a longer run", append([]int{54, 52, 52, 54}, repeatTTL(52, changeMinRepliesRecent-1)...), nil},
+		{"interrupted candidate", append([]int{54, 52, 52, 54}, repeatTTL(52, changeMinRepliesRecent)...), []TTLChange{{Time: at(4), Old: 54, New: 52}}},
+		{"TTL no longer recent", slices.Concat([]int{54, 52}, repeatTTL(54, changeRecentReplies), repeatTTL(52, 3)), []TTLChange{{Time: at(2 + changeRecentReplies), Old: 54, New: 52}}},
 		{"two short runs of the new TTL", []int{54, 52, 52, 54, 52, 52}, nil},
 		{"another candidate replaces it", []int{54, 52, 52, 50, 50, 50}, []TTLChange{{Time: at(3), Old: 54, New: 50}}},
 	}
@@ -170,12 +170,12 @@ func TestReplyTTLNoData(t *testing.T) {
 
 func TestReplyTTLChangesCapped(t *testing.T) {
 	mm := NewMetricsManager()
-	// Blocks of ttlChangeMinReplies replies, each with a new TTL: every
+	// Blocks of changeMinReplies replies, each with a new TTL: every
 	// block after the first is a change at its first reply.
 	n := maxTTLChanges + 5
 	var ttls []int
 	for k := 0; k <= n; k++ {
-		for range ttlChangeMinReplies {
+		for range changeMinReplies {
 			ttls = append(ttls, 100+k)
 		}
 	}
@@ -187,7 +187,7 @@ func TestReplyTTLChangesCapped(t *testing.T) {
 	if len(s.Changes) != maxTTLChanges {
 		t.Fatalf("kept %d changes, want %d", len(s.Changes), maxTTLChanges)
 	}
-	m := ttlChangeMinReplies
+	m := changeMinReplies
 	if last := s.Changes[len(s.Changes)-1]; !last.Time.Equal(at(m * n)) {
 		t.Errorf("newest change at %v, want %v", last.Time, at(m*n))
 	}

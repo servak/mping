@@ -13,6 +13,11 @@ var t0 = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 // at returns t0 + n seconds (one probe per second)
 func at(n int) time.Time { return t0.Add(time.Duration(n) * time.Second) }
 
+// add is addResult for a result without details
+func (t *outageTracker) add(sentTime time.Time, success bool, err string, now time.Time) {
+	t.addResult(probeResult{sentTime: sentTime, success: success, err: err}, now)
+}
+
 // feed applies results in order; 'S' = success, 'F' = failure, one per second
 func feed(tr *outageTracker, pattern string) {
 	for i, c := range pattern {

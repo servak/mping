@@ -27,6 +27,25 @@ func TestResetDropsStaleResults(t *testing.T) {
 	}
 }
 
+// The results of a target may be processed after a reset that came before
+// the manager knew the target.
+func TestResetDropsStaleResultsOfNewTarget(t *testing.T) {
+	mm := NewMetricsManager().(*metricsManager)
+	sent := time.Now()
+	time.Sleep(2 * time.Millisecond)
+	mm.ResetAllMetrics()
+	mm.autoRegister("a", "a", "")
+	mm.Sent("a", sent)
+	mm.SuccessWithDetails("a", time.Millisecond, sent, nil)
+	mm.Failed("b", sent, "timeout") // not even registered
+	for _, key := range []string{"a", "b"} {
+		m := mm.GetMetrics(key)
+		if m.GetTotal() != 0 || m.GetSuccessful() != 0 || m.GetFailed() != 0 {
+			t.Errorf("%s: stale results counted: %d/%d/%d", key, m.GetTotal(), m.GetSuccessful(), m.GetFailed())
+		}
+	}
+}
+
 func TestHistoryOrderedBySentTime(t *testing.T) {
 	h := NewTargetHistory(5)
 	base := time.Now().Add(-time.Minute)
