@@ -78,6 +78,13 @@ func (l *Lease) Release() {
 	l.once.Do(func() { l.a.release(l.id) })
 }
 
+// Held returns the number of IDs currently held.
+func (a *Allocator) Held() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.held)
+}
+
 // Acquire returns a lease on a non-zero ID that no one holds and that was not
 // released within the quarantine. The cursor walks the 16-bit space from the
 // base and wraps around. If no ID qualifies it returns ErrExhausted.

@@ -35,7 +35,8 @@ type Params struct {
 }
 
 // New creates the ProbeManager and MetricsManager, registers the targets and
-// subscribes the metrics manager to probe events.
+// subscribes the metrics manager to probe events. The session may hold sockets
+// from here on; Stop releases them, whether it was started or not.
 func New(p Params) (*Session, error) {
 	cfg := p.Config.Clone()
 	cfg.SetSourceInterface(p.SourceInterface)
@@ -44,6 +45,7 @@ func New(p Params) (*Session, error) {
 	pm := prober.NewProbeManager(cfg.Prober, cfg.Default)
 	mm := stats.NewMetricsManagerWithOptions(p.Stats)
 	if err := pm.AddTargets(p.Targets...); err != nil {
+		pm.Stop() // releases the probers of the targets before the bad one
 		return nil, fmt.Errorf("failed to add targets: %w", err)
 	}
 	return &Session{
@@ -58,7 +60,8 @@ func New(p Params) (*Session, error) {
 // Metrics returns the metrics of the targets, which stay readable after Stop.
 func (s *Session) Metrics() stats.MetricsManager { return s.metrics }
 
-// Start runs probing in the background. A ProbeManager.Run error is
+// Start runs probing in the background until ctx is done or Stop is called; a
+// session runs once. A ProbeManager.Run error is
 // delivered on the returned channel (buffered, at most one value) so the
 // caller decides when to report it.
 func (s *Session) Start(ctx context.Context) <-chan error {
@@ -71,7 +74,9 @@ func (s *Session) Start(ctx context.Context) <-chan error {
 	return errCh
 }
 
-// Stop halts probing and waits for in-flight metric updates to settle.
+// Stop halts probing and waits for in-flight metric updates to settle. It may
+// be called any number of times, but not from a hook in Params.Stats, which it
+// would wait for.
 func (s *Session) Stop() {
 	s.probes.Stop()
 	<-s.done
