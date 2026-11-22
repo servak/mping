@@ -46,10 +46,10 @@ go install github.com/servak/mping/cmd/mping@latest
 ```
 ## Permission
 
-Only ICMP needs permissions; the HTTP, TCP, DNS and NTP probers never do. The ICMP probers use unprivileged datagram ICMP ("ping") sockets and fall back to raw sockets where those are not permitted or not supported:
+Only ICMP needs permissions; the HTTP, TCP, DNS and NTP probers never do. The ICMP probers and [path traces](#path-trace-mtr) use unprivileged datagram ICMP ("ping") sockets and fall back to raw sockets where those are not permitted or not supported:
 
-| Platform | What ICMP probing needs |
-|----------|-------------------------|
+| Platform | What ICMP probing and tracing needs |
+|----------|-------------------------------------|
 | macOS | nothing |
 | Linux | nothing if your group is within `net.ipv4.ping_group_range` (it governs IPv6 too); otherwise `cap_net_raw` or root |
 | Windows | Administrator (raw sockets) |
@@ -70,7 +70,7 @@ sudo setcap cap_net_raw=+ep mping
 
 Where file capabilities are not available, `sudo chown root mping && sudo chmod u+s mping` does the same with far more privileges than needed.
 
-The [path trace](#path-trace-mtr) makes its own choice of sockets: it prefers raw sockets, and on Linux an ICMP trace shows the intermediate hops only with `cap_net_raw` or root.
+Where datagram ICMP is allowed, nothing in mping needs `cap_net_raw` or root: ICMP path traces see every hop on datagram sockets too. UDP path traces (for HTTP, TCP, DNS and NTP targets) need no permission on Linux and macOS in any case, see [the table](#path-trace-mtr).
 
 In Kubernetes, set the sysctl for the pod instead of adding the `NET_RAW` capability; it is a [safe sysctl](https://kubernetes.io/docs/tasks/administer-cluster/sysctl-cluster/) since 1.18:
 
@@ -179,19 +179,21 @@ The trace uses the protocol that matches how the selected probe's packets are fo
 
 UDP probes are sent from one ephemeral source port to destination ports `33434 + (31 × round + ttl − 1) mod N`, where N (at least 94, at most 32102, so ports stay below 65536) grows with timeout ÷ interval: each hop cycles through all N flows (and then repeats them, so per-branch statistics accumulate), and a port is never reused while an earlier probe on it may still be answered. (Only with a timeout of more than about 1000 intervals does N run out; probes older than the ~1000 rounds N covers then count as lost.) The probe's TTL is also encoded in the payload, so a late reply cannot be credited to the wrong hop. Routers answer with Time Exceeded, the destination with Port Unreachable. Every branch shows up as its own responder row under the hop, so a UDP trace through an ECMP fabric typically lists several routers per hop where an ICMP trace (or `mtr`, `traceroute -I`) shows one.
 
-Privileges needed for the trace:
+Sockets used for the trace; every variant shows all hops:
 
 | Platform | ICMP trace | UDP trace |
 |----------|------------|-----------|
-| root / `cap_net_raw` (Linux, macOS) | raw ICMP socket | UDP socket + raw ICMP socket for the replies |
-| Linux, unprivileged | datagram ICMP if `net.ipv4.ping_group_range` allows it; intermediate hops are not visible | UDP socket error queue (`IP_RECVERR`): all hops visible, no privileges needed |
-| macOS, unprivileged | datagram ICMP, all hops visible | UDP socket + datagram ICMP socket, all hops visible |
+| Linux, unprivileged | datagram ICMP socket and its error queue (`IP_RECVERR`), if `net.ipv4.ping_group_range` allows datagram ICMP | UDP socket error queue (`IP_RECVERR`), no permission needed |
+| Linux, root / `cap_net_raw` | the same; a raw ICMP socket if datagram ICMP is not allowed | UDP socket + raw ICMP socket for the replies |
+| macOS, unprivileged | datagram ICMP socket | UDP socket + datagram ICMP socket for the replies |
+| macOS, root | raw ICMP socket | UDP socket + raw ICMP socket for the replies |
 
 Notes:
 - When several routers answer for the same hop (ECMP / load balancing), each one is listed under the hop with its share of the replies and its own Last/Avg/Best/Wrst; the first row is the most frequent responder. Responders that stop answering are dimmed and marked `(stale)`, and are hidden after a longer silence once another router has answered more recently (the most recent responder of a hop is never hidden, so a rate-limited hop keeps its address). Silence is measured in revisits: a branch of an N-way ECMP hop is only hit every ~N rounds, so it turns stale after ~10 × N silent rounds rather than 10. At most 16 responders per hop are tracked; replies from further ones only count in the hop's totals. At most 4 extra responders are shown per hop, followed by `+N more`.
 - The trace ends at the longest path: with ECMP branches of different lengths the destination is shown after the farthest hop any branch passes through. A longer path is picked up within a few rounds; a shorter one only once the far hops have been silent for 60-600 rounds (more with more UDP flows), so the hop rows do not jump around.
 - Loss at an intermediate hop that does not continue to the destination is usually ICMP rate limiting on that router, not real loss; the path view points this out.
-- Raw sockets are used when available (root / `cap_net_raw`), otherwise the unprivileged fallbacks above. When none is available the path view says why instead of showing a trace.
+- On Linux a UDP trace still prefers the raw socket when it may open one, as the error queue does not return the quoted UDP header: for routers that quote no more than that header, a late reply cannot be told from a timely one by its TTL, and a reply is ignored if NAT changed the quoted destination. In an ICMP trace the error queue returns all that is needed.
+- When no socket can be opened the path view says why instead of showing a trace. On a Linux kernel (or sandbox) that offers datagram ICMP without an error queue, and without permission for a raw socket, an ICMP trace only shows the destination and says so.
 - A destination that actually listens on one of the UDP ports answers with data instead of Port Unreachable; that probe is then lost. UDP to ports from `33434` up is rarely open, but firewalls that drop UDP or ICMP errors hide the hops behind them.
 - In the TUI, path probing runs at most once per second so that router rate limiting does not show up as fake loss.
 
@@ -695,10 +697,10 @@ MPING_IT_HOSTS=127.0.0.3,127.0.0.1,127.0.0.2 MPING_IT_DURATION=8s \
 go test -tags e2e -v ./test/e2e/
 ```
 
-The ICMP prober prefers datagram sockets and the tracer raw ones, see [Permission](#permission). The ICMP cases are skipped where no ICMP socket can be opened (`MPING_E2E_ICMP=require` / `MPING_IT_STRICT=1` fail instead); on Linux, `sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"` lets all of them run without privileges. For the raw socket path on Linux:
+The ICMP prober and ICMP traces prefer datagram sockets (traces on macOS: raw ones), see [Permission](#permission). The ICMP cases are skipped where no ICMP socket can be opened (`MPING_E2E_ICMP=require` / `MPING_IT_STRICT=1` fail instead); on Linux, `sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"` lets all of them run without privileges. For the raw socket path on Linux:
 
 ```bash
-# Without datagram ICMP the prober falls back to raw sockets
+# Without datagram ICMP the prober and the tracer fall back to raw sockets
 sudo sysctl -w net.ipv4.ping_group_range="1 0"
 
 go build -o /tmp/mping ./cmd/mping
@@ -714,14 +716,20 @@ sudo setcap cap_net_raw=+ep /tmp/trace.test
 (cd internal/trace && MPING_IT_TARGETS=127.0.0.1,::1 MPING_IT_PRIVILEGED=1 /tmp/trace.test -test.run Integration -test.v)
 ```
 
-The tracer integration test traces every target with ICMP and with UDP. Without privileges the ICMP trace falls back to datagram ICMP, which Linux only allows when the user's group is within `net.ipv4.ping_group_range` (otherwise the integration tests skip; `MPING_IT_STRICT=1` makes them fail); the UDP trace uses the socket error queue. `MPING_IT_PRIVILEGED=1` / `0` asserts which socket type was used, in the prober tests too (raw / datagram). Linux rate-limits ICMP errors (`net.ipv4.icmp_ratelimit`, `net.ipv6.icmp.ratelimit`); CI sets both to 0.
+The tracer integration test traces every target with ICMP and with UDP. The ICMP trace uses datagram ICMP, which Linux only allows when the user's group is within `net.ipv4.ping_group_range` (otherwise the integration tests need `cap_net_raw` or skip; `MPING_IT_STRICT=1` makes them fail); without privileges the UDP trace uses the socket error queue. `MPING_IT_PRIVILEGED=1` / `0` asserts which socket type was used, in the prober tests too (raw / datagram). Linux rate-limits ICMP errors (`net.ipv4.icmp_ratelimit`, `net.ipv6.icmp.ratelimit`); CI sets both to 0.
 
-Real ECMP is tested with Linux network namespaces (root required): `test/netns/ecmp.sh up` builds a client, a router with a two-way multipath route hashed on L4 ports (`fib_multipath_hash_policy=1`), two branch routers and a destination. The ECMP test then asserts that a UDP trace sees both branches at hop 2 and an ICMP trace exactly one:
+Real ECMP is tested with Linux network namespaces (root required): `test/netns/ecmp.sh up` builds a client, a router with a two-way multipath route hashed on L4 ports (`fib_multipath_hash_policy=1`), two branch routers and a destination. The ECMP test then asserts that a UDP trace sees both branches at hop 2 and an ICMP trace exactly one, and that both see every router and "unreachable" answer on the way, over IPv4 and IPv6:
 
 ```bash
 go test -c -tags integration -o /tmp/trace.test ./internal/trace/
 sudo test/netns/ecmp.sh up
-sudo ip netns exec mping-c env MPING_IT_ECMP_TARGET=10.200.0.1 /tmp/trace.test -test.run IntegrationECMP -test.v
+# As root with a raw ICMP socket (a new namespace allows datagram ICMP for nobody)
+sudo ip netns exec mping-c env MPING_IT_ECMP_TARGET=10.200.0.1 MPING_IT_PRIVILEGED=1 \
+  /tmp/trace.test -test.run IntegrationECMP -test.v
+# Without any privileges
+sudo ip netns exec mping-c sysctl -w net.ipv4.ping_group_range="0 2147483647"
+sudo ip netns exec mping-c setpriv --reuid="$(id -u)" --regid="$(id -g)" --clear-groups \
+  env MPING_IT_ECMP_TARGET=10.200.0.1 MPING_IT_PRIVILEGED=0 /tmp/trace.test -test.run IntegrationECMP -test.v
 sudo test/netns/ecmp.sh down
 ```
 
