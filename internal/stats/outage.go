@@ -79,6 +79,8 @@ type outageTracker struct {
 	longest time.Duration
 
 	ttl *ttlChangeTracker // nil until the first reply with a known TTL
+
+	emit func(Event) // reports events; nil = off, as in clones
 }
 
 func newOutageTracker(settle time.Duration) *outageTracker {
@@ -149,6 +151,7 @@ func (t *outageTracker) apply(r probeResult) {
 			t.current = &Outage{Start: t.lostRun[0].sentTime, LostProbes: len(t.lostRun), LastError: r.err}
 			t.count++
 			t.lostRun = t.lostRun[:0]
+			t.emitOutage(EventOutageStart, t.current.Start, *t.current)
 		}
 	}
 }
@@ -162,7 +165,17 @@ func (t *outageTracker) applyTTL(r probeResult) {
 	if t.ttl == nil {
 		t.ttl = &ttlChangeTracker{}
 	}
-	t.ttl.apply(r)
+	if c, ok := t.ttl.apply(r); ok && t.emit != nil {
+		ev := c // only what is reported goes to the heap
+		t.emit(Event{Kind: EventTTLChange, Time: ev.Time, TTL: &ev})
+	}
+}
+
+func (t *outageTracker) emitOutage(kind EventKind, at time.Time, o Outage) {
+	if t.emit != nil {
+		ev := o // only what is reported goes to the heap
+		t.emit(Event{Kind: kind, Time: at, Outage: &ev})
+	}
 }
 
 func (t *outageTracker) closeCurrent(end time.Time) {
@@ -178,6 +191,7 @@ func (t *outageTracker) closeCurrent(end time.Time) {
 		t.closed = append([]Outage(nil), t.closed[len(t.closed)-maxStoredOutages:]...)
 	}
 	t.current = nil
+	t.emitOutage(EventOutageEnd, o.End, o)
 }
 
 // outages returns a copy of closed outages plus the ongoing one, oldest first
@@ -215,8 +229,10 @@ func (t *outageTracker) summary(now time.Time) OutageSummary {
 	return s
 }
 
+// clone returns a copy to read from; it reports no events
 func (t *outageTracker) clone() *outageTracker {
 	c := *t
+	c.emit = nil
 	c.pending = append([]probeResult(nil), t.pending...)
 	c.lostRun = append([]probeResult(nil), t.lostRun...)
 	c.ttl = t.ttl.clone()
@@ -231,5 +247,7 @@ func (t *outageTracker) clone() *outageTracker {
 }
 
 func (t *outageTracker) reset() {
+	emit := t.emit
 	*t = *newOutageTracker(t.settle)
+	t.emit = emit
 }

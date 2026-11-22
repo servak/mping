@@ -20,6 +20,10 @@ type metricsManager struct {
 	onFailure   func(name string)
 	resetAt     time.Time // last reset; also applies to targets added since
 	mu          sync.Mutex
+
+	onEvent func(Event)
+	events  eventQueue // not dispatched yet
+	eventMu sync.Mutex // held while onEvent runs; taken before mu
 }
 
 // Options configures a MetricsManager
@@ -32,8 +36,40 @@ type Options struct {
 	SettleTime time.Duration
 	// OnFailure, if set, is called with the target's display name after each
 	// failure (timeout or error) has been recorded. It runs on the event
-	// processing goroutine outside the manager's lock, so it must not block.
+	// processing goroutine outside the manager's lock, so it must not block,
+	// nor wait until processing has ended (see OnEvent).
 	OnFailure func(name string)
+	// OnEvent, if set, is called with each outage and change of a target.
+	//
+	// Events are facts of the results in send order, so they are established
+	// only once those have settled (see SettleTime). Each is reported once,
+	// those of a target in the order in which they were established.
+	//
+	// Nothing but results drives this: a result settles when a later one of
+	// its target arrives. For a regularly probed target an event is therefore
+	// reported within about SettleTime + interval + timeout of the probe that
+	// establishes it. If results stop, the rest waits until Subscribe's
+	// channel is closed: then all results are applied and all events
+	// reported, before Subscribe's done channel is closed. Reading metrics
+	// settles results too, but does not call the hook; events established
+	// that way are reported with the next result of any target.
+	//
+	// The hook runs on the event processing goroutine (the one Subscribe
+	// starts), one call at a time and outside the manager's lock, so it may
+	// read metrics. It must not block: no results are processed meanwhile
+	// and ResetAllMetrics waits for it. So it must neither call
+	// ResetAllMetrics nor wait for a goroutine that may do so. The same goes
+	// for waiting until processing has ended (Subscribe's done channel, and
+	// thus stopping a session), which waits for the hook.
+	//
+	// ResetAllMetrics forgets the past silently: once it has returned nothing
+	// from before it is reported anymore. An ongoing outage gets no end; if
+	// the target stays down, a new outage starts with the probes sent after
+	// the reset. The first value seen after the reset is not a change.
+	//
+	// An outage that is ongoing when Subscribe's channel is closed gets no
+	// end either: whether the target has recovered is not known.
+	OnEvent func(Event)
 }
 
 // SettleTimeFor returns the recommended SettleTime for the probe timing
@@ -56,13 +92,17 @@ func NewMetricsManagerWithOptions(opts Options) MetricsManager {
 		historySize: opts.HistorySize,
 		settle:      opts.SettleTime,
 		onFailure:   opts.OnFailure,
+		onEvent:     opts.OnEvent,
 	}
 	return mm
 }
 
-func (mm *metricsManager) newMetrics(name string) *metrics {
+func (mm *metricsManager) newMetrics(key, name string) *metrics {
 	m := newMetrics(name, mm.historySize, mm.settle)
 	m.resetAt = mm.resetAt
+	if mm.onEvent != nil {
+		m.outage.emit = mm.events.emitter(key, name)
+	}
 	return m
 }
 
@@ -73,7 +113,7 @@ func (mm *metricsManager) getMetrics(host string) *metrics {
 
 	m, ok := mm.metrics[host]
 	if !ok {
-		m = mm.newMetrics(host)
+		m = mm.newMetrics(host, host)
 		// Register the new metrics for the host
 		mm.metrics[host] = m
 	}
@@ -88,9 +128,16 @@ func (mm *metricsManager) GetMetrics(host string) Metrics {
 }
 
 func (mm *metricsManager) ResetAllMetrics() {
+	if mm.onEvent != nil {
+		// Wait for a running dispatch, so that no event from before the
+		// reset is reported once it has returned.
+		mm.eventMu.Lock()
+		defer mm.eventMu.Unlock()
+	}
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 
+	mm.events = nil
 	mm.resetAt = time.Now()
 	for _, m := range mm.metrics {
 		m.Reset()
@@ -117,7 +164,12 @@ func (mm *metricsManager) SuccessWithDetails(host string, rtt time.Duration, sen
 	}
 	m.conn.add(sentTime, details)
 	m.outage.addResult(probeResult{sentTime: sentTime, success: true, ttl: replyTTL(details)}, time.Now())
+	dispatch := len(mm.events) > 0
 	mm.mu.Unlock()
+
+	if dispatch {
+		mm.dispatchEvents()
+	}
 }
 
 // replyTTL returns the ICMP reply TTL of details, 0 if unknown
@@ -156,11 +208,15 @@ func (mm *metricsManager) FailedWithDetails(host string, sentTime time.Time, msg
 	}
 	m.conn.add(sentTime, details)
 	m.outage.add(sentTime, false, msg, time.Now())
+	dispatch := len(mm.events) > 0
 	mm.mu.Unlock()
 
-	// Called outside the lock so the hook may read metrics without deadlock
+	// Called outside the lock so the hooks may read metrics without deadlock
 	if mm.onFailure != nil {
 		mm.onFailure(name)
+	}
+	if dispatch {
+		mm.dispatchEvents()
 	}
 }
 
@@ -207,7 +263,7 @@ func (mm *metricsManager) autoRegister(key, displayName, probeType string) {
 
 	m, exists := mm.metrics[key]
 	if !exists {
-		m = mm.newMetrics(displayName)
+		m = mm.newMetrics(key, displayName)
 		mm.metrics[key] = m
 	}
 	if probeType != "" {
@@ -217,10 +273,11 @@ func (mm *metricsManager) autoRegister(key, displayName, probeType string) {
 
 func (mm *metricsManager) flushOutages() {
 	mm.mu.Lock()
-	defer mm.mu.Unlock()
 	for _, m := range mm.metrics {
 		m.outage.flushAll()
 	}
+	mm.mu.Unlock()
+	mm.dispatchEvents()
 }
 
 // SortBy sorts metrics by specified key and returns Metrics slice.
