@@ -4,6 +4,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -23,15 +24,31 @@ type Session struct {
 
 // Params describes one probing session.
 type Params struct {
-	// Config is copied by New, so sessions may share it.
+	// Config is copied by New, so sessions may share it. It must be valid
+	// (see Config.Validate), which New does not check.
 	Config          *config.Config
-	Targets         []string
+	Targets         []string // at least one
 	SourceInterface string
-	Interval        time.Duration
-	Timeout         time.Duration
+	Interval        time.Duration // positive
+	Timeout         time.Duration // positive
 	// Stats carries caller-specific metrics options (e.g. the failure hook);
 	// SettleTime is filled in by New.
 	Stats stats.Options
+}
+
+// validate returns an error for what would fail later, or panic.
+func (p *Params) validate() error {
+	switch {
+	case p.Config == nil:
+		return errors.New("no config")
+	case len(p.Targets) == 0:
+		return errors.New("no targets")
+	case p.Interval <= 0:
+		return fmt.Errorf("interval must be greater than zero, got %v", p.Interval)
+	case p.Timeout <= 0:
+		return fmt.Errorf("timeout must be greater than zero, got %v", p.Timeout)
+	}
+	return nil
 }
 
 // New creates the ProbeManager and MetricsManager, registers the targets and
@@ -44,6 +61,9 @@ type Params struct {
 // created as prober.ProberError. A New that fails holds nothing, except that
 // lookups the system cannot interrupt end in the background.
 func New(ctx context.Context, p Params) (*Session, error) {
+	if err := p.validate(); err != nil {
+		return nil, fmt.Errorf("invalid session: %w", err)
+	}
 	cfg := p.Config.Clone()
 	cfg.SetSourceInterface(p.SourceInterface)
 	p.Stats.SettleTime = stats.SettleTimeFor(p.Interval, p.Timeout)

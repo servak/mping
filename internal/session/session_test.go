@@ -186,6 +186,26 @@ func TestNewRejectsBadTargets(t *testing.T) {
 	}
 }
 
+func TestNewRejectsBadParams(t *testing.T) {
+	for name, modify := range map[string]func(*Params){
+		"no config":  func(p *Params) { p.Config = nil },
+		"no targets": func(p *Params) { p.Targets = []string{} },
+		"interval must be greater than zero, got 0s":  func(p *Params) { p.Interval = 0 },
+		"interval must be greater than zero, got -1s": func(p *Params) { p.Interval = -time.Second },
+		"timeout must be greater than zero, got 0s":   func(p *Params) { p.Timeout = 0 },
+		"timeout must be greater than zero, got -1ns": func(p *Params) { p.Timeout = -1 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := params(config.DefaultConfig(), "tcp://127.0.0.1:1")
+			modify(&p)
+			s, err := New(context.Background(), p)
+			if s != nil || err == nil || err.Error() != "invalid session: "+name {
+				t.Errorf("New() = %v, %v", s, err)
+			}
+		})
+	}
+}
+
 // Sessions created at the same time from one config, with different source
 // interfaces, probe the same target each from its own source, and leave the
 // config alone. The one whose source address is not of this host fails.
