@@ -26,6 +26,10 @@ func newFakeProber(stopDelay time.Duration) *fakeProber {
 
 func (p *fakeProber) Accept(string) error { return nil }
 
+func (p *fakeProber) prepare(context.Context, resolver, string, bool) (func(), error) {
+	return func() {}, nil
+}
+
 func (p *fakeProber) Start(r chan *Event, _, _ time.Duration) error {
 	ok, err := p.loop.begin()
 	if !ok {
@@ -135,7 +139,7 @@ func TestProbeManagerRunWithoutProbers(t *testing.T) {
 	if err := pm.Run(context.Background(), time.Hour, time.Second); err == nil {
 		t.Fatal("Run() without probers error = nil")
 	}
-	if err := pm.AddTargets("http://127.0.0.1/"); err != nil {
+	if err := pm.AddTargets(context.Background(), "http://127.0.0.1/"); err != nil {
 		t.Errorf("AddTargets after failed Run: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())

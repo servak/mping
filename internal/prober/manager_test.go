@@ -1,6 +1,7 @@
 package prober
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -215,7 +216,7 @@ func TestProbeManagerIntegration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create fresh ProbeManager for each test
 			testPM := NewProbeManager(config, "http")
-			err := testPM.AddTargets(tt.targets...)
+			err := testPM.AddTargets(context.Background(), tt.targets...)
 
 			if tt.shouldErr {
 				if err == nil {

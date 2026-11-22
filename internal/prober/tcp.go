@@ -1,11 +1,13 @@
 package prober
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"net"
 	"net/netip"
 	"slices"
+	"sync"
 	"time"
 )
 
@@ -18,9 +20,10 @@ type (
 		targets map[string]tcpTarget // key (target as given, also its display name) -> address and source
 		config  *TCPConfig
 		// sources caches the source address per family (index 1 for IPv6)
-		sources [2]*net.TCPAddr
-		prefix  string
-		loop    *runLoop
+		sources   [2]*net.TCPAddr
+		sourcesMu sync.Mutex
+		prefix    string
+		loop      *runLoop
 	}
 
 	tcpTarget struct {
@@ -48,24 +51,23 @@ func NewTCPProber(cfg *TCPConfig, prefix string) *TCPProber {
 	}
 }
 
-func (p *TCPProber) Accept(target string) error {
+func (p *TCPProber) Accept(target string) error { return accept(p, target) }
+
+func (p *TCPProber) prepare(ctx context.Context, r resolver, target string, _ bool) (func(), error) {
 	if _, ok := cutPrefix(target, p.prefix); !ok {
-		return ErrNotAccepted
+		return nil, ErrNotAccepted
 	}
 
 	host, port, err := p.parseTarget(target)
 	if err != nil {
-		return fmt.Errorf("invalid TCP target: %w", err)
+		return nil, fmt.Errorf("invalid TCP target: %w", err)
 	}
 
-	// DNS解決を事前に実行
-	ips, err := net.LookupIP(host)
+	// DNS解決を事前に実行し、最初のIPを使用
+	ip, err := lookupFirstIP(ctx, r, host)
 	if err != nil {
-		return fmt.Errorf("failed to resolve '%s': %w", host, err)
+		return nil, fmt.Errorf("failed to resolve '%s': %w", host, err)
 	}
-
-	// 最初のIPを使用
-	ip := ips[0]
 	ipPort := net.JoinHostPort(ip.String(), port)
 
 	// Resolve the source address now, so that an unusable source_interface
@@ -73,12 +75,10 @@ func (p *TCPProber) Accept(target string) error {
 	var local *net.TCPAddr
 	if p.config != nil && p.config.SourceInterface != "" {
 		if local, err = p.localAddr(ipPort); err != nil {
-			return fmt.Errorf("source_interface %q for %s: %w", p.config.SourceInterface, target, err)
+			return nil, fmt.Errorf("source_interface %q for %s: %w", p.config.SourceInterface, target, err)
 		}
 	}
-	p.targets[target] = tcpTarget{addr: ipPort, local: local}
-
-	return nil
+	return func() { p.targets[target] = tcpTarget{addr: ipPort, local: local} }, nil
 }
 
 func (p *TCPProber) Start(result chan *Event, interval, timeout time.Duration) error {
@@ -143,6 +143,8 @@ func (p *TCPProber) localAddr(target string) (*net.TCPAddr, error) {
 	if v6 {
 		fam = 1
 	}
+	p.sourcesMu.Lock()
+	defer p.sourcesMu.Unlock()
 	if a := p.sources[fam]; a != nil {
 		return a, nil
 	}

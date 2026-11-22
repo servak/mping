@@ -37,15 +37,21 @@ type Params struct {
 // New creates the ProbeManager and MetricsManager, registers the targets and
 // subscribes the metrics manager to probe events. The session may hold sockets
 // from here on; Stop releases them, whether it was started or not.
-func New(p Params) (*Session, error) {
+//
+// ctx bounds the lookups of the target names only, not the session: when it is
+// done New returns its error at once. Targets that cannot be probed are
+// reported all together, as prober.TargetErrors, and probers that cannot be
+// created as prober.ProberError. A New that fails holds nothing, except that
+// lookups the system cannot interrupt end in the background.
+func New(ctx context.Context, p Params) (*Session, error) {
 	cfg := p.Config.Clone()
 	cfg.SetSourceInterface(p.SourceInterface)
 	p.Stats.SettleTime = stats.SettleTimeFor(p.Interval, p.Timeout)
 
 	pm := prober.NewProbeManager(cfg.Prober, cfg.Default)
 	mm := stats.NewMetricsManagerWithOptions(p.Stats)
-	if err := pm.AddTargets(p.Targets...); err != nil {
-		pm.Stop() // releases the probers of the targets before the bad one
+	if err := pm.AddTargets(ctx, p.Targets...); err != nil {
+		pm.Stop()
 		return nil, fmt.Errorf("failed to add targets: %w", err)
 	}
 	return &Session{

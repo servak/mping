@@ -2,6 +2,7 @@ package prober
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -85,34 +86,37 @@ func NewDNSProber(cfg *DNSConfig, prefix string) *DNSProber {
 }
 
 // Accept parses DNS targets in format: dns://server[:port]/domain[/record_type] or dns:server[:port]/domain[/record_type]
-func (p *DNSProber) Accept(target string) error {
+func (p *DNSProber) Accept(target string) error { return accept(p, target) }
+
+func (p *DNSProber) prepare(ctx context.Context, r resolver, target string, _ bool) (func(), error) {
 	if _, ok := cutPrefix(target, p.prefix); !ok {
-		return ErrNotAccepted
+		return nil, ErrNotAccepted
 	}
 
 	dnsTarget, err := p.parseTarget(target)
 	if err != nil {
-		return fmt.Errorf("invalid DNS target: %w", err)
+		return nil, fmt.Errorf("invalid DNS target: %w", err)
 	}
 
 	// Validate DNS server by resolving its IP
-	serverIP, err := net.ResolveIPAddr("ip", dnsTarget.Server)
+	serverIP, err := resolveIPAddr(ctx, r, "ip", dnsTarget.Server)
 	if err != nil {
-		return fmt.Errorf("failed to resolve DNS server '%s': %w", dnsTarget.Server, err)
+		return nil, fmt.Errorf("failed to resolve DNS server '%s': %w", dnsTarget.Server, err)
 	}
 
 	// Store complete DNSTarget with pre-resolved IP
 	dnsTarget.ServerIP = serverIP.String()
-	p.targets = append(p.targets, dnsTarget)
+	return func() {
+		p.targets = append(p.targets, dnsTarget)
 
-	// Unique and sorted targets
-	slices.SortFunc(p.targets, func(a, b *DNSTarget) int {
-		return cmp.Compare(a.OriginalTarget, b.OriginalTarget)
-	})
-	p.targets = slices.CompactFunc(p.targets, func(a, b *DNSTarget) bool {
-		return a.OriginalTarget == b.OriginalTarget
-	})
-	return nil
+		// Unique and sorted targets
+		slices.SortFunc(p.targets, func(a, b *DNSTarget) int {
+			return cmp.Compare(a.OriginalTarget, b.OriginalTarget)
+		})
+		p.targets = slices.CompactFunc(p.targets, func(a, b *DNSTarget) bool {
+			return a.OriginalTarget == b.OriginalTarget
+		})
+	}, nil
 }
 
 func (p *DNSProber) parseTarget(target string) (*DNSTarget, error) {

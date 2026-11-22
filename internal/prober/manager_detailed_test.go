@@ -1,6 +1,7 @@
 package prober
 
 import (
+	"context"
 	"testing"
 )
 
@@ -31,7 +32,7 @@ func TestProbeManagerDetailedScenarios(t *testing.T) {
 		pm := NewProbeManager(config, "http")
 
 		// Add initial targets
-		err := pm.AddTargets("http://example.com")
+		err := pm.AddTargets(context.Background(), "http://example.com")
 		if err != nil {
 			t.Fatalf("Failed to add targets: %v", err)
 		}
@@ -40,7 +41,7 @@ func TestProbeManagerDetailedScenarios(t *testing.T) {
 		pm.(*probeManager).started = true
 
 		// Try to add more targets while running
-		err = pm.AddTargets("http://google.com")
+		err = pm.AddTargets(context.Background(), "http://google.com")
 		if err == nil {
 			t.Error("Expected error when adding targets to running manager")
 		}
@@ -55,7 +56,7 @@ func TestProbeManagerDetailedScenarios(t *testing.T) {
 			"http://github.com",
 		}
 
-		err := pm.AddTargets(targets...)
+		err := pm.AddTargets(context.Background(), targets...)
 		if err != nil {
 			t.Errorf("Failed to add multiple targets: %v", err)
 		}
@@ -70,7 +71,7 @@ func TestProbeManagerDetailedScenarios(t *testing.T) {
 			"my-secure://api.com", // HTTPS prober with TLS
 		}
 
-		err := pm.AddTargets(targets...)
+		err := pm.AddTargets(context.Background(), targets...)
 		if err != nil {
 			t.Errorf("Failed to add mixed targets: %v", err)
 		}
@@ -79,7 +80,7 @@ func TestProbeManagerDetailedScenarios(t *testing.T) {
 	t.Run("Invalid default prober", func(t *testing.T) {
 		pm := NewProbeManager(config, "nonexistent")
 
-		err := pm.AddTargets("example.com")
+		err := pm.AddTargets(context.Background(), "example.com")
 		if err == nil {
 			t.Error("Expected error with invalid default prober")
 		}
@@ -89,7 +90,7 @@ func TestProbeManagerDetailedScenarios(t *testing.T) {
 		emptyConfig := map[string]*ProberConfig{}
 		pm := NewProbeManager(emptyConfig, "http")
 
-		err := pm.AddTargets("example.com")
+		err := pm.AddTargets(context.Background(), "example.com")
 		if err == nil {
 			t.Error("Expected error with empty config")
 		}
@@ -121,7 +122,7 @@ func TestGetOrCreateProber(t *testing.T) {
 	}
 
 	t.Run("Create new prober", func(t *testing.T) {
-		prober, err := pm.getOrCreateProber("http")
+		prober, err := pm.newProber("http")
 		if err != nil {
 			t.Errorf("Failed to create HTTP prober: %v", err)
 		}
@@ -131,25 +132,18 @@ func TestGetOrCreateProber(t *testing.T) {
 	})
 
 	t.Run("Reuse existing prober", func(t *testing.T) {
-		// First call creates prober
-		prober1, err := pm.getOrCreateProber("http")
-		if err != nil {
-			t.Errorf("Failed to create HTTP prober: %v", err)
+		for _, target := range []string{"http://192.0.2.1/", "http://192.0.2.2/"} {
+			if err := pm.AddTargets(context.Background(), target); err != nil {
+				t.Fatalf("AddTargets(%s): %v", target, err)
+			}
 		}
-
-		// Second call should return same prober
-		prober2, err := pm.getOrCreateProber("http")
-		if err != nil {
-			t.Errorf("Failed to get existing HTTP prober: %v", err)
-		}
-
-		if prober1 != prober2 {
-			t.Error("Should reuse existing prober instance")
+		if n := len(pm.probers["http"].(*HTTPProber).targets); n != 2 {
+			t.Errorf("prober has %d targets, want 2", n)
 		}
 	})
 
 	t.Run("Unknown prober type", func(t *testing.T) {
-		_, err := pm.getOrCreateProber("unknown")
+		_, err := pm.newProber("unknown")
 		if err == nil {
 			t.Error("Expected error for unknown prober type")
 		}
@@ -167,7 +161,7 @@ func TestGetOrCreateProber(t *testing.T) {
 			probers: make(map[string]Prober),
 		}
 
-		_, err := pm.getOrCreateProber("invalid")
+		_, err := pm.newProber("invalid")
 		if err == nil {
 			t.Error("Expected error for invalid probe type")
 		}

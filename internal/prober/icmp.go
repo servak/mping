@@ -1,6 +1,7 @@
 package prober
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -206,23 +207,17 @@ func (p *ICMPProber) isBuiltin() bool {
 // Accept adds a target written with the prober's scheme ("my-ping://host",
 // "icmpv4://host" or the legacy "icmpv4:host"). The targets of a custom
 // prober are keyed and shown with its scheme.
-func (p *ICMPProber) Accept(target string) error {
-	return p.accept(target, false)
-}
+func (p *ICMPProber) Accept(target string) error { return accept(p, target) }
 
-// acceptPlain adds a target the user wrote without a scheme, routed here
-// because p is the default prober. Like the targets of the built-in
-// probers, it is shown by its bare address whichever prober is the
-// default; only its key carries the scheme of a custom prober, so that it
-// does not merge with the same address probed by another prober.
-func (p *ICMPProber) acceptPlain(target string) error {
-	return p.accept(target, true)
-}
-
-func (p *ICMPProber) accept(target string, plain bool) error {
+// prepare: a plain target, routed here because p is the default prober, is
+// shown by its bare address like the targets of the built-in probers,
+// whichever prober is the default; only its key carries the scheme of a custom
+// prober, so that it does not merge with the same address probed by another
+// prober.
+func (p *ICMPProber) prepare(ctx context.Context, r resolver, target string, plain bool) (func(), error) {
 	hostname, ok := cutPrefix(target, p.prefix)
 	if !ok {
-		return ErrNotAccepted
+		return nil, ErrNotAccepted
 	}
 
 	// Determine resolver type based on ICMP version
@@ -232,16 +227,11 @@ func (p *ICMPProber) accept(target string, plain bool) error {
 	}
 
 	// Resolve hostname to IP address
-	ip, err := net.ResolveIPAddr(resolvType, hostname)
+	ip, err := resolveIPAddr(ctx, r, resolvType, hostname)
 	if err != nil {
-		return fmt.Errorf("failed to resolve '%s': %w", hostname, err)
+		return nil, fmt.Errorf("failed to resolve '%s': %w", hostname, err)
 	}
-
-	// Check for duplicate IP addresses
 	ipStr := ip.String()
-	if _, exists := p.targets[ipStr]; exists {
-		return nil // Already exists, no need to add again
-	}
 
 	// The built-in probers key their targets by address. Any other ICMP
 	// prober (e.g. one with TTL=1) may probe the same address, so its key
@@ -254,9 +244,12 @@ func (p *ICMPProber) accept(target string, plain bool) error {
 			displayName = icmpDisplayName(hostname, ipStr, p.prefix)
 		}
 	}
-	p.targets[ipStr] = icmpTarget{key: key, name: displayName}
-
-	return nil
+	return func() {
+		// The first target of an address is the one that stays
+		if _, exists := p.targets[ipStr]; !exists {
+			p.targets[ipStr] = icmpTarget{key: key, name: displayName}
+		}
+	}, nil
 }
 
 // icmpDisplayName formats a target as its address, or "host(address)" when

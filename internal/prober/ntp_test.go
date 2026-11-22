@@ -1,6 +1,7 @@
 package prober
 
 import (
+	"context"
 	"encoding/binary"
 	"net"
 	"strings"
@@ -538,7 +539,7 @@ func TestNTPReresolvesPerProbe(t *testing.T) {
 
 	p := NewNTPProber(&NTPConfig{Server: "pool.test", Port: 123}, "ntp")
 	calls := 0
-	p.resolve = func(network, address string) (*net.UDPAddr, error) {
+	p.resolve = func(ctx context.Context, r resolver, address string) (*net.UDPAddr, error) {
 		calls++
 		if calls <= 2 { // Accept + first probe: the pool member that later disappears
 			return dead.LocalAddr().(*net.UDPAddr), nil
@@ -566,9 +567,9 @@ func TestNTPReresolvesPerProbe(t *testing.T) {
 	// IP literal: resolved at Accept only.
 	lp := NewNTPProber(&NTPConfig{Server: "127.0.0.1", Port: 123}, "ntp")
 	n := 0
-	lp.resolve = func(network, address string) (*net.UDPAddr, error) {
+	lp.resolve = func(ctx context.Context, r resolver, address string) (*net.UDPAddr, error) {
 		n++
-		return net.ResolveUDPAddr(network, address)
+		return resolveUDPAddr(ctx, r, address)
 	}
 	if err := lp.Accept("ntp://" + live.LocalAddr().String()); err != nil {
 		t.Fatal(err)

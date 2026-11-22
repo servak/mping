@@ -108,7 +108,9 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 				return err
 			}
 
-			sess, err := session.New(session.Params{
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			sess, err := session.New(ctx, session.Params{
 				Config:          cfg,
 				Targets:         hosts,
 				SourceInterface: sourceInterface,
@@ -122,8 +124,6 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 				return err
 			}
 
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
 			sigs, stopSignals := notify()
 			defer stopSignals()
 

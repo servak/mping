@@ -2,6 +2,7 @@ package prober
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"maps"
@@ -32,7 +33,7 @@ type (
 		prefix  string
 		loop    *runLoop
 		// resolve looks up a host:port; replaceable in tests.
-		resolve func(network, address string) (*net.UDPAddr, error)
+		resolve func(ctx context.Context, r resolver, address string) (*net.UDPAddr, error)
 	}
 
 	NTPConfig struct {
@@ -80,33 +81,34 @@ func NewNTPProber(cfg *NTPConfig, prefix string) *NTPProber {
 		config:  cfg,
 		prefix:  prefix,
 		loop:    newRunLoop(),
-		resolve: net.ResolveUDPAddr,
+		resolve: resolveUDPAddr,
 	}
 }
 
 // Accept parses NTP targets in format: ntp://server[:port] or ntp:server[:port]
-func (p *NTPProber) Accept(target string) error {
+func (p *NTPProber) Accept(target string) error { return accept(p, target) }
+
+func (p *NTPProber) prepare(ctx context.Context, r resolver, target string, _ bool) (func(), error) {
 	if _, ok := cutPrefix(target, p.prefix); !ok {
-		return ErrNotAccepted
+		return nil, ErrNotAccepted
 	}
 
 	server, port, err := p.parseTarget(target)
 	if err != nil {
-		return fmt.Errorf("invalid NTP target: %w", err)
+		return nil, fmt.Errorf("invalid NTP target: %w", err)
 	}
 
 	// Resolve once to reject unresolvable names early. Probes resolve again
 	// (before T1) so that pool members that come and go are followed.
 	serverAddr := net.JoinHostPort(server, strconv.Itoa(port))
-	if _, err := p.resolve("udp", serverAddr); err != nil {
-		return fmt.Errorf("failed to resolve NTP server '%s': %w", serverAddr, err)
+	if _, err := p.resolve(ctx, r, serverAddr); err != nil {
+		return nil, fmt.Errorf("failed to resolve NTP server '%s': %w", serverAddr, err)
 	}
 
 	// Store target with server:port as key for uniqueness
 	_, litErr := netip.ParseAddr(server)
-	p.targets[serverAddr] = &ntpTarget{display: target, host: server, port: port, literal: litErr == nil}
-
-	return nil
+	t := &ntpTarget{display: target, host: server, port: port, literal: litErr == nil}
+	return func() { p.targets[serverAddr] = t }, nil
 }
 
 func (p *NTPProber) parseTarget(target string) (string, int, error) {
@@ -162,7 +164,7 @@ func (p *NTPProber) sendProbe(result chan *Event, serverAddr string, timeout tim
 	// session. IP literals are used as they are.
 	dest := serverAddr
 	if !tgt.literal {
-		udpAddr, err := p.resolve("udp", serverAddr)
+		udpAddr, err := p.resolve(context.Background(), net.DefaultResolver, serverAddr)
 		if err != nil {
 			result <- errorEvent(serverAddr, displayName, now, fmt.Errorf("failed to resolve NTP server '%s': %w", serverAddr, err))
 			return

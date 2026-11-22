@@ -74,7 +74,9 @@ mping dns://8.8.8.8/google.com`,
 			notifier := beep.NewNotifier()
 			defer notifier.Close()
 
-			sess, err := session.New(session.Params{
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			sess, err := session.New(ctx, session.Params{
 				Config:          cfg,
 				Targets:         hosts,
 				SourceInterface: sourceInterface,
@@ -86,8 +88,6 @@ mping dns://8.8.8.8/google.com`,
 				return err
 			}
 
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
 			probeErr := sess.Start(ctx)
 
 			startTUI(sess.Metrics(), notifier, cfg.UI, interval, timeout)
