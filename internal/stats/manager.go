@@ -18,6 +18,7 @@ type metricsManager struct {
 	historySize int // Number of history entries to keep
 	settle      time.Duration
 	onFailure   func(name string)
+	resetAt     time.Time // last reset; also applies to targets added since
 	mu          sync.Mutex
 }
 
@@ -60,7 +61,9 @@ func NewMetricsManagerWithOptions(opts Options) MetricsManager {
 }
 
 func (mm *metricsManager) newMetrics(name string) *metrics {
-	return newMetrics(name, mm.historySize, mm.settle)
+	m := newMetrics(name, mm.historySize, mm.settle)
+	m.resetAt = mm.resetAt
+	return m
 }
 
 // 指定されたホストのMetricsを取得（内部用）
@@ -88,6 +91,7 @@ func (mm *metricsManager) ResetAllMetrics() {
 	mm.mu.Lock()
 	defer mm.mu.Unlock()
 
+	mm.resetAt = time.Now()
 	for _, m := range mm.metrics {
 		m.Reset()
 	}
