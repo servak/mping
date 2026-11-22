@@ -23,6 +23,8 @@ func Execute() {
 	cmd.AddCommand(
 		command.NewPingBatchCmd(),
 		command.NewConfigCmd(),
+		command.NewServerCmd(Version),
+		command.NewWatchCmd(Version),
 	)
 	cmd.CompletionOptions.HiddenDefaultCmd = true
 	cmd.SetOut(os.Stdout)
