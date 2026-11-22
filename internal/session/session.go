@@ -23,6 +23,7 @@ type Session struct {
 
 // Params describes one probing session.
 type Params struct {
+	// Config is copied by New, so sessions may share it.
 	Config          *config.Config
 	Targets         []string
 	SourceInterface string
@@ -36,10 +37,11 @@ type Params struct {
 // New creates the ProbeManager and MetricsManager, registers the targets and
 // subscribes the metrics manager to probe events.
 func New(p Params) (*Session, error) {
-	p.Config.SetSourceInterface(p.SourceInterface)
+	cfg := p.Config.Clone()
+	cfg.SetSourceInterface(p.SourceInterface)
 	p.Stats.SettleTime = stats.SettleTimeFor(p.Interval, p.Timeout)
 
-	pm := prober.NewProbeManager(p.Config.Prober, p.Config.Default)
+	pm := prober.NewProbeManager(cfg.Prober, cfg.Default)
 	mm := stats.NewMetricsManagerWithOptions(p.Stats)
 	if err := pm.AddTargets(p.Targets...); err != nil {
 		return nil, fmt.Errorf("failed to add targets: %w", err)

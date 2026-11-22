@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -50,6 +51,17 @@ type Config struct {
 	Prober  map[string]*prober.ProberConfig `yaml:"prober"`
 	Default string                          `yaml:"default"`
 	UI      *shared.Config                  `yaml:"ui"`
+}
+
+// Clone returns a deep copy of c, which shares no pointer, map or slice with it.
+func (c *Config) Clone() *Config {
+	cp := *c
+	cp.Prober = maps.Clone(c.Prober)
+	for name, pc := range cp.Prober {
+		cp.Prober[name] = pc.Clone()
+	}
+	cp.UI = c.UI.Clone()
+	return &cp
 }
 
 func (c *Config) SetTitle(t string) {

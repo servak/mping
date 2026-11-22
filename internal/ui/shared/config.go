@@ -2,6 +2,7 @@ package shared
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 
 	"gopkg.in/yaml.v3"
@@ -157,6 +158,16 @@ func DefaultConfig() *Config {
 	}
 
 	return cfg
+}
+
+// Clone returns a deep copy of c.
+func (c *Config) Clone() *Config {
+	if c == nil {
+		return nil
+	}
+	cp := *c
+	cp.Themes = maps.Clone(c.Themes)
+	return &cp
 }
 
 // GetTheme returns the appropriate theme based on config
