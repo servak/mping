@@ -16,6 +16,7 @@ mping
 - 🖥️ **Interactive TUI**: Clean terminal interface with sortable results
 - ⚡ **High performance**: Concurrent probing with configurable intervals
 - 📁 **Batch mode**: Non-interactive mode for scripting and automation, with JSON/CSV output and exit codes
+- 🛰️ **Watches**: Probe in the background for hours, log out, and read the results and events at any time, as text or JSON
 - ⏱️ **Outage measurement**: Records every outage with start/end time and duration — ideal for failover and maintenance tests
 - 🛣️ **Path trace (MTR)**: Press `p` in the TUI to see per-hop loss and latency to the selected host
 - 📈 **History at a glance**: Sparkline of recent probes and RTT p50/p95/p99 per host
@@ -234,6 +235,119 @@ Caveats:
 - A change to a path of the same length (e.g. another ECMP branch) does not change the TTL; it only shows in the path view.
 - Windows does not report the reply TTL, so the ICMP lines are not shown there.
 
+## Watches (Background Probing)
+
+A watch probes its targets in the background until its end, also when the terminal is closed, and keeps the state of the targets and what happened to them:
+
+```bash
+mping watch start --name switch-update --for 2h 10.0.0.0/28 https://example.com
+mping watch ls
+mping watch show switch-update
+mping watch events switch-update -F
+mping watch stop switch-update
+```
+
+```
+$ mping watch show switch-update
+switch-update (w-37346a85c30e): running
+started:  2026-11-22 14:00:00
+ends:     2026-11-22 16:00:00 (in 1h14m)
+probes:   every 1s, timeout 1s
+result:   17 targets: 1 down, 0 degraded, 0 pending, 16 ok
+┌────────┬──────────┬───────┬───────────────────┬───────────┬─────────────────────┬─────────┐
+│ STATUS │ HOST     │ LOSS  │ CONSECUTIVE FAILS │ OUTAGES   │ LAST FAIL           │ REASON  │
+├────────┼──────────┼───────┼───────────────────┼───────────┼─────────────────────┼─────────┤
+│ down   │ 10.0.0.9 │ 1.5%  │                42 │ 1/42.000s │ 2026-11-22 14:45:03 │ timeout │
+└────────┴──────────┴───────┴───────────────────┴───────────┴─────────────────────┴─────────┘
+$ mping watch events switch-update
+2026-11-22 14:00:00.120 #1 watch_started: until 2026-11-22 16:00:00
+2026-11-22 14:44:22.120 #2 outage_start 10.0.0.9: 3 lost, timeout
+```
+
+| Command | What it does |
+|---------|--------------|
+| `watch start --name NAME TARGET...` | Starts a watch. `--for` is its duration (`90m`, `2h`, `1d12h`; default `2h`); `-i`, `-t`, `-I` and `-f FILE` are as in `mping`. If any target cannot be resolved, nothing is started and all of those are listed. |
+| `watch ls` | Lists the watches, the newest last. |
+| `watch show NAME` | Shows the state of a watch and the targets that are not ok (up to 100), worst first; with `-a` all targets. |
+| `watch events NAME` | Shows what happened, with `--after N` only events with a higher number. `-F` goes on until the watch has stopped. |
+| `watch extend NAME --for D` | Moves the end of a running watch to that long from now. It cannot be made earlier. |
+| `watch stop NAME` | Stops a watch and waits for the last replies. It stays readable for 24 hours. |
+| `watch rm NAME` | Removes a watch, with `-f` also a running one. |
+
+Names have up to 63 letters, digits, `.`, `_` and `-`. A stopped watch does not occupy its name: `NAME` is the running watch, else the newest one, and the ID (`w-...`) also finds the others.
+
+| Status | Meaning |
+|--------|---------|
+| `down` | an outage is going on (3 or more consecutive failures), or it has never answered |
+| `degraded` | any other target with a failure since the start of the watch |
+| `pending` | no result yet |
+| `ok` | no failure at all |
+
+| Event | Meaning |
+|-------|---------|
+| `outage_start`, `outage_end` | see [Outage Measurement](#outage-measurement). An outage that goes on when the watch stops ends with `end_unknown`. |
+| `ttl_change`, `peer_change`, `cert_change` | see [Path and Peer Changes](#path-and-peer-changes) |
+| `watch_started`, `watch_extended`, `watch_stopped` | the watch itself; `watch_stopped` is its last event |
+| `gap` | the host was suspended, so there were no probes |
+
+An event is known once the results around it are, a few intervals and timeouts after it happened.
+
+| Limit | Value |
+|-------|-------|
+| Running watches | 20 |
+| Targets of a watch, expanded | 1024 |
+| Duration | default 2 hours, at most 7 days from now |
+| Interval | at least 200ms |
+| Timeout | at most 1 minute |
+| Events of a watch | the last 10000 |
+
+### The server
+
+The watches run in a server process of your own, with your permissions, on the socket `~/.mping/server.sock` that only you can open:
+
+- `mping watch start` starts it in the background when it is not running; the other commands only tell that it is not running (`watch ls` succeeds then, with an empty list). Its log is `~/.mping/server.log`.
+- That server ends when there has been no watch at all, not even a stopped one, for 10 minutes.
+- `mping server stop` ends it, with `-f` also while watches are running. It succeeds if there is no server.
+- **Results are in memory only**: they are gone when the server ends.
+- `~/.mping.yml` is read again for each new watch.
+- Updating mping does not update a running server; the commands warn about the other version.
+- `sudo mping watch` is the server of root (on macOS, `sudo -H`).
+- Windows is not supported.
+
+`mping server` runs it in the foreground until it is interrupted, e.g. by systemd, which also helps where logging out ends all processes of a user (`KillUserProcesses=yes`):
+
+```ini
+# ~/.config/systemd/user/mping.service
+[Unit]
+Description=mping watches
+
+[Service]
+ExecStart=/usr/local/bin/mping server
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user enable --now mping
+loginctl enable-linger   # from boot on, and after logout
+```
+
+`--config FILE` is another config, and `--listen unix:///PATH` another socket, which the commands find by `-s unix:///PATH` or `MPING_SERVER=unix:///PATH`. They never start a server there, and name it in their output.
+
+### Scripts and AI agents
+
+`-o json` is for `start`, `ls`, `show` and `events`; messages are on stderr and the exit status is 1 for any error. The fields of a target are those of `mping batch -o json`.
+
+```bash
+mping watch show switch-update -o json | jq '.counts, .last_event_seq'
+mping watch show switch-update -o json | jq -r '.targets[] | select(.status == "down") | .host'
+mping watch events switch-update --after 42 -o json   # what is new since event 42
+```
+
+`events -o json` prints one JSON object per line, also with `-F`. The `seq` of the last one is the next `--after`; a warning tells if older events are no longer kept.
+
 ## Target Expansion
 
 mping supports powerful target expansion syntax for monitoring large numbers of hosts efficiently:
@@ -400,6 +514,8 @@ Available Commands:
   batch       Disables TUI and performs probing for a set number of iterations
   config      management config
   help        Help about any command
+  server      Runs the server of the watches in the foreground
+  watch       Probes in the background, with results to read at any time
 
 Flags:
   -c, --config string      config path (default "~/.mping.yml")
@@ -413,6 +529,8 @@ Flags:
 
 Use "mping [command] --help" for more information about a command.
 ```
+
+A host whose name is that of a command needs a prefix: `mping icmpv4://server`.
 
 ### Keyboard shortcuts (TUI)
 
@@ -694,7 +812,8 @@ MPING_IT_TARGETS=127.0.0.1,::1 MPING_IT_ROUNDS=10 MPING_IT_INTERVAL=200ms \
 MPING_IT_HOSTS=127.0.0.3,127.0.0.1,127.0.0.2 MPING_IT_DURATION=8s \
   go test -tags integration -run Integration -v ./internal/ui/tui/
 
-# The real binary: "mping batch -o json" against every protocol (e2e build tag).
+# The real binary: "mping batch -o json" against every protocol, and watches
+# with servers of their own in temporary home directories (e2e build tag).
 # Without MPING_BIN the test builds ./cmd/mping itself.
 go test -tags e2e -v ./test/e2e/
 ```
