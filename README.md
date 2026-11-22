@@ -437,7 +437,7 @@ prober:
     http:
       expect_codes: "200-299"     # Expected HTTP status codes
       expect_body: ""             # Expected response body (optional)
-      headers:                    # Custom headers (optional)
+      headers:                    # Custom headers (optional; not sent to other hosts on redirect)
         User-Agent: "mping/1.0"
       redirect_off: false         # Disable redirect following
       keep_alive: false           # Reuse connections between probes (default: false; see note below)
@@ -520,7 +520,19 @@ The URL scheme used for HTTP probers is decided as follows:
 
 TLS certificate verification is skipped by default. `tls: {}` or omitting `skip_verify` keeps that default; set `skip_verify: false` to verify certificates.
 
-Custom headers are sent with every request. A `Host` header (case-insensitive) overrides the HTTP Host, which is useful for probing a virtual host by IP:
+Custom headers (`headers`) may carry credentials, so redirects get them only on the host that was probed. All of them, including `User-Agent` and the like, are dropped for any other redirect target:
+
+| Redirect | Headers |
+|----------|---------|
+| Same scheme, host name and port | sent |
+| `http://h` → `https://h` (port 80 → 443, or the same port) | sent |
+| `https://h` → `http://h` (downgrade) | dropped |
+| Any other port change on the same host name | dropped |
+| Other host name, including subdomains | dropped |
+
+Each redirect is compared with the probed URL, not with the previous hop, so a redirect back to it has the headers again. Use `redirect_off: true` to follow no redirects at all.
+
+A `Host` header (case-insensitive) overrides the HTTP Host, which is useful for probing a virtual host by IP:
 
 ```yaml
 prober:

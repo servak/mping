@@ -58,10 +58,11 @@ type (
 		SkipVerify *bool `yaml:"skip_verify,omitempty"`
 	}
 
-	// customTransport adds the configured headers. The Host header is handled
-	// specially: it (and the TLS server name, via hostTransport) applies only
-	// to requests for the host the probe started with, never to a redirect
-	// target on another host.
+	// customTransport adds the configured headers. They may carry credentials,
+	// so a redirect target gets them only if keepsHeaders allows it. The Host
+	// header is handled specially: it (and the TLS server name, via
+	// hostTransport) applies only to requests for the host the probe started
+	// with, never to a redirect target on another host.
 	customTransport struct {
 		transport     http.RoundTripper // no Host override: SNI follows the URL host
 		hostTransport http.RoundTripper // ServerName = host override
@@ -69,9 +70,9 @@ type (
 		host          string // resolved Host override; "" if none
 	}
 
-	// origHostKey carries the host of the originally requested URL in the
+	// origURLKey carries the originally requested URL (*url.URL) in the
 	// request context (redirected requests inherit it).
-	origHostKey struct{}
+	origURLKey struct{}
 )
 
 // ShouldSkipVerify reports whether TLS certificate verification should be skipped.
@@ -229,7 +230,7 @@ func (p *HTTPProber) probe(r chan *Event, target string) {
 			}
 		},
 	}
-	ctx := context.WithValue(req.Context(), origHostKey{}, req.URL.Host)
+	ctx := context.WithValue(req.Context(), origURLKey{}, req.URL)
 	req = req.WithContext(httptrace.WithClientTrace(ctx, trace))
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -366,23 +367,61 @@ func (c *customTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	// A RoundTripper must not modify the caller's request.
 	req = req.Clone(req.Context())
-	for k, v := range c.headers {
-		if http.CanonicalHeaderKey(k) == "Host" {
-			continue // handled below
+	orig, _ := req.Context().Value(origURLKey{}).(*url.URL)
+	if orig == nil {
+		orig = req.URL // not part of a probe: nothing to compare with
+	}
+	if keepsHeaders(orig, req.URL) {
+		for k, v := range c.headers {
+			if http.CanonicalHeaderKey(k) == "Host" {
+				continue // handled below
+			}
+			req.Header.Set(k, v)
 		}
-		req.Header.Set(k, v)
 	}
 	tr := c.transport
 	// net/http ignores Header["Host"]; the Host header is taken from req.Host.
 	// Override it (and SNI) only for the original host, not for redirects
 	// that leave it.
-	if c.host != "" {
-		if orig, _ := req.Context().Value(origHostKey{}).(string); orig == "" || orig == req.URL.Host {
-			req.Host = c.host
-			tr = c.hostTransport
-		}
+	if c.host != "" && orig.Host == req.URL.Host {
+		req.Host = c.host
+		tr = c.hostTransport
 	}
 	return tr.RoundTrip(req)
+}
+
+// keepsHeaders reports whether a request for u, reached from a probe of orig,
+// gets the configured headers. The host name must be the same, and:
+//
+//   - with the same scheme, so must be the port;
+//   - http -> https keeps them on the same port or from port 80 to port 443 (a
+//     plain upgrade); other port changes may reach an unrelated service;
+//   - https -> http never keeps them: they would be sent in the clear.
+//
+// Every hop is compared with orig, so a redirect back to it has them again.
+func keepsHeaders(orig, u *url.URL) bool {
+	if !strings.EqualFold(orig.Hostname(), u.Hostname()) {
+		return false
+	}
+	from, to := effectivePort(orig), effectivePort(u)
+	switch {
+	case orig.Scheme == u.Scheme:
+		return from == to
+	case orig.Scheme == "http" && u.Scheme == "https":
+		return from == to || (from == "80" && to == "443")
+	}
+	return false
+}
+
+// effectivePort returns the port of u, or the default one of its scheme.
+func effectivePort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	if u.Scheme == "https" {
+		return "443"
+	}
+	return "80"
 }
 
 // CloseIdleConnections closes idle keep-alive connections of the inner
