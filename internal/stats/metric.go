@@ -302,7 +302,7 @@ func (m *metrics) GetReplyTTL() ReplyTTLStats {
 			s.Min, s.Max = min(s.Min, ttl), max(s.Max, ttl)
 		})
 	}
-	if m.outage != nil {
+	if m.outage != nil && m.outage.ttl != nil {
 		if s.Last == 0 { // no reply left in history: a long outage
 			s.Last = m.outage.ttl.last
 			s.Min, s.Max = s.Last, s.Last

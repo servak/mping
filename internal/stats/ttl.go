@@ -1,7 +1,6 @@
 package stats
 
 import (
-	"slices"
 	"time"
 
 	"github.com/servak/mping/internal/prober"
@@ -13,7 +12,7 @@ const maxTTLChanges = 20
 
 // TTLChange is a confirmed change of the reply TTL (IPv4) / hop limit
 // (IPv6): the new TTL was seen on enough consecutive successful replies
-// (see ttlChangeMinReplies).
+// (see changeTracker).
 type TTLChange struct {
 	Time time.Time // send time of the first reply with the new TTL
 	Old  int
@@ -47,89 +46,39 @@ type ReplyTTLStats struct {
 	ChangeCount int
 }
 
-const (
-	// ttlChangeMinReplies is the number of consecutive successful replies a
-	// new TTL must be seen on before it is recorded as a change (like the 3
-	// consecutive losses that make an outage).
-	ttlChangeMinReplies = 3
-
-	// ttlChangeMinRepliesRecent applies instead when the TTL was already
-	// seen among the ttlRecentReplies replies before the run. Per-packet
-	// load balancing over unequal paths mixes TTLs at random, where runs of
-	// 3 are common (every 14 replies for an even split) but runs of 10 are
-	// rare. A real switch back to a recent path is still recorded, only
-	// later.
-	ttlChangeMinRepliesRecent = 10
-	ttlRecentReplies          = 50
-)
-
-// ttlChangeTracker detects TTL changes between successful replies. It is
-// fed by outageTracker, which applies results in send order once they have
-// settled, so a late reply cannot fake a change.
-//
-// prev is the confirmed TTL. A reply with another TTL starts (or extends)
-// a candidate; once the candidate's TTL has been seen on candNeed
-// consecutive replies it is recorded as a change at the send time of its
-// first reply. A reply with the confirmed TTL drops the candidate. Failures
-// and replies with an unknown TTL change nothing.
+// ttlChangeTracker keeps the reply TTL changes of a target. It is fed by
+// outageTracker, which applies results in send order once they have settled.
 type ttlChangeTracker struct {
-	prev     int // confirmed TTL; 0 until the first reply with a known TTL
-	candTTL  int // candidate TTL; 0 if none
-	candSent time.Time
-	candRun  int
-	candNeed int // candRun needed to record the candidate
-	changes  []TTLChange
-	count    int
-
-	recent [ttlRecentReplies]uint8 // ring of the latest TTLs; 0 = unused
-	next   int                     // next slot of recent
-	last   int                     // latest known TTL
+	tracker changeTracker[uint8]
+	last    int // latest known TTL
+	changes []TTLChange
+	count   int
 }
 
-func (t *ttlChangeTracker) apply(r probeResult) {
-	if !r.success || r.ttl <= 0 || r.ttl > 255 {
-		return
-	}
-	t.detect(r)
+// apply records a reply with a known TTL and returns the change that it
+// confirms, if any.
+func (t *ttlChangeTracker) apply(r probeResult) (TTLChange, bool) {
 	t.last = r.ttl
-	t.recent[t.next] = uint8(r.ttl)
-	t.next = (t.next + 1) % len(t.recent)
-}
-
-// detect applies a reply to prev and the candidate; recent still holds only
-// the replies before it.
-func (t *ttlChangeTracker) detect(r probeResult) {
-	switch {
-	case t.prev == 0:
-		t.prev = r.ttl // the first known TTL is not a change
-		return
-	case r.ttl == t.prev:
-		t.candTTL, t.candRun = 0, 0
-		return
-	case r.ttl == t.candTTL:
-		t.candRun++
-	default:
-		t.candTTL, t.candSent, t.candRun = r.ttl, r.sentTime, 1
-		t.candNeed = ttlChangeMinReplies
-		if slices.Contains(t.recent[:], uint8(r.ttl)) {
-			t.candNeed = ttlChangeMinRepliesRecent
-		}
+	vc, ok := t.tracker.observe(uint8(r.ttl), r.sentTime)
+	if !ok {
+		return TTLChange{}, false
 	}
-	if t.candRun < t.candNeed {
-		return
-	}
-	t.changes = append(t.changes, TTLChange{Time: t.candSent, Old: t.prev, New: t.candTTL})
+	c := TTLChange{Time: vc.Time, Old: int(vc.Old), New: int(vc.New)}
+	t.changes = append(t.changes, c)
 	t.count++
 	if len(t.changes) > maxTTLChanges {
 		t.changes = append([]TTLChange(nil), t.changes[len(t.changes)-maxTTLChanges:]...)
 	}
-	t.prev = t.candTTL
-	t.candTTL, t.candRun = 0, 0
+	return c, true
 }
 
-func (t ttlChangeTracker) clone() ttlChangeTracker {
-	t.changes = append([]TTLChange(nil), t.changes...)
-	return t
+// clone returns a copy to read from; it must not be fed, because it does not
+// copy the state needed to detect further changes.
+func (t *ttlChangeTracker) clone() *ttlChangeTracker {
+	if t == nil {
+		return nil
+	}
+	return &ttlChangeTracker{last: t.last, changes: append([]TTLChange(nil), t.changes...), count: t.count}
 }
 
 // ConnInfo is the peer of the latest response received from an HTTP(S)

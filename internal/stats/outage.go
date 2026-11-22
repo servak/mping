@@ -78,7 +78,7 @@ type outageTracker struct {
 	total   time.Duration
 	longest time.Duration
 
-	ttl ttlChangeTracker
+	ttl *ttlChangeTracker // nil until the first reply with a known TTL
 }
 
 func newOutageTracker(settle time.Duration) *outageTracker {
@@ -133,7 +133,7 @@ func (t *outageTracker) flushUntil(deadline time.Time) {
 }
 
 func (t *outageTracker) apply(r probeResult) {
-	t.ttl.apply(r)
+	t.applyTTL(r)
 	switch {
 	case r.success:
 		t.lostRun = t.lostRun[:0]
@@ -151,6 +151,18 @@ func (t *outageTracker) apply(r probeResult) {
 			t.lostRun = t.lostRun[:0]
 		}
 	}
+}
+
+// applyTTL applies the reply TTL of r. Failures and unknown TTLs change
+// nothing.
+func (t *outageTracker) applyTTL(r probeResult) {
+	if !r.success || r.ttl <= 0 || r.ttl > 255 {
+		return
+	}
+	if t.ttl == nil {
+		t.ttl = &ttlChangeTracker{}
+	}
+	t.ttl.apply(r)
 }
 
 func (t *outageTracker) closeCurrent(end time.Time) {
