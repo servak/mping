@@ -1,6 +1,6 @@
 # Regenerate demo/icmp.gif (run from the repo root):
 #   go build -o mping ./cmd/mping/
-#   sudo chown root mping && sudo chmod u+s mping   # once, so ICMP works without sudo below
+#   # ICMP has to work without sudo: see "Permission" in README.md (nothing to do on macOS)
 #   vhs demo/icmp.tape
 
 Output demo/icmp.gif
