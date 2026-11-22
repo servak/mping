@@ -85,27 +85,34 @@ func TestFormatPathWaitingAndRateLimitColors(t *testing.T) {
 	}
 }
 
-func TestFormatPathProtocolAndPrivilegeNote(t *testing.T) {
+func TestFormatPathProtocolAndHiddenHopsNote(t *testing.T) {
 	theme := shared.PredefinedThemes["dark"]
-	res := &trace.Result{Dst: net.ParseIP("192.0.2.10"), Rounds: 2, Reached: true,
-		Hops: []trace.Hop{{TTL: 1, Addr: "192.0.2.10", Sent: 2, Recv: 2}}}
 	for _, tt := range []struct {
-		proto    trace.Proto
-		header   string
-		wantNote bool
+		name       string
+		proto      trace.Proto
+		privileged bool
+		hidden     bool
+		header     string
 	}{
-		{"", "192.0.2.10[#ffffff] · icmp · 2 rounds", true},
-		{trace.ProtoICMP, "192.0.2.10[#ffffff] · icmp · 2 rounds", true},
-		// The UDP fallbacks see every hop, so no ICMP note
-		{trace.ProtoUDP, "192.0.2.10[#ffffff] · udp · 2 rounds", false},
+		{"default protocol", "", true, false, "192.0.2.10[#ffffff] · icmp · 2 rounds"},
+		{"raw ICMP", trace.ProtoICMP, true, false, "192.0.2.10[#ffffff] · icmp · 2 rounds"},
+		// Unprivileged, but every hop is visible: nothing to warn about
+		{"datagram ICMP", trace.ProtoICMP, false, false, "192.0.2.10[#ffffff] · icmp · 2 rounds"},
+		{"datagram ICMP without ICMP errors", trace.ProtoICMP, false, true, "192.0.2.10[#ffffff] · icmp · 2 rounds"},
+		{"UDP", trace.ProtoUDP, false, false, "192.0.2.10[#ffffff] · udp · 2 rounds"},
 	} {
-		res.Proto = tt.proto
+		res := &trace.Result{Dst: net.ParseIP("192.0.2.10"), Rounds: 2, Reached: true,
+			Proto: tt.proto, Privileged: tt.privileged, HopsHidden: tt.hidden,
+			Hops: []trace.Hop{{TTL: 1, Addr: "192.0.2.10", Sent: 2, Recv: 2}}}
 		got := FormatPath("192.0.2.10", res, nil, &theme)
 		if !strings.Contains(got, tt.header) {
-			t.Errorf("proto %q: header missing %q:\n%s", tt.proto, tt.header, got)
+			t.Errorf("%s: header missing %q:\n%s", tt.name, tt.header, got)
 		}
-		if note := strings.Contains(got, "unprivileged ICMP"); note != tt.wantNote {
-			t.Errorf("proto %q: unprivileged note = %v, want %v", tt.proto, note, tt.wantNote)
+		if note := strings.Contains(got, "hops cannot be seen"); note != tt.hidden {
+			t.Errorf("%s: note about hidden hops = %v, want %v:\n%s", tt.name, note, tt.hidden, got)
+		}
+		if !tt.hidden && strings.Contains(got, "nprivileged") {
+			t.Errorf("%s: warns about privileges:\n%s", tt.name, got)
 		}
 	}
 }

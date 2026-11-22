@@ -7,7 +7,7 @@ import (
 
 // icmpErrnos are the errnos a socket reports for an ICMP error it received
 // (Port / Host / Net Unreachable, Time Exceeded): Linux with IP_RECVERR
-// returns them from the next socket call, see udpTransport.send.
+// returns them from the next socket call, see retrySend.
 var icmpErrnos = append([]syscall.Errno{
 	syscall.ECONNREFUSED, syscall.EHOSTUNREACH, syscall.ENETUNREACH, syscall.EPROTO,
 }, platformICMPErrnos...)

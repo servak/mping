@@ -248,6 +248,8 @@ func newFakeNetwork(branches int) *fakeNetwork {
 
 func (f *fakeNetwork) privileged() bool { return false }
 
+func (f *fakeNetwork) hidesHops() bool { return false }
+
 func (f *fakeNetwork) close() error {
 	select {
 	case <-f.closed:

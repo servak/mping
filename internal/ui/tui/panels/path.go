@@ -137,8 +137,8 @@ func FormatPath(target string, res *trace.Result, err error, theme *shared.Theme
 	if rateLimited {
 		fmt.Fprintf(&sb, "[%s]loss only at intermediate hops is usually router ICMP rate limiting[%s]\n", theme.Secondary, theme.Primary)
 	}
-	if proto == trace.ProtoICMP && !res.Privileged {
-		fmt.Fprintf(&sb, "[%s]unprivileged ICMP: intermediate hops may be missing on Linux[%s]\n", theme.Secondary, theme.Primary)
+	if res.HopsHidden {
+		fmt.Fprintf(&sb, "[%s]unprivileged ICMP without an error queue: intermediate hops cannot be seen[%s]\n", theme.Secondary, theme.Primary)
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }

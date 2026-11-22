@@ -132,10 +132,7 @@ func TestParseReplyRejects(t *testing.T) {
 // transport is open; closing releases it, and closing twice must not release
 // the lease of a later owner of the same ID.
 func TestICMPTransportEchoIDLease(t *testing.T) {
-	alloc := icmpid.New(1, 0, nil)
-	old := acquireID
-	acquireID = alloc.Acquire
-	defer func() { acquireID = old }()
+	alloc := localIDs(t)
 
 	tp, err := newICMPTransport(&net.IPAddr{IP: net.IPv4(127, 0, 0, 1)}, false)
 	if err != nil {

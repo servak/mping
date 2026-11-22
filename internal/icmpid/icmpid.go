@@ -60,13 +60,6 @@ var global = New(uint16(rand.Uint32()), DefaultQuarantine, nil)
 // Default returns the process-wide allocator.
 func Default() *Allocator { return global }
 
-// Acquire takes an ID from the process-wide allocator. See Allocator.Acquire.
-func Acquire() (*Lease, error) { return global.Acquire() }
-
-// Reserve takes the given ID from the process-wide allocator. See
-// Allocator.Reserve.
-func Reserve(id uint16) (*Lease, bool) { return global.Reserve(id) }
-
 // Lease is the ownership of one echo ID. Only the lease can release the ID,
 // and releasing is idempotent, so a double Release never affects a later
 // owner of the same ID.
