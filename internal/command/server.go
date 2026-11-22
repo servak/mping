@@ -29,7 +29,8 @@ func newServerCmd(version string, stderr io.Writer, notify signalSource) *cobra.
 		Use:   "server",
 		Short: "Runs the server of the watches in the foreground",
 		Long: `Runs the server that probes for "mping watch", in the foreground until it is
-interrupted or stopped.`,
+interrupted or stopped. "mping watch start" starts one in the background, so this
+is only needed to run it otherwise, e.g. by systemd.`,
 		Args:              cobra.NoArgs,
 		PersistentPreRunE: checkPlatform,
 		RunE: func(cmd *cobra.Command, _ []string) error {

@@ -47,7 +47,8 @@ func newWatchCmd(version string, stderr io.Writer) *cobra.Command {
 		Use:   "watch",
 		Short: "Probes in the background, with results to read at any time",
 		Long: `Probes in the background: a watch goes on until its end when the terminal is
-closed, and its results can be read during and after it. "mping server" does this.`,
+closed, and its results can be read during and after it. The server that does
+this is started when needed.`,
 		Example: `mping watch start --name switch-update --for 2h 10.0.0.0/28 https://example.com
 mping watch ls
 mping watch show switch-update
@@ -73,7 +74,7 @@ mping watch stop switch-update`,
 		return nil
 	})
 
-	start := add("start --name NAME TARGET...", "Starts a watch", cobra.ArbitraryArgs, (*watchCmd).start)
+	start := add("start --name NAME TARGET...", "Starts a watch, and the server if none is running", cobra.ArbitraryArgs, (*watchCmd).start)
 	start.Flags().String("name", "", "name of the watch")
 	start.MarkFlagRequired("name")
 	start.Flags().String("for", "2h", "duration, e.g. 90m, 2h, 1d12h (at most 7d)")
@@ -175,13 +176,21 @@ func (w *watchCmd) start() error {
 	if req.Targets, err = collectTargets(w.args, w.flag("filename")); err != nil {
 		return err
 	}
+	// No server is started for nothing
 	if req.Name == "" {
 		return errors.New("the name is empty")
 	}
 	if len(req.Targets) == 0 {
 		return errors.New("no targets: please set hostname or ip")
 	}
-	created, err := w.Create(w.ctx, req)
+	var created api.Watch
+	if w.given {
+		created, err = w.Create(w.ctx, req)
+	} else {
+		created, err = w.CreateAutoStart(w.ctx, req, func(pid int) {
+			fmt.Fprintf(w.stderr, "started the server (pid %d)\n", pid)
+		})
+	}
 	if err != nil {
 		return err
 	}

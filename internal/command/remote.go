@@ -86,7 +86,7 @@ func (r *remote) explain(err error) error {
 	var e *api.Error
 	switch {
 	case errors.Is(err, client.ErrNotRunning) && !r.given:
-		return fmt.Errorf("%w; \"mping server\" runs it", client.ErrNotRunning)
+		return fmt.Errorf("%w; \"mping watch start\" starts it", client.ErrNotRunning)
 	case errors.As(err, &e) && len(e.Targets) > 0:
 		var b strings.Builder
 		for _, t := range e.Targets {

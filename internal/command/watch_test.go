@@ -234,7 +234,7 @@ func TestWatchCommands(t *testing.T) {
 		t.Error(out, errOut, err)
 	}
 	for _, args := range []string{"show x", "events x", "events -F x", "extend --for 1h x", "stop x", "rm x"} {
-		wantErr(t, `not running; "mping server" runs it`, append([]string{"watch"}, strings.Fields(args)...)...)
+		wantErr(t, `not running; "mping watch start" starts it`, append([]string{"watch"}, strings.Fields(args)...)...)
 	}
 }
 

@@ -1,7 +1,8 @@
 //go:build e2e
 
 // Package e2e runs the real mping binary ("mping batch -o json") against
-// servers started on loopback and checks the reported statistics.
+// servers started on loopback and checks the reported statistics, and watches
+// with mping servers of their own.
 //
 //	go test -tags e2e -v ./test/e2e/
 //
