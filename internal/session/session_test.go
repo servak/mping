@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -376,5 +377,55 @@ func TestStopSettlesMetrics(t *testing.T) {
 	}
 	if n := len(m.GetOutages()); n != 1 {
 		t.Errorf("%d outages after Stop, want 1", n)
+	}
+}
+
+// Sessions that ping the same address at the same time, with the same sequence
+// numbers, each get the replies to their own requests, which are told apart by
+// their body, and only those.
+func TestIntegrationSessionsSameTarget(t *testing.T) {
+	needICMP(t)
+	for probe, addr := range map[prober.ProbeType]string{prober.ICMPV4: "127.0.0.1", prober.ICMPV6: "::1"} {
+		t.Run(string(probe), func(t *testing.T) {
+			if probe == prober.ICMPV6 && os.Getenv("MPING_IT_STRICT") != "1" {
+				ln, err := net.Listen("tcp", "[::1]:0")
+				if err != nil {
+					t.Skip(err)
+				}
+				ln.Close()
+			}
+			ids := icmpid.Default().Held()
+			var sessions []*Session
+			for i := range 3 {
+				cfg := config.DefaultConfig()
+				cfg.Prober[string(probe)].ICMP.Body = fmt.Sprint("session ", i)
+				p := params(cfg, string(probe)+"://"+addr)
+				p.Interval = 50 * time.Millisecond // macOS answers only some 500 echo requests per second
+				sessions = append(sessions, mustNew(t, p))
+			}
+			if n := icmpid.Default().Held() - ids; n != len(sessions) {
+				t.Errorf("%d echo IDs for %d sessions", n, len(sessions))
+			}
+			for _, s := range sessions {
+				s.Start(context.Background())
+			}
+			waitTotal(t, 15, sessions...)
+			for i, s := range sessions {
+				stop(t, s)
+				m := only(t, s)
+				if m.GetSuccessful() != m.GetTotal() {
+					t.Errorf("session %d: %d sent, %d successful, %d failed (%s)", i,
+						m.GetTotal(), m.GetSuccessful(), m.GetFailed(), m.GetLastFailDetail())
+				}
+				for _, e := range m.GetRecentHistory(stats.DefaultHistorySize) {
+					if e.Details == nil || e.Details.ICMP == nil {
+						t.Fatalf("session %d: result without ICMP details: %+v", i, e)
+					}
+					if got, want := e.Details.ICMP.Payload, fmt.Sprint("session ", i); got != want {
+						t.Errorf("session %d got the reply %q", i, got)
+					}
+				}
+			}
+		})
 	}
 }
