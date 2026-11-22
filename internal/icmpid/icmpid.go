@@ -7,7 +7,7 @@
 // one prober or tracer apart from another's. Drawing all IDs from one
 // allocator guarantees that the IDs held at the same time within a process
 // are distinct. The IDs of datagram sockets on Linux are chosen by the
-// kernel; the probers Reserve those.
+// kernel; their users Reserve those.
 //
 // IDs are handed out by a cursor that starts at a random per-process base, so
 // concurrent mping processes rarely pick the same IDs (PID-derived IDs
@@ -56,6 +56,9 @@ func New(base uint16, quarantine time.Duration, now func() time.Time) *Allocator
 }
 
 var global = New(uint16(rand.Uint32()), DefaultQuarantine, nil)
+
+// Default returns the process-wide allocator.
+func Default() *Allocator { return global }
 
 // Acquire takes an ID from the process-wide allocator. See Allocator.Acquire.
 func Acquire() (*Lease, error) { return global.Acquire() }

@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/servak/mping/internal/icmpid"
+	"github.com/servak/mping/internal/icmpsock"
 )
 
 // integrationProber opens a prober on a real socket of the type that
@@ -310,11 +311,11 @@ func TestIntegrationICMPProberKernelID(t *testing.T) {
 	if runtime.GOOS != "linux" || p.sock.typ != datagramSocket {
 		t.Skip("Linux datagram sockets only")
 	}
-	id := kernelEchoID(icmpConnOf(t, p))
+	id := icmpsock.KernelEchoID(icmpConnOf(t, p))
 	if id == 0 || int(id) != p.runID {
 		t.Errorf("kernel echo ID %#x, prober has %#x", id, p.runID)
 	}
-	if l, ok := icmpid.Reserve(id); ok {
+	if l, ok := icmpid.Default().Reserve(id); ok {
 		l.Release()
 		t.Error("the ID of the open socket is still free")
 	}
