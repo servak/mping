@@ -171,12 +171,7 @@ mping batch --max-loss 20 -f hosts.txt || echo "some targets are unhealthy"`,
 			// Stop probing
 			sess.Stop()
 			fmt.Fprint(progress, "\r\033[K")
-			var runErr error
-			select {
-			case err := <-probeErr:
-				runErr = fmt.Errorf("probe manager: %w", err)
-			default:
-			}
+			runErr := runError(probeErr)
 
 			metrics := sess.Metrics().SortBy(stats.Success, true)
 			if err := shared.WriteReport(cmd.OutOrStdout(), output, metrics, stats.Success, true); err != nil {

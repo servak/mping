@@ -54,6 +54,36 @@ func stop(t *testing.T, s *Session) {
 	}
 }
 
+// ended returns what the channel of a Start yields until it is closed, and
+// fails the test if that does not happen.
+func ended(t *testing.T, errCh <-chan error) (errs []error) {
+	t.Helper()
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case err, ok := <-errCh:
+			if !ok {
+				return errs
+			}
+			errs = append(errs, err)
+		case <-timeout:
+			t.Fatal("the channel of Start was not closed")
+		}
+	}
+}
+
+// startFails checks that s cannot be started, which is known at once.
+func startFails(t *testing.T, s *Session, want error) {
+	t.Helper()
+	errCh := s.Start(context.Background())
+	if n := len(errCh); n != 1 {
+		t.Errorf("Start reported %d errors at once, want 1", n)
+	}
+	if errs := ended(t, errCh); len(errs) != 1 || !errors.Is(errs[0], want) {
+		t.Errorf("Start reported %v, want only %v", errs, want)
+	}
+}
+
 // only returns the metrics of the single target of s.
 func only(t *testing.T, s *Session) stats.Metrics {
 	t.Helper()
@@ -427,11 +457,25 @@ func TestIntegrationStopReleasesAll(t *testing.T) {
 			"stop without start": func(t *testing.T, s *Session) { stopped(t, s) },
 			"start after stop": func(t *testing.T, s *Session) {
 				stopped(t, s)
-				s.Start(context.Background())
+				startFails(t, s, ErrStopped)
 			},
 			"stop at once": func(t *testing.T, s *Session) {
-				s.Start(context.Background())
+				errCh := s.Start(context.Background())
 				stopped(t, s)
+				if errs := ended(t, errCh); len(errs) != 0 {
+					t.Errorf("Start reported %v", errs)
+				}
+			},
+			"stop at the same time": func(t *testing.T, s *Session) {
+				var wg sync.WaitGroup
+				wg.Go(func() { s.Stop() })
+				// Start comes before or after
+				for _, err := range ended(t, s.Start(context.Background())) {
+					if !errors.Is(err, ErrStopped) {
+						t.Errorf("Start reported %v", err)
+					}
+				}
+				wg.Wait()
 			},
 			"stop while probing": func(t *testing.T, s *Session) {
 				s.Start(context.Background())
@@ -449,36 +493,37 @@ func TestIntegrationStopReleasesAll(t *testing.T) {
 			},
 			"context done": func(t *testing.T, s *Session) {
 				ctx, cancel := context.WithCancel(context.Background())
-				s.Start(ctx)
+				errCh := s.Start(ctx)
 				probed(t, s)
 				cancel()
+				if errs := ended(t, errCh); len(errs) != 0 {
+					t.Errorf("Start reported %v", errs)
+				}
 				select {
 				case <-s.done:
-				case <-time.After(5 * time.Second):
-					t.Fatal("session did not end with its context")
+				default:
+					t.Error("metrics not settled when the run has ended")
 				}
 				if n := icmpid.Default().Held(); n != base {
 					t.Errorf("%d ICMP echo IDs held after the context, want %d", n, base)
 				}
+				startFails(t, s, ErrStopped)
 			},
 			"started twice": func(t *testing.T, s *Session) {
 				first := s.Start(context.Background())
 				probed(t, s)
-				select {
-				case err := <-s.Start(context.Background()):
-					if err == nil {
-						t.Error("second Start reported a nil error")
-					}
-				case <-time.After(5 * time.Second):
-					t.Error("second Start was not rejected")
-				}
+				startFails(t, s, ErrStarted)
 				s.Start(context.Background()) // nobody reads its error
-				stopped(t, s)
 				select {
-				case err := <-first:
-					t.Errorf("first Start: %v", err)
+				case err, ok := <-first:
+					t.Errorf("first Start: %v, closed: %v", err, !ok)
 				default:
 				}
+				stopped(t, s)
+				if errs := ended(t, first); len(errs) != 0 {
+					t.Errorf("first Start reported %v", errs)
+				}
+				startFails(t, s, ErrStopped)
 			},
 		} {
 			t.Run(name, func(t *testing.T) {
@@ -497,6 +542,92 @@ func TestIntegrationStopReleasesAll(t *testing.T) {
 		needICMP(t)
 		run(t, []string{"127.0.0.1"})
 	})
+}
+
+// fakeProbes is a ProbeManager whose Run returns err, once run is closed or the
+// manager is stopped.
+type fakeProbes struct {
+	prober.ProbeManager // the methods that are not called
+	run                 chan struct{}
+	err                 error
+	events              chan *prober.Event
+	stop                func()
+}
+
+func (p *fakeProbes) Events() <-chan *prober.Event { return p.events }
+func (p *fakeProbes) Stop()                        { p.stop() }
+
+func (p *fakeProbes) Run(context.Context, time.Duration, time.Duration) error {
+	<-p.run
+	return p.err
+}
+
+// fakeSession returns a session on a fakeProbes, which ends when run is closed.
+func fakeSession(err error) (s *Session, run chan struct{}) {
+	p := &fakeProbes{run: make(chan struct{}), err: err, events: make(chan *prober.Event)}
+	p.stop = sync.OnceFunc(func() {
+		time.Sleep(20 * time.Millisecond)
+		close(p.events)
+	})
+	mm := stats.NewMetricsManagerWithOptions(stats.Options{})
+	return &Session{probes: p, metrics: mm, done: mm.Subscribe(p.Events())}, p.run
+}
+
+// A run that ends by itself, with an error, stops the session and closes the
+// channel after yielding the error.
+func TestRunError(t *testing.T) {
+	want := errors.New("no sockets left")
+	s, run := fakeSession(want)
+	errCh := s.Start(context.Background())
+	select {
+	case err := <-errCh:
+		t.Fatalf("Start reported %v while running", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(run)
+	if errs := ended(t, errCh); len(errs) != 1 || !errors.Is(errs[0], want) {
+		t.Errorf("Start reported %v, want only %v", errs, want)
+	}
+	select {
+	case <-s.done:
+	default:
+		t.Error("metrics not settled when the run has ended")
+	}
+	startFails(t, s, ErrStopped)
+	stop(t, s)
+}
+
+// The error of a run need not be read, nor does it keep Stop from returning.
+func TestRunErrorUnread(t *testing.T) {
+	checkLeaks(t, func(t *testing.T) {
+		s, run := fakeSession(errors.New("no sockets left"))
+		s.Start(context.Background())
+		stop(t, s)
+		close(run)
+	})
+}
+
+// Every concurrent Stop returns only when stopping is complete.
+func TestConcurrentStops(t *testing.T) {
+	silent := silentServer(t) // a probe is waiting until its timeout
+	p := params(config.DefaultConfig(), "http://"+silent)
+	p.Interval, p.Timeout = time.Minute, 200*time.Millisecond
+	s := mustNew(t, p)
+	errCh := s.Start(context.Background())
+	waitTotal(t, 1, s)
+	var wg sync.WaitGroup
+	for range 5 {
+		wg.Go(func() {
+			s.Stop()
+			if m := only(t, s); m.GetFailed() != 1 {
+				t.Errorf("Stop returned with %d of %d results", m.GetFailed(), m.GetTotal())
+			}
+		})
+	}
+	wg.Wait()
+	if errs := ended(t, errCh); len(errs) != 0 {
+		t.Errorf("Start reported %v", errs)
+	}
 }
 
 // Results settle for as long as one may still arrive out of order, which the
