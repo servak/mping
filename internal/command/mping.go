@@ -74,7 +74,9 @@ mping dns://8.8.8.8/google.com`,
 			notifier := beep.NewNotifier()
 			defer notifier.Close()
 
-			sess, err := session.New(session.Params{
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			sess, err := session.New(ctx, session.Params{
 				Config:          cfg,
 				Targets:         hosts,
 				SourceInterface: sourceInterface,
@@ -86,8 +88,6 @@ mping dns://8.8.8.8/google.com`,
 				return err
 			}
 
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
 			probeErr := sess.Start(ctx)
 
 			startTUI(sess.Metrics(), notifier, cfg.UI, interval, timeout)
@@ -97,10 +97,8 @@ mping dns://8.8.8.8/google.com`,
 
 			// A ProbeManager failure is reported only now: printing while
 			// the TUI owns the screen would corrupt the display.
-			select {
-			case err := <-probeErr:
-				return fmt.Errorf("probe manager: %w", err)
-			default:
+			if err := runError(probeErr); err != nil {
+				return err
 			}
 
 			// Final results
@@ -118,6 +116,15 @@ mping dns://8.8.8.8/google.com`,
 	flags.IntP("timeout", "t", 1000, "timeout(ms)")
 
 	return cmd
+}
+
+// runError waits for the end of a run and returns its error, if any, from the
+// channel of Session.Start.
+func runError(probeErr <-chan error) error {
+	if err := <-probeErr; err != nil {
+		return fmt.Errorf("probe manager: %w", err)
+	}
+	return nil
 }
 
 // applyTitle overrides the configured UI title only when --title was given,

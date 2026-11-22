@@ -1,6 +1,7 @@
 package command
 
 import (
+	"errors"
 	"github.com/servak/mping/internal/config"
 	"github.com/spf13/pflag"
 	"os"
@@ -51,6 +52,19 @@ func TestPingCmdNoArgsShowsHelp(t *testing.T) {
 	cmd.SetArgs([]string{"-c", emptyConfig(t)})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("no args should show help without error, got %v", err)
+	}
+}
+
+func TestRunError(t *testing.T) {
+	failed := errors.New("no sockets left")
+	ch := make(chan error, 1)
+	ch <- failed
+	close(ch)
+	if err := runError(ch); !errors.Is(err, failed) || err.Error() != "probe manager: no sockets left" {
+		t.Errorf("runError() = %v", err)
+	}
+	if err := runError(ch); err != nil { // closed without an error
+		t.Errorf("runError() = %v, want nil", err)
 	}
 }
 

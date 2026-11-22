@@ -158,7 +158,7 @@ func TestLoadedHTTPSConfigProbesTLSServer(t *testing.T) {
 				t.Fatalf("Load: %v", err)
 			}
 			pm := prober.NewProbeManager(cfg.Prober, cfg.Default)
-			if err := pm.AddTargets(tt.target); err != nil {
+			if err := pm.AddTargets(context.Background(), tt.target); err != nil {
 				t.Fatalf("AddTargets: %v", err)
 			}
 			ctx, cancel := context.WithCancel(context.Background())

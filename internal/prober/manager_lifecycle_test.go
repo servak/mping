@@ -2,6 +2,9 @@ package prober
 
 import (
 	"context"
+	"errors"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,6 +15,7 @@ import (
 type fakeProber struct {
 	loop      *runLoop
 	stopDelay time.Duration
+	startErr  error // of Start, which then does not run
 	started   atomic.Bool
 	stopped   atomic.Bool
 }
@@ -22,12 +26,19 @@ func newFakeProber(stopDelay time.Duration) *fakeProber {
 
 func (p *fakeProber) Accept(string) error { return nil }
 
+func (p *fakeProber) prepare(context.Context, resolver, string, bool) (func(), error) {
+	return func() {}, nil
+}
+
 func (p *fakeProber) Start(r chan *Event, _, _ time.Duration) error {
 	ok, err := p.loop.begin()
 	if !ok {
 		return err
 	}
 	defer p.loop.finish()
+	if p.startErr != nil {
+		return p.startErr
+	}
 	p.started.Store(true)
 	<-p.loop.stopping()
 	time.Sleep(p.stopDelay)
@@ -128,7 +139,7 @@ func TestProbeManagerRunWithoutProbers(t *testing.T) {
 	if err := pm.Run(context.Background(), time.Hour, time.Second); err == nil {
 		t.Fatal("Run() without probers error = nil")
 	}
-	if err := pm.AddTargets("http://127.0.0.1/"); err != nil {
+	if err := pm.AddTargets(context.Background(), "http://127.0.0.1/"); err != nil {
 		t.Errorf("AddTargets after failed Run: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -184,5 +195,90 @@ func TestProbeManagerStopRacesRun(t *testing.T) {
 		if !eventsClosed(pm, time.Second) {
 			t.Fatal("event channel not closed")
 		}
+	}
+}
+
+// A prober that cannot start ends the run: the others are stopped too and Run
+// returns the errors of all that failed.
+func TestProbeManagerRunReturnsStartErrors(t *testing.T) {
+	err1, err2 := errors.New("no socket"), errors.New("no buffers")
+	failing := func(err error) *fakeProber {
+		p := newFakeProber(0)
+		p.startErr = err
+		return p
+	}
+	for name, tc := range map[string]struct {
+		probers []*fakeProber
+		want    string
+	}{
+		"none":         {[]*fakeProber{newFakeProber(0), newFakeProber(0)}, ""},
+		"one of three": {[]*fakeProber{newFakeProber(0), failing(err1), newFakeProber(0)}, "prober b: no socket"},
+		"all":          {[]*fakeProber{failing(err1), failing(err2)}, "prober a: no socket\nprober b: no buffers"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var probers []Prober
+			for _, p := range tc.probers {
+				probers = append(probers, p)
+			}
+			pm := newFakeManager(probers...)
+			done := runAsync(pm, context.Background())
+			if tc.want == "" {
+				time.Sleep(20 * time.Millisecond)
+				pm.Stop()
+			}
+			var err error
+			select {
+			case err = <-done:
+			case <-time.After(stopBudget):
+				t.Fatal("Run did not end")
+			}
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			// The second of two that fail may be stopped before it starts
+			if got != tc.want && (got == "" || !strings.Contains(tc.want, got)) {
+				t.Errorf("Run() error = %q, want %q", got, tc.want)
+			}
+			if err != nil && !errors.Is(err, err1) && !errors.Is(err, err2) {
+				t.Errorf("Run() error = %v, does not wrap that of Start", err)
+			}
+			for i, p := range tc.probers {
+				if !p.stopped.Load() {
+					t.Errorf("prober %d was not stopped", i)
+				}
+			}
+			if !eventsClosed(pm, time.Second) {
+				t.Error("event channel not closed")
+			}
+		})
+	}
+}
+
+// Every concurrent Stop returns only when stopping is complete.
+func TestProbeManagerConcurrentStops(t *testing.T) {
+	fp := newFakeProber(100 * time.Millisecond)
+	pm := newFakeManager(fp)
+	done := runAsync(pm, context.Background())
+	for !fp.started.Load() {
+		time.Sleep(time.Millisecond)
+	}
+	var wg sync.WaitGroup
+	for range 5 {
+		wg.Go(func() {
+			pm.Stop()
+			if !fp.stopped.Load() {
+				t.Error("Stop returned before the prober was stopped")
+			}
+			select {
+			case <-pm.Events(): // closed; there are no events
+			default:
+				t.Error("Stop returned before the event channel was closed")
+			}
+		})
+	}
+	wg.Wait()
+	if err := <-done; err != nil {
+		t.Errorf("Run() error = %v", err)
 	}
 }

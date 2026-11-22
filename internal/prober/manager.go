@@ -2,15 +2,20 @@ package prober
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
+	"net"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // ProbeManager manages the lifecycle of probing operations
 type ProbeManager interface {
-	AddTargets(targets ...string) error
+	AddTargets(ctx context.Context, targets ...string) error
 	Run(ctx context.Context, interval, timeout time.Duration) error
 	Events() <-chan *Event
 	Stop()
@@ -22,6 +27,8 @@ type ProbeManager interface {
 type probeManager struct {
 	config      map[string]*ProberConfig
 	defaultType string
+	resolver    resolver
+	addMu       sync.Mutex // serialises AddTargets; taken before mu
 	probers     map[string]Prober
 	eventChan   chan *Event
 	wg          sync.WaitGroup
@@ -36,35 +43,181 @@ func NewProbeManager(proberConfigs map[string]*ProberConfig, defaultType string)
 	return &probeManager{
 		config:      proberConfigs,
 		defaultType: defaultType,
+		resolver:    net.DefaultResolver,
 		eventChan:   make(chan *Event, 1000), // Buffered channel for events
 		probers:     make(map[string]Prober),
 	}
 }
 
-// AddTargets adds targets to appropriate probers
-func (pm *probeManager) AddTargets(targets ...string) error {
+// maxLookups is how many targets AddTargets resolves at the same time.
+const maxLookups = 32
+
+// candidate is a target that AddTargets is to add.
+type candidate struct {
+	target     string // as given
+	routed     string // with the scheme of its prober
+	proberType string
+	prober     Prober
+	plain      bool   // given without a scheme
+	add        func() // adds the target to its prober; nil if err
+	err        error
+}
+
+// AddTargets adds targets to the probers of their types: all of them, or none
+// if it fails. Names are resolved concurrently, but the outcome is that of
+// adding the targets one by one in the given order.
+//
+// Every target that cannot be probed is reported, as TargetErrors. A prober
+// that cannot be created is not the fault of its targets: it is reported once,
+// as ProberError, and its targets are not checked. Errors of both kinds are
+// joined.
+//
+// When ctx is done AddTargets returns its error at once, even if a lookup
+// hangs. Stop does not wait for AddTargets, which then fails.
+func (pm *probeManager) AddTargets(ctx context.Context, targets ...string) (err error) {
+	pm.addMu.Lock()
+	defer pm.addMu.Unlock()
+
+	pm.mu.Lock()
+	err = pm.checkAddable()
+	probers := maps.Clone(pm.probers)
+	pm.mu.Unlock()
+	if err != nil {
+		return err
+	}
+
+	// Nobody knows the new probers until the targets are added, so they have
+	// to be released here if that fails
+	created := make(map[string]Prober)
+	defer func() {
+		if err != nil {
+			for _, p := range created {
+				p.Stop()
+			}
+		}
+	}()
+
+	var errs []error
+	candidates := make([]*candidate, 0, len(targets))
+	for _, target := range targets {
+		c := &candidate{target: target, plain: !hasScheme(target, pm.config)}
+		c.routed, c.proberType = pm.transformTarget(target)
+		if c.proberType == "" {
+			c.err = fmt.Errorf("unable to determine prober type for target: %s", target)
+			candidates = append(candidates, c)
+			continue
+		}
+		p, known := probers[c.proberType]
+		if !known {
+			var err error
+			if p, err = pm.newProber(c.proberType); err != nil {
+				errs = append(errs, ProberError{Prober: c.proberType, Err: err})
+			} else {
+				created[c.proberType] = p
+			}
+			probers[c.proberType] = p // nil if it failed, so that it is not tried again
+		}
+		if p != nil {
+			c.prober = p
+			candidates = append(candidates, c)
+		}
+	}
+
+	if err := prepareAll(ctx, pm.resolver, candidates); err != nil {
+		return err
+	}
+	if failed := targetErrors(candidates); len(failed) > 0 {
+		errs = append(errs, failed)
+	}
+	switch len(errs) {
+	case 0:
+	case 1:
+		return errs[0]
+	default:
+		return errors.Join(errs...)
+	}
+
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
+	if err := pm.checkAddable(); err != nil {
+		return err
+	}
+	for _, c := range candidates {
+		c.add()
+	}
+	maps.Copy(pm.probers, created)
+	return nil
+}
 
+// checkAddable returns an error if targets can no longer be added. pm.mu must
+// be held.
+func (pm *probeManager) checkAddable() error {
 	if pm.started {
 		return fmt.Errorf("ProbeManager is already running")
 	}
 	if pm.stopped {
 		return fmt.Errorf("ProbeManager is stopped")
 	}
+	return nil
+}
 
-	// Route each target to appropriate prober
-	for _, target := range targets {
-		if err := pm.routeTarget(target); err != nil {
-			return fmt.Errorf("failed to route target %s: %w", target, err)
+// prepareAll prepares the candidates that have not failed yet, maxLookups at a
+// time. It returns the error of ctx as soon as that is done, after which the
+// candidates must not be used: lookups that do not return yet may still write
+// to them.
+func prepareAll(ctx context.Context, r resolver, candidates []*candidate) error {
+	var next atomic.Int64
+	var workers sync.WaitGroup
+	for range min(maxLookups, len(candidates)) {
+		workers.Go(func() {
+			for ctx.Err() == nil {
+				i := int(next.Add(1)) - 1
+				if i >= len(candidates) {
+					return
+				}
+				c := candidates[i]
+				if c.err != nil {
+					continue
+				}
+				if c.add, c.err = c.prober.prepare(ctx, r, c.routed, c.plain); c.err != nil {
+					c.err = fmt.Errorf("prober %s rejected target %s: %w", c.proberType, c.routed, c.err)
+				}
+			}
+		})
+	}
+	done := make(chan struct{})
+	go func() {
+		workers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+	return ctx.Err()
+}
+
+// targetErrors returns the errors of the candidates, in their order. A target
+// that was given several times is reported once.
+func targetErrors(candidates []*candidate) TargetErrors {
+	var errs TargetErrors
+	seen := make(map[string]bool)
+	for _, c := range candidates {
+		if c.err != nil && !seen[c.target] {
+			seen[c.target] = true
+			errs = append(errs, TargetError{Target: c.target, Err: c.err})
 		}
 	}
-
-	return nil
+	return errs
 }
 
 // Run starts the probers and blocks until ctx is done or Stop is called. It
 // returns nil at once when Stop was called before.
+//
+// A prober that cannot start ends the run, rather than leave its targets
+// unprobed: Run stops all probers and returns the errors of those that failed.
+// (The only error of the probers of this package is a second Start, which a
+// manager never makes.)
 func (pm *probeManager) Run(ctx context.Context, interval, timeout time.Duration) error {
 	pm.mu.Lock()
 	if pm.started {
@@ -83,24 +236,29 @@ func (pm *probeManager) Run(ctx context.Context, interval, timeout time.Duration
 
 	// Create cancelable context for this run
 	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	pm.cancel = cancel
 
 	// Start all probers under the lock, so that a concurrent Stop either
 	// sees none of them or waits for all of them
-	for _, prober := range pm.probers {
-		pm.wg.Add(1)
-		go func(p Prober) {
-			defer pm.wg.Done()
-			p.Start(pm.eventChan, interval, timeout)
-		}(prober)
+	names := slices.Sorted(maps.Keys(pm.probers))
+	errs := make([]error, len(names))
+	for i, name := range names {
+		p := pm.probers[name]
+		pm.wg.Go(func() {
+			if err := p.Start(pm.eventChan, interval, timeout); err != nil {
+				errs[i] = fmt.Errorf("prober %s: %w", name, err)
+				cancel()
+			}
+		})
 	}
 	pm.mu.Unlock()
 
-	// Wait for context cancellation (Stop cancels it too)
+	// Wait for context cancellation (Stop and a failed prober cancel it too)
 	<-runCtx.Done()
-	pm.Stop()
+	pm.Stop() // waits for all probers, so errs is complete
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // Events returns the event channel for receiving probe results
@@ -109,7 +267,8 @@ func (pm *probeManager) Events() <-chan *Event {
 }
 
 // Stop stops all probers, waits for them to finish and closes the event
-// channel. It may be called before Run and any number of times.
+// channel. It may be called before Run and any number of times, also
+// concurrently: each call returns only when all of that is done.
 func (pm *probeManager) Stop() {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
@@ -137,42 +296,6 @@ func (pm *probeManager) Stop() {
 
 	// Close event channel
 	close(pm.eventChan)
-}
-
-// routeTarget routes a single target to appropriate prober, creating prober if needed
-func (pm *probeManager) routeTarget(target string) error {
-	// Transform target with appropriate prefix
-	transformedTarget, proberType := pm.transformTarget(target)
-	if proberType == "" {
-		return fmt.Errorf("unable to determine prober type for target: %s", target)
-	}
-
-	// Get or create prober for this type
-	prober, err := pm.getOrCreateProber(proberType)
-	if err != nil {
-		return fmt.Errorf("failed to get prober for %s: %w", proberType, err)
-	}
-
-	// Accept transformed target in prober (prober handles its own prefix).
-	// A target written without a scheme went to the default prober; one
-	// that shows such targets differently is told so.
-	if pa, ok := prober.(plainAccepter); ok && !hasScheme(target, pm.config) {
-		err = pa.acceptPlain(transformedTarget)
-	} else {
-		err = prober.Accept(transformedTarget)
-	}
-	if err != nil {
-		return fmt.Errorf("prober %s rejected target %s: %w", proberType, transformedTarget, err)
-	}
-
-	return nil
-}
-
-// plainAccepter is implemented by probers that name the targets written
-// without a scheme (and routed to them as the default prober) differently
-// from those written with their scheme.
-type plainAccepter interface {
-	acceptPlain(target string) error
 }
 
 // hasScheme reports whether target names its prober: "name://target", or
@@ -223,45 +346,30 @@ func (pm *probeManager) transformTarget(target string) (string, string) {
 	return target, ""
 }
 
-// getOrCreateProber gets existing prober or creates new one
-func (pm *probeManager) getOrCreateProber(proberType string) (Prober, error) {
-	// Check if prober already exists
-	if prober, exists := pm.probers[proberType]; exists {
-		return prober, nil
-	}
-
-	// Get config for this prober type
+// newProber creates the prober of a type (a name in the config).
+func (pm *probeManager) newProber(proberType string) (Prober, error) {
 	config, exists := pm.config[proberType]
 	if !exists {
 		return nil, fmt.Errorf("no configuration found for prober type: %s", proberType)
 	}
 
 	// Create new prober based on config.Probe field (not the proberType name)
-	var prober Prober
-	var err error
-
 	switch config.Probe {
-	case ICMPV4:
-		prober, err = NewICMPProber(ICMPV4, config.ICMP, proberType)
-	case ICMPV6:
-		prober, err = NewICMPProber(ICMPV6, config.ICMP, proberType)
+	case ICMPV4, ICMPV6:
+		p, err := NewICMPProber(config.Probe, config.ICMP, proberType)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create %s prober: %w", proberType, err)
+		}
+		return p, nil
 	case HTTP, HTTPS: // Both HTTP and HTTPS use HTTPProber (scheme rules: see HTTPProber.resolveURL)
-		prober = NewHTTPProber(config.Probe, config.HTTP, proberType)
+		return NewHTTPProber(config.Probe, config.HTTP, proberType), nil
 	case TCP:
-		prober = NewTCPProber(config.TCP, proberType)
+		return NewTCPProber(config.TCP, proberType), nil
 	case DNS:
-		prober = NewDNSProber(config.DNS, proberType)
+		return NewDNSProber(config.DNS, proberType), nil
 	case NTP:
-		prober = NewNTPProber(config.NTP, proberType)
+		return NewNTPProber(config.NTP, proberType), nil
 	default:
 		return nil, fmt.Errorf("unknown probe type in config: %s", config.Probe)
 	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to create %s prober: %w", proberType, err)
-	}
-
-	// Store the prober
-	pm.probers[proberType] = prober
-	return prober, nil
 }

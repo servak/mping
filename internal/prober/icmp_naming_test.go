@@ -1,6 +1,7 @@
 package prober
 
 import (
+	"context"
 	"net/url"
 	"testing"
 
@@ -75,7 +76,7 @@ func TestICMPCustomDefaultPlainTargets(t *testing.T) {
 	pm := NewProbeManager(config, "ping").(*probeManager)
 	p := newTestProber(t, ICMPV4, newFakeICMPConn(), nil, "ping")
 	pm.probers["ping"] = p
-	if err := pm.AddTargets("127.0.0.1", "ping://127.0.0.2", "ping:127.0.0.3"); err != nil {
+	if err := pm.AddTargets(context.Background(), "127.0.0.1", "ping://127.0.0.2", "ping:127.0.0.3"); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]icmpTarget{

@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,7 +31,7 @@ func params(cfg *config.Config, targets ...string) Params {
 
 func mustNew(t *testing.T, p Params) *Session {
 	t.Helper()
-	s, err := New(p)
+	s, err := New(context.Background(), p)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,6 +51,36 @@ func stop(t *testing.T, s *Session) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Error("Stop did not return")
+	}
+}
+
+// ended returns what the channel of a Start yields until it is closed, and
+// fails the test if that does not happen.
+func ended(t *testing.T, errCh <-chan error) (errs []error) {
+	t.Helper()
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case err, ok := <-errCh:
+			if !ok {
+				return errs
+			}
+			errs = append(errs, err)
+		case <-timeout:
+			t.Fatal("the channel of Start was not closed")
+		}
+	}
+}
+
+// startFails checks that s cannot be started, which is known at once.
+func startFails(t *testing.T, s *Session, want error) {
+	t.Helper()
+	errCh := s.Start(context.Background())
+	if n := len(errCh); n != 1 {
+		t.Errorf("Start reported %d errors at once, want 1", n)
+	}
+	if errs := ended(t, errCh); len(errs) != 1 || !errors.Is(errs[0], want) {
+		t.Errorf("Start reported %v, want only %v", errs, want)
 	}
 }
 
@@ -163,10 +195,44 @@ func needICMP(t *testing.T) {
 	t.Skip(err)
 }
 
-func TestNewRejectsBadTarget(t *testing.T) {
-	_, err := New(params(config.DefaultConfig(), "bogusprober:foo"))
-	if err == nil || !strings.Contains(err.Error(), "failed to add targets") {
-		t.Errorf("expected add targets error, got %v", err)
+func TestNewRejectsBadTargets(t *testing.T) {
+	for _, tc := range []struct {
+		targets []string
+		want    string
+	}{
+		{[]string{"bogus://foo"}, "failed to add targets: failed to route target bogus://foo: unable to determine prober type for target: bogus://foo"},
+		{[]string{"tcp://127.0.0.1:1", "bogus://foo", "http://127.0.0.1/", "tcp://noport"}, "failed to add targets: 2 targets failed\n" +
+			"  bogus://foo: unable to determine prober type for target: bogus://foo\n" +
+			"  tcp://noport: prober tcp rejected target tcp://noport: invalid TCP target: invalid target format: noport"},
+	} {
+		_, err := New(context.Background(), params(config.DefaultConfig(), tc.targets...))
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("New(%q) = %v\nwant %s", tc.targets, err, tc.want)
+		}
+		var errs prober.TargetErrors
+		if !errors.As(err, &errs) {
+			t.Errorf("New(%q) = %v, want TargetErrors", tc.targets, err)
+		}
+	}
+}
+
+func TestNewRejectsBadParams(t *testing.T) {
+	for name, modify := range map[string]func(*Params){
+		"no config":  func(p *Params) { p.Config = nil },
+		"no targets": func(p *Params) { p.Targets = []string{} },
+		"interval must be greater than zero, got 0s":  func(p *Params) { p.Interval = 0 },
+		"interval must be greater than zero, got -1s": func(p *Params) { p.Interval = -time.Second },
+		"timeout must be greater than zero, got 0s":   func(p *Params) { p.Timeout = 0 },
+		"timeout must be greater than zero, got -1ns": func(p *Params) { p.Timeout = -1 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := params(config.DefaultConfig(), "tcp://127.0.0.1:1")
+			modify(&p)
+			s, err := New(context.Background(), p)
+			if s != nil || err == nil || err.Error() != "invalid session: "+name {
+				t.Errorf("New() = %v, %v", s, err)
+			}
+		})
 	}
 }
 
@@ -185,7 +251,7 @@ func TestSessionsDoNotShareConfig(t *testing.T) {
 		wg.Go(func() {
 			p := params(cfg, target)
 			p.SourceInterface = source
-			sessions[i], errs[i] = New(p)
+			sessions[i], errs[i] = New(context.Background(), p)
 		})
 	}
 	wg.Wait()
@@ -236,13 +302,129 @@ func TestIntegrationFailedNewReleasesAll(t *testing.T) {
 			checkLeaks(t, func(t *testing.T) {
 				p := params(config.DefaultConfig(), tc.targets...)
 				p.SourceInterface = tc.source
-				if s, err := New(p); err == nil {
+				if s, err := New(context.Background(), p); err == nil {
 					s.Stop()
 					t.Fatal("New() did not fail")
 				}
 			})
 		})
 	}
+}
+
+// dialDNS connects to DNS servers; see TestMain and useDNS.
+var dialDNS atomic.Pointer[func(network, address string) (net.Conn, error)]
+
+// The resolver is set once, before any goroutine uses it: lookups may outlive
+// the test that caused them.
+func TestMain(m *testing.M) {
+	dial := net.Dial
+	dialDNS.Store(&dial)
+	net.DefaultResolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(_ context.Context, network, address string) (net.Conn, error) {
+			return (*dialDNS.Load())(network, address)
+		},
+	}
+	os.Exit(m.Run())
+}
+
+// useDNS makes dial, which returns no connection, stand in for the connections
+// to DNS servers.
+func useDNS(t *testing.T, dial func() error) {
+	orig := dialDNS.Load()
+	f := func(string, string) (net.Conn, error) { return nil, dial() }
+	dialDNS.Store(&f)
+	t.Cleanup(func() { dialDNS.Store(orig) })
+}
+
+// A New that is canceled while the resolver hangs returns at once, and leaves
+// nothing behind either.
+func TestIntegrationCanceledNewReleasesAll(t *testing.T) {
+	needICMP(t)
+	targets := []string{"127.0.0.1", "icmpv6://::1", "http://127.0.0.1/", "tcp://127.0.0.1:1"}
+	for i := range 100 {
+		targets = append(targets, fmt.Sprintf("h%d.test.", i), fmt.Sprintf("tcp://h%d.test.:80", i))
+	}
+	base := icmpid.Default().Held()
+	checkLeaks(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		release := make(chan struct{})
+		defer close(release)
+		useDNS(t, func() error {
+			cancel()
+			<-release // whatever the context
+			return io.ErrUnexpectedEOF
+		})
+		done := make(chan error, 1)
+		go func() {
+			_, err := New(ctx, params(config.DefaultConfig(), targets...))
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("New() = %v, want context.Canceled", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("New did not return")
+		}
+		if n := icmpid.Default().Held(); n != base {
+			t.Errorf("%d ICMP echo IDs held after New, want %d", n, base)
+		}
+	})
+}
+
+// No target makes New or a session panic, however strange it is.
+func TestStrangeTargets(t *testing.T) {
+	useDNS(t, func() error { return io.ErrUnexpectedEOF })
+	cfg := config.DefaultConfig()
+	cfg.Prober["dns"].DNS.Server, cfg.Prober["ntp"].NTP.Server = "127.0.0.1", "127.0.0.1"
+	long := strings.Repeat("a", 70000)
+	targets := []string{"://", ":", "::", "/", "//", " ", "bogus://", "bogus:", "\x00", "\xff", long, "://" + long}
+	for _, scheme := range []string{"", "icmpv4://", "icmpv6://", "http://", "https://", "tcp://", "dns://", "ntp://", "icmpv4:", "tcp:", "dns:", "ntp:", "http:"} {
+		for _, host := range []string{"", "/", "//", "://", ":", "[", "]", "[]", "[::1", "[::1]", "[::1]x", "::", "%", "::%", "::1%x", "fe80::1%",
+			"\x00", "\x1b[2J", "\xff\xfe", "a\nb", " ", "..", long, "@", "?", "#", "127.0.0.1%0"} {
+			for _, rest := range []string{"", ":", ":0", ":-1", ":65536", ":1", ":domain", ":" + long, "/", "/x", "/\x00", "/\xff/A", "/" + long, "/a..b", "/\\", "/x/", "/x/bogus", ":1/x/MX"} {
+				targets = append(targets, scheme+host+rest)
+			}
+		}
+	}
+	_, err := New(context.Background(), params(cfg, targets...))
+	var errs prober.TargetErrors
+	if !errors.As(err, &errs) {
+		t.Fatalf("New() = %v, want TargetErrors", err)
+	}
+	var noICMP prober.ProberError
+	errors.As(err, &noICMP)
+	bad := make(map[string]bool)
+	for _, e := range errs {
+		bad[e.Target] = true
+	}
+	var accepted []string
+	for _, target := range targets {
+		scheme, _, _ := strings.Cut(target, ":")
+		pc := cfg.Prober[scheme]
+		isICMP := pc == nil || pc.ICMP != nil // the default is ICMP
+		if !bad[target] && (!isICMP || noICMP.Err == nil) {
+			accepted = append(accepted, target)
+		}
+	}
+	t.Logf("%d of %d targets accepted", len(accepted), len(targets))
+	if len(accepted) == 0 || len(bad) == 0 {
+		t.Fatal("all or nothing accepted")
+	}
+	p := params(cfg, accepted...)
+	p.Interval, p.Timeout = time.Minute, 100*time.Millisecond // one round
+	s := mustNew(t, p)
+	s.Start(context.Background())
+	waitFor(t, "results", func() bool {
+		metrics := s.Metrics().SortBy(stats.Host, true)
+		return len(metrics) > 0 && !slices.ContainsFunc(metrics, func(m stats.Metrics) bool {
+			return m.GetSuccessful()+m.GetFailed() == 0
+		})
+	})
+	stop(t, s)
 }
 
 // However a session ends, it leaves nothing behind, and ending it again does
@@ -275,11 +457,25 @@ func TestIntegrationStopReleasesAll(t *testing.T) {
 			"stop without start": func(t *testing.T, s *Session) { stopped(t, s) },
 			"start after stop": func(t *testing.T, s *Session) {
 				stopped(t, s)
-				s.Start(context.Background())
+				startFails(t, s, ErrStopped)
 			},
 			"stop at once": func(t *testing.T, s *Session) {
-				s.Start(context.Background())
+				errCh := s.Start(context.Background())
 				stopped(t, s)
+				if errs := ended(t, errCh); len(errs) != 0 {
+					t.Errorf("Start reported %v", errs)
+				}
+			},
+			"stop at the same time": func(t *testing.T, s *Session) {
+				var wg sync.WaitGroup
+				wg.Go(func() { s.Stop() })
+				// Start comes before or after
+				for _, err := range ended(t, s.Start(context.Background())) {
+					if !errors.Is(err, ErrStopped) {
+						t.Errorf("Start reported %v", err)
+					}
+				}
+				wg.Wait()
 			},
 			"stop while probing": func(t *testing.T, s *Session) {
 				s.Start(context.Background())
@@ -297,36 +493,37 @@ func TestIntegrationStopReleasesAll(t *testing.T) {
 			},
 			"context done": func(t *testing.T, s *Session) {
 				ctx, cancel := context.WithCancel(context.Background())
-				s.Start(ctx)
+				errCh := s.Start(ctx)
 				probed(t, s)
 				cancel()
+				if errs := ended(t, errCh); len(errs) != 0 {
+					t.Errorf("Start reported %v", errs)
+				}
 				select {
 				case <-s.done:
-				case <-time.After(5 * time.Second):
-					t.Fatal("session did not end with its context")
+				default:
+					t.Error("metrics not settled when the run has ended")
 				}
 				if n := icmpid.Default().Held(); n != base {
 					t.Errorf("%d ICMP echo IDs held after the context, want %d", n, base)
 				}
+				startFails(t, s, ErrStopped)
 			},
 			"started twice": func(t *testing.T, s *Session) {
 				first := s.Start(context.Background())
 				probed(t, s)
-				select {
-				case err := <-s.Start(context.Background()):
-					if err == nil {
-						t.Error("second Start reported a nil error")
-					}
-				case <-time.After(5 * time.Second):
-					t.Error("second Start was not rejected")
-				}
+				startFails(t, s, ErrStarted)
 				s.Start(context.Background()) // nobody reads its error
-				stopped(t, s)
 				select {
-				case err := <-first:
-					t.Errorf("first Start: %v", err)
+				case err, ok := <-first:
+					t.Errorf("first Start: %v, closed: %v", err, !ok)
 				default:
 				}
+				stopped(t, s)
+				if errs := ended(t, first); len(errs) != 0 {
+					t.Errorf("first Start reported %v", errs)
+				}
+				startFails(t, s, ErrStopped)
 			},
 		} {
 			t.Run(name, func(t *testing.T) {
@@ -345,6 +542,92 @@ func TestIntegrationStopReleasesAll(t *testing.T) {
 		needICMP(t)
 		run(t, []string{"127.0.0.1"})
 	})
+}
+
+// fakeProbes is a ProbeManager whose Run returns err, once run is closed or the
+// manager is stopped.
+type fakeProbes struct {
+	prober.ProbeManager // the methods that are not called
+	run                 chan struct{}
+	err                 error
+	events              chan *prober.Event
+	stop                func()
+}
+
+func (p *fakeProbes) Events() <-chan *prober.Event { return p.events }
+func (p *fakeProbes) Stop()                        { p.stop() }
+
+func (p *fakeProbes) Run(context.Context, time.Duration, time.Duration) error {
+	<-p.run
+	return p.err
+}
+
+// fakeSession returns a session on a fakeProbes, which ends when run is closed.
+func fakeSession(err error) (s *Session, run chan struct{}) {
+	p := &fakeProbes{run: make(chan struct{}), err: err, events: make(chan *prober.Event)}
+	p.stop = sync.OnceFunc(func() {
+		time.Sleep(20 * time.Millisecond)
+		close(p.events)
+	})
+	mm := stats.NewMetricsManagerWithOptions(stats.Options{})
+	return &Session{probes: p, metrics: mm, done: mm.Subscribe(p.Events())}, p.run
+}
+
+// A run that ends by itself, with an error, stops the session and closes the
+// channel after yielding the error.
+func TestRunError(t *testing.T) {
+	want := errors.New("no sockets left")
+	s, run := fakeSession(want)
+	errCh := s.Start(context.Background())
+	select {
+	case err := <-errCh:
+		t.Fatalf("Start reported %v while running", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(run)
+	if errs := ended(t, errCh); len(errs) != 1 || !errors.Is(errs[0], want) {
+		t.Errorf("Start reported %v, want only %v", errs, want)
+	}
+	select {
+	case <-s.done:
+	default:
+		t.Error("metrics not settled when the run has ended")
+	}
+	startFails(t, s, ErrStopped)
+	stop(t, s)
+}
+
+// The error of a run need not be read, nor does it keep Stop from returning.
+func TestRunErrorUnread(t *testing.T) {
+	checkLeaks(t, func(t *testing.T) {
+		s, run := fakeSession(errors.New("no sockets left"))
+		s.Start(context.Background())
+		stop(t, s)
+		close(run)
+	})
+}
+
+// Every concurrent Stop returns only when stopping is complete.
+func TestConcurrentStops(t *testing.T) {
+	silent := silentServer(t) // a probe is waiting until its timeout
+	p := params(config.DefaultConfig(), "http://"+silent)
+	p.Interval, p.Timeout = time.Minute, 200*time.Millisecond
+	s := mustNew(t, p)
+	errCh := s.Start(context.Background())
+	waitTotal(t, 1, s)
+	var wg sync.WaitGroup
+	for range 5 {
+		wg.Go(func() {
+			s.Stop()
+			if m := only(t, s); m.GetFailed() != 1 {
+				t.Errorf("Stop returned with %d of %d results", m.GetFailed(), m.GetTotal())
+			}
+		})
+	}
+	wg.Wait()
+	if errs := ended(t, errCh); len(errs) != 0 {
+		t.Errorf("Start reported %v", errs)
+	}
 }
 
 // Results settle for as long as one may still arrive out of order, which the

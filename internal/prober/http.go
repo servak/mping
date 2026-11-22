@@ -131,10 +131,13 @@ func NewHTTPProber(probeType ProbeType, cfg *HTTPConfig, prefix string) *HTTPPro
 	}
 }
 
-func (p *HTTPProber) Accept(target string) error {
+func (p *HTTPProber) Accept(target string) error { return accept(p, target) }
+
+// prepare looks nothing up: the name is resolved by every probe.
+func (p *HTTPProber) prepare(_ context.Context, _ resolver, target string, _ bool) (func(), error) {
 	// Check if it matches our prefix (e.g., "my-http://host", "http://host")
 	if !strings.HasPrefix(target, p.prefix+"://") {
-		return ErrNotAccepted
+		return nil, ErrNotAccepted
 	}
 
 	scheme, rest := p.resolveURL(target)
@@ -142,21 +145,19 @@ func (p *HTTPProber) Accept(target string) error {
 	// The remainder must be a plain "host[:port][/path]". Anything still
 	// containing "://" (e.g. "http://ftp://host") is malformed.
 	if rest == "" || strings.Contains(rest, "://") {
-		return fmt.Errorf("invalid HTTP URL format")
+		return nil, fmt.Errorf("invalid HTTP URL format")
 	}
 
 	// Validate URL format
 	u, err := url.Parse(scheme + "://" + rest)
 	if err != nil || u.Host == "" {
-		return fmt.Errorf("invalid HTTP URL format")
+		return nil, fmt.Errorf("invalid HTTP URL format")
 	}
-	if slices.Contains(p.targets, target) {
-		// Target already exists, no need to add it again
-		return nil
-	}
-	p.targets = append(p.targets, target) // Store original target
-	return nil
-
+	return func() {
+		if !slices.Contains(p.targets, target) {
+			p.targets = append(p.targets, target) // Store original target
+		}
+	}, nil
 }
 
 // resolveURL splits a target ("<prefix>://<rest>") into the URL scheme to use
