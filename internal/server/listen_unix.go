@@ -82,6 +82,18 @@ func acquire(ctx context.Context, socket string) (*os.File, error) {
 	}
 }
 
+// Locked tells whether a process holds the lock of a socket: a server, also one
+// that is starting or ending and does not listen. The probe may make a server
+// that starts at the same moment try again, not fail.
+func Locked(socket string) bool {
+	f, err := os.OpenFile(socket+".lock", os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB) != nil
+}
+
 // removeStale removes the socket of a server that has crashed. The lock must be
 // held.
 func removeStale(path string) error {

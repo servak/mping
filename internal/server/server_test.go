@@ -187,7 +187,7 @@ func TestEndToEnd(t *testing.T) {
 	s := run(t, Options{})
 	var health api.Health
 	s.want(200, "GET", "/healthz", nil, &health)
-	if health != (api.Health{Status: "ok", Version: "v1.2.3"}) {
+	if health != (api.Health{Status: "ok", Version: "v1.2.3", PID: os.Getpid()}) {
 		t.Errorf("%+v", health)
 	}
 	ln, steady := tcpServer(t, "127.0.0.1:0"), tcpServer(t, "127.0.0.1:0")

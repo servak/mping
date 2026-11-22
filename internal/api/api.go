@@ -227,6 +227,7 @@ type Events struct {
 type Health struct {
 	Status  string `json:"status"` // "ok"
 	Version string `json:"version"`
+	PID     int    `json:"pid"`
 }
 
 // The codes of errors.

@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"runtime/debug"
 	"slices"
@@ -211,7 +212,7 @@ func number(q url.Values, name string, def, lo, hi int64) (int64, error) {
 }
 
 func (h *handler) health(http.ResponseWriter, *http.Request, url.Values) (int, any, error) {
-	return http.StatusOK, api.Health{Status: "ok", Version: h.version}, nil
+	return http.StatusOK, api.Health{Status: "ok", Version: h.version, PID: os.Getpid()}, nil
 }
 
 func (h *handler) shutDown(_ http.ResponseWriter, r *http.Request, _ url.Values) (int, any, error) {
