@@ -2,7 +2,10 @@ package prober
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -65,6 +68,11 @@ func (pm *probeManager) AddTargets(targets ...string) error {
 
 // Run starts the probers and blocks until ctx is done or Stop is called. It
 // returns nil at once when Stop was called before.
+//
+// A prober that cannot start ends the run, rather than leave its targets
+// unprobed: Run stops all probers and returns the errors of those that failed.
+// (The only error of the probers of this package is a second Start, which a
+// manager never makes.)
 func (pm *probeManager) Run(ctx context.Context, interval, timeout time.Duration) error {
 	pm.mu.Lock()
 	if pm.started {
@@ -83,24 +91,29 @@ func (pm *probeManager) Run(ctx context.Context, interval, timeout time.Duration
 
 	// Create cancelable context for this run
 	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	pm.cancel = cancel
 
 	// Start all probers under the lock, so that a concurrent Stop either
 	// sees none of them or waits for all of them
-	for _, prober := range pm.probers {
-		pm.wg.Add(1)
-		go func(p Prober) {
-			defer pm.wg.Done()
-			p.Start(pm.eventChan, interval, timeout)
-		}(prober)
+	names := slices.Sorted(maps.Keys(pm.probers))
+	errs := make([]error, len(names))
+	for i, name := range names {
+		p := pm.probers[name]
+		pm.wg.Go(func() {
+			if err := p.Start(pm.eventChan, interval, timeout); err != nil {
+				errs[i] = fmt.Errorf("prober %s: %w", name, err)
+				cancel()
+			}
+		})
 	}
 	pm.mu.Unlock()
 
-	// Wait for context cancellation (Stop cancels it too)
+	// Wait for context cancellation (Stop and a failed prober cancel it too)
 	<-runCtx.Done()
-	pm.Stop()
+	pm.Stop() // waits for all probers, so errs is complete
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // Events returns the event channel for receiving probe results
@@ -109,7 +122,8 @@ func (pm *probeManager) Events() <-chan *Event {
 }
 
 // Stop stops all probers, waits for them to finish and closes the event
-// channel. It may be called before Run and any number of times.
+// channel. It may be called before Run and any number of times, also
+// concurrently: each call returns only when all of that is done.
 func (pm *probeManager) Stop() {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
