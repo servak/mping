@@ -51,6 +51,7 @@ type metrics struct {
 	MaximumRTT     time.Duration
 	LastRTT        time.Duration
 	sumSquaredRTT  float64 // sum of rtt^2 in ns^2, used to derive jitter
+	rtts           rttHistogram
 	LastFailTime   time.Time
 	LastSuccTime   time.Time
 	LastFailDetail string
@@ -70,6 +71,7 @@ func (m *metrics) Success(rtt time.Duration, sentTime time.Time) {
 	}
 	m.TotalRTT += rtt
 	m.sumSquaredRTT += float64(rtt) * float64(rtt)
+	m.rtts.add(rtt)
 	m.AverageRTT = m.TotalRTT / time.Duration(m.Successful)
 	if m.Successful == 1 || rtt < m.MinimumRTT {
 		m.MinimumRTT = rtt
@@ -111,6 +113,7 @@ func (m *metrics) Reset() {
 	m.MaximumRTT = time.Duration(0)
 	m.LastRTT = time.Duration(0)
 	m.sumSquaredRTT = 0
+	m.rtts = rttHistogram{}
 	m.LastFailTime = time.Time{}
 	m.LastSuccTime = time.Time{}
 	m.LastFailDetail = ""
@@ -135,6 +138,7 @@ func (m *metrics) settledSnapshot(now time.Time) *metrics {
 // snapshot returns a deep copy that can be read without holding the manager lock
 func (m *metrics) snapshot() *metrics {
 	c := *m
+	c.rtts = m.rtts.clone()
 	if m.history != nil {
 		c.history = m.history.clone()
 	}
@@ -257,26 +261,30 @@ func (m *metrics) GetOutageSummary() OutageSummary {
 }
 
 // GetRTTPercentiles returns RTT percentiles (0-100, nearest-rank method)
-// over the successful probes kept in history.
+// over all successful probes since the start or the last reset. They are exact
+// while the history has all of those, then within 2.5%.
 func (m *metrics) GetRTTPercentiles(ps ...float64) []time.Duration {
 	res := make([]time.Duration, len(ps))
-	if m.history == nil {
+	total := m.rtts.total
+	if total == 0 {
 		return res
 	}
 	var rtts []time.Duration
-	for _, e := range m.history.GetRecentEntries(m.history.count) {
-		if e.Success {
-			rtts = append(rtts, e.RTT)
-		}
+	if m.history != nil && total <= m.history.size {
+		m.history.eachNewest(func(e *HistoryEntry) {
+			if e.Success {
+				rtts = append(rtts, e.RTT)
+			}
+		})
+		slices.Sort(rtts)
 	}
-	if len(rtts) == 0 {
-		return res
-	}
-	slices.Sort(rtts)
 	for i, p := range ps {
-		rank := int(math.Ceil(p / 100 * float64(len(rtts))))
-		rank = min(max(rank, 1), len(rtts))
-		res[i] = rtts[rank-1]
+		rank := min(max(int(math.Ceil(p/100*float64(total))), 1), total)
+		if len(rtts) == total {
+			res[i] = rtts[rank-1]
+		} else {
+			res[i] = min(max(m.rtts.quantile(rank), m.MinimumRTT), m.MaximumRTT)
+		}
 	}
 	return res
 }

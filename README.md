@@ -201,7 +201,7 @@ Notes:
 
 ## History and Percentiles
 
-The host list has a **History** column with the last 20 probes (oldest on the left). The bar height shows how much slower than usual a probe was: the RTT increase over the host's median, on a fixed millisecond scale. So +20ms looks the same on a 10ms LAN host and on a 150ms overseas host.
+The host list has a **History** column with the last 20 probes (oldest on the left). The bar height shows how much slower than usual a probe was: the RTT increase over the median of the host's last 100 probes, on a fixed millisecond scale. So +20ms looks the same on a 10ms LAN host and on a 150ms overseas host.
 
 | Mark | Meaning |
 |------|---------|
@@ -210,7 +210,7 @@ The host list has a **History** column with the last 20 probes (oldest on the le
 | yellow `▆▇█` | +100ms / +200ms / +500ms slower |
 | red `×` | no reply (timeout / connection failure) |
 
-Latency spikes and loss bursts are visible at a glance. The host details and JSON/CSV output include RTT p50/p95/p99 over the last 100 probes.
+Latency spikes and loss bursts are visible at a glance. The host details and JSON/CSV output include RTT p50/p95/p99 since the start or the last reset, like the average, best and worst RTT. They are exact for the first 100 probes and then, to need no more memory however long mping runs, accurate to 2.5%.
 
 ## Path and Peer Changes
 
